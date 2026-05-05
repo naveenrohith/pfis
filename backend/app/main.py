@@ -20,6 +20,9 @@ from app.database import init_db, close_db, AsyncSessionLocal
 from app.api.routes import health, users, transactions, categories
 from app.services.seed_service import run_seeds
 
+# Import all models so SQLAlchemy Base.metadata registers them before create_all()
+import app.models  # noqa: F401
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
