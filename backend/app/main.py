@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import init_db, close_db, AsyncSessionLocal
 from app.api.routes import health, users, transactions, categories
+from app.api.routes.gmail import auth_router as gmail_auth_router, gmail_router
 from app.services.seed_service import run_seeds
 
 # Import all models so SQLAlchemy Base.metadata registers them before create_all()
@@ -81,6 +82,10 @@ app.include_router(health.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(transactions.router, prefix="/api")
 app.include_router(categories.router, prefix="/api")
+
+# Phase 1: Gmail routes
+app.include_router(gmail_auth_router, prefix="/api")
+app.include_router(gmail_router, prefix="/api")
 
 
 @app.get("/")
