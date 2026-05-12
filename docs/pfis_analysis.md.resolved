@@ -1,0 +1,552 @@
+# 🧠 Personal Finance Intelligence System (PFIS) — Complete Analysis
+
+## Table of Contents
+1. [Product Identity](#1-product-identity)
+2. [Architecture Deep-Dive](#2-architecture-deep-dive)
+3. [Data Model Analysis](#3-data-model-analysis)
+4. [Processing Pipeline](#4-processing-pipeline)
+5. [Parsing Engine — The Heart](#5-parsing-engine)
+6. [Dashboard & Insights](#6-dashboard--insights)
+7. [Security & Privacy](#7-security--privacy)
+8. [Risk Assessment](#8-risk-assessment)
+9. [Phased Roadmap](#9-phased-roadmap)
+10. [Recommendations](#10-recommendations)
+
+---
+
+## 1. Product Identity
+
+### What This Is
+A **zero-manual-entry** personal finance system that ingests bank/UPI transaction emails from Gmail, parses them into structured data, and delivers actionable financial insights via a dashboard.
+
+### What This Is NOT
+- ❌ A manual expense tracker (Splitwise, Walnut)
+- ❌ An AI-powered financial advisor (yet)
+- ❌ A multi-bank aggregation platform (yet)
+
+### Core Differentiator
+
+| Dimension | Typical Apps | PFIS |
+|-----------|-------------|------|
+| Data Entry | Manual | **Fully automated** |
+| Reports | Static | **Intelligent insights** |
+| Visualization | Simple charts | **Behavioral analysis** |
+| Data Sources | Single | **MCP-extensible** |
+
+### Vision Statement
+> *"A system that automatically understands your financial life and gives actionable decisions without any manual effort."*
+
+### Four Pillars
+
+| Pillar | Meaning |
+|--------|---------|
+| **Automation-first** | No typing — emails are the input |
+| **Accuracy-first** | Correct parsing > fancy features |
+| **Insight-driven** | Not just data → decisions |
+| **Extensible** | Gmail today → multi-connectors tomorrow |
+
+> [!IMPORTANT]
+> The entire value proposition collapses if parsing accuracy is poor. The parsing engine is the **single most critical component** — everything downstream depends on it.
+
+---
+
+## 2. Architecture Deep-Dive
+
+### System Layers (9 Total)
+
+```mermaid
+graph TD
+    A["Layer 1: Ingestion<br/>Gmail OAuth + Email Scanning"] --> B["Layer 2: Parsing<br/>Amount, Merchant, Date Extraction"]
+    B --> C["Layer 3: Processing<br/>Dedup, Normalize, Categorize"]
+    C --> D["Layer 4: Storage<br/>PostgreSQL — Raw + Processed"]
+    D --> E["Layer 5: Insights<br/>Category Spend, Trends, Recurring"]
+    E --> F["Layer 6: Reporting<br/>Monthly Summary, CSV Export"]
+    F --> G["Layer 7: Advanced (Future)<br/>Predictions, Anomaly Detection"]
+
+    style A fill:#1a1a2e,stroke:#e94560,color:#fff
+    style B fill:#1a1a2e,stroke:#e94560,color:#fff
+    style C fill:#1a1a2e,stroke:#0f3460,color:#fff
+    style D fill:#1a1a2e,stroke:#0f3460,color:#fff
+    style E fill:#1a1a2e,stroke:#16213e,color:#fff
+    style F fill:#1a1a2e,stroke:#16213e,color:#fff
+    style G fill:#333,stroke:#666,color:#999
+```
+
+### Component Architecture
+
+```mermaid
+graph TB
+    FE["Frontend Dashboard<br/>(Next.js)"] --> API["API Layer<br/>(REST)"]
+    API --> GC["Gmail Connector"]
+    API --> PE["Parsing Engine"]
+    API --> PR["Processing Engine"]
+    API --> IE["Insights Engine"]
+    GC --> DB["PostgreSQL"]
+    PE --> DB
+    PR --> DB
+    IE --> DB
+    BW["Background Workers<br/>(BullMQ / Celery)"] --> GC
+    BW --> PE
+    BW --> PR
+```
+
+### Tech Stack (Prototype)
+
+| Component | Choice | Rationale |
+|-----------|--------|-----------|
+| Backend | **Node.js** or **Python** | Node for speed-of-dev, Python for parsing strength |
+| Database | **PostgreSQL** | Structured queries, JSON support, reliability |
+| Queue | **BullMQ** (Node) / **Celery** (Python) | Async email processing |
+| Frontend | **Next.js** | Dashboard with SSR |
+| APIs | **REST** | Simple, sufficient for prototype |
+
+> [!TIP]
+> **My recommendation:** Use **Python (FastAPI)** for the backend. Email parsing is regex-heavy and Python's `re` module + NLP libraries (spaCy, dateutil) are significantly stronger than Node.js equivalents. Use BullMQ only if you go Node; otherwise Celery + Redis.
+
+---
+
+## 3. Data Model Analysis
+
+### Entity Relationship Diagram
+
+```mermaid
+erDiagram
+    USERS ||--o{ GMAIL_ACCOUNTS : has
+    USERS ||--o{ RAW_EMAILS : receives
+    USERS ||--o{ TRANSACTIONS : owns
+    USERS ||--o{ BUDGETS : sets
+    RAW_EMAILS ||--o| TRANSACTIONS : generates
+    TRANSACTIONS }o--|| CATEGORIES : belongs_to
+    TRANSACTIONS }o--|| MERCHANTS : references
+    CATEGORIES ||--o{ BUDGETS : limits
+    MERCHANTS ||--o{ CATEGORIES : defaults_to
+
+    USERS {
+        uuid id PK
+        string email
+        string name
+        string currency
+        timestamp created_at
+    }
+    GMAIL_ACCOUNTS {
+        uuid id PK
+        uuid user_id FK
+        string google_account_id
+        string access_token_ref
+        string refresh_token_ref
+        timestamp last_synced_at
+    }
+    RAW_EMAILS {
+        uuid id PK
+        uuid user_id FK
+        string gmail_message_id UK
+        string subject
+        text body
+        string sender
+        timestamp received_at
+        boolean processed_flag
+    }
+    TRANSACTIONS {
+        uuid id PK
+        uuid user_id FK
+        decimal amount
+        string currency
+        enum transaction_type
+        string merchant_raw
+        string merchant_normalized
+        uuid category_id FK
+        date transaction_date
+        string account_last4
+        string reference_id
+        float confidence_score
+        uuid source_email_id FK
+        timestamp created_at
+    }
+    CATEGORIES {
+        uuid id PK
+        string name
+        uuid parent_category FK
+        string icon
+    }
+    MERCHANTS {
+        uuid id PK
+        string normalized_name
+        jsonb aliases
+        uuid category_default FK
+    }
+    BUDGETS {
+        uuid id PK
+        uuid user_id FK
+        uuid category_id FK
+        decimal monthly_limit
+    }
+```
+
+### Key Design Decisions I've Identified
+
+| Decision | Analysis |
+|----------|----------|
+| **Raw email storage** | ✅ Essential — enables re-parsing when rules improve |
+| **Confidence score on transactions** | ✅ Critical — allows UI to flag low-confidence items for review |
+| **Merchant normalization as separate table** | ✅ Smart — aliases JSON enables fuzzy matching |
+| **`reference_id` on transactions** | ✅ Core to deduplication fingerprint |
+| **`parent_category` self-reference** | ✅ Enables hierarchy (Food → Dining Out, Groceries) |
+
+> [!WARNING]
+> **Missing from the model:**
+> - `sync_history` table — track each Gmail sync run (start, end, emails fetched, errors)
+> - `parsing_rules` table — store versioned regex patterns for different banks
+> - `audit_log` — track user corrections to improve parsing over time
+> - `transaction_fingerprint` — a computed hash column for dedup (amount + date + merchant + ref_id)
+
+---
+
+## 4. Processing Pipeline
+
+### The 9-Step Pipeline
+
+```mermaid
+flowchart LR
+    S1["1. Gmail Sync<br/>Fetch new emails"] --> S2["2. Filter Engine<br/>Identify financial emails"]
+    S2 --> S3["3. Parser<br/>Extract structured data"]
+    S3 --> S4["4. Deduplication<br/>Avoid duplicates"]
+    S4 --> S5["5. Normalization<br/>Clean merchant names"]
+    S5 --> S6["6. Categorization<br/>Assign category"]
+    S6 --> S7["7. Storage<br/>Save transaction"]
+    S7 --> S8["8. Insights Engine<br/>Update aggregates"]
+    S8 --> S9["9. Dashboard/API<br/>Serve UI"]
+```
+
+### Step-by-Step Analysis
+
+#### Step 1: Gmail Sync
+- Fetch last 50–100 emails on first connect
+- Subsequent syncs: only new emails since `last_synced_at`
+- Filter by known senders: `alerts@hdfcbank.com`, `noreply@paytm.com`, etc.
+
+> [!NOTE]
+> Gmail API uses `historyId` for incremental sync — far more efficient than date-based polling. The `users.messages.list` endpoint with a `q` parameter can filter by sender at the API level, reducing bandwidth.
+
+#### Step 2: Filter Engine
+Classifies each email into:
+- ✅ `TRANSACTION_EMAIL` → process
+- ❌ `OTP` → ignore
+- ❌ `PROMOTION` → ignore
+- ❌ `STATEMENT` → handle differently (future)
+
+**Keywords for detection:** `debited`, `credited`, `spent`, `transaction`, `UPI`, `NEFT`, `IMPS`
+
+#### Step 3: Parser (Detailed in Section 5)
+
+#### Step 4: Deduplication
+**Fingerprint formula:**
+```
+hash(amount + date + merchant + ref_id)
+```
+- If fingerprint exists → skip
+- Edge case: same amount, same merchant, same day, different transactions → `ref_id` disambiguates
+
+> [!WARNING]
+> If `ref_id` is missing (some banks don't include it), dedup becomes risky. Fallback: `amount + date + merchant + account_last4 + time_window(±5min)`
+
+#### Step 5: Merchant Normalization
+```
+SWIGGY, SWIGGY INDIA, SWIGGY ONLINE → "Swiggy"
+AMAZON PAY, AMAZON.IN, AMZN → "Amazon"
+```
+**Implementation:** Alias lookup table + fuzzy matching (Levenshtein distance)
+
+#### Step 6: Categorization
+**Rule-based for prototype:**
+```
+Swiggy, Zomato → Food
+Uber, Ola → Transport
+Amazon, Flipkart → Shopping
+Netflix, Spotify → Subscription
+```
+Unknown merchants → `"Others"` category
+
+#### Step 7–9: Storage → Insights → Dashboard
+Covered in Sections 6 below.
+
+### Automation Rules (Non-Negotiable)
+
+| Rule | Rationale |
+|------|-----------|
+| Always auto-sync | Zero manual effort promise |
+| Never duplicate | Data integrity |
+| Always store raw | Enable re-processing |
+| Always compute confidence | Enable quality filtering |
+| Never block on errors | Pipeline resilience |
+| Low confidence → flag but store | Don't lose data |
+
+---
+
+## 5. Parsing Engine
+
+> [!CAUTION]
+> This is the **single most critical and most fragile** component. If parsing fails, the entire system produces garbage. Every design decision here has outsized impact.
+
+### Parsing Steps
+
+```mermaid
+flowchart TD
+    E["Raw Email Body"] --> C1["Step 1: Email Classification<br/>debit / credit / OTP / promo"]
+    C1 -->|Transaction| PM["Step 2: Pattern Matching<br/>Regex extraction"]
+    C1 -->|Non-transaction| IGN["Ignore"]
+    PM --> ME["Step 3: Merchant Extraction"]
+    ME --> DE["Step 4: Date Extraction"]
+    DE --> CS["Step 5: Confidence Scoring"]
+    CS --> OUT["Structured Transaction Object"]
+```
+
+### Worked Example
+
+**Input email:**
+```
+From: alerts@hdfcbank.com
+Subject: Debit Alert
+Body: "Rs. 450.00 debited from A/c XX1234 on 05-May-26 at SWIGGY via UPI Ref No 123456789"
+```
+
+**Step 1 — Classification:** Keywords `debited` → `DEBIT` type
+
+**Step 2 — Amount Extraction:**
+```regex
+(?:Rs\.?|INR|₹)\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)
+```
+Result: `450.00`
+
+**Step 3 — Merchant Extraction:**
+```regex
+(?:at|to|from|via UPI to)\s+([A-Z][A-Za-z\s]+?)(?:\s+via|\s+on|\s*$)
+```
+Result: `SWIGGY`
+
+**Step 4 — Date Extraction:**
+```regex
+(\d{2}-[A-Z][a-z]{2}-\d{2,4})
+```
+Result: `05-May-26` → `2026-05-05`
+
+**Step 5 — Confidence Scoring:**
+
+| Signal | Found? | Score |
+|--------|--------|-------|
+| Amount | ✅ | +40 |
+| Merchant | ✅ | +30 |
+| Date | ✅ | +20 |
+| Type | ✅ | +10 |
+| **Total** | | **100%** → `0.92` (with small penalty for heuristic uncertainty) |
+
+**Output:**
+```json
+{
+  "amount": 450.00,
+  "type": "debit",
+  "merchant_raw": "SWIGGY",
+  "merchant_normalized": "Swiggy",
+  "category": "Food",
+  "date": "2026-05-05",
+  "account": "XX1234",
+  "ref_id": "123456789",
+  "confidence": 0.92
+}
+```
+
+### Bank Format Variability — The Hard Problem
+
+| Bank | Example Format |
+|------|---------------|
+| HDFC | `Rs. 450.00 debited from A/c XX1234 on 05-May-26 at SWIGGY` |
+| SBI | `Your a/c X1234 debited by Rs450 on 05/05/26 transfer to SWIGGY` |
+| ICICI | `INR 450 spent on ICICI Card XX1234 at SWIGGY on 05-May` |
+| Kotak | `₹450 debited from your Kotak A/c for SWIGGY` |
+
+> [!IMPORTANT]
+> Each bank has its own email template. The parser needs **bank-specific rule sets**, not one universal regex. Design the parser as a **registry of bank parsers**, each with its own patterns.
+
+### Recommended Parser Architecture
+```
+ParserRegistry
+  ├── HDFCParser (patterns for HDFC emails)
+  ├── SBIParser (patterns for SBI emails)
+  ├── ICICIParser (patterns for ICICI emails)
+  ├── GenericParser (fallback with loose patterns)
+  └── [Future: LLM-based parser for unknown formats]
+```
+
+---
+
+## 6. Dashboard & Insights
+
+### Dashboard Components
+
+| Component | Data Source | Update Frequency |
+|-----------|-----------|-----------------|
+| Transaction List | `transactions` table | Real-time |
+| Monthly Total | `SUM(amount) WHERE month=current` | Per-sync |
+| Category Breakdown | `GROUP BY category_id` | Per-sync |
+| Top Merchants | `GROUP BY merchant, ORDER BY SUM(amount)` | Per-sync |
+| Daily Trend | `GROUP BY transaction_date` | Per-sync |
+| Insights Cards | Computed comparisons | Per-sync |
+| Recurring Payments | Same merchant + amount + interval | Daily batch |
+
+### Insight Generation Rules
+
+| Insight Type | Logic |
+|-------------|-------|
+| Category % | `category_spend / total_spend * 100` |
+| Top merchant | `MAX(SUM(amount) GROUP BY merchant)` |
+| Spending trend | Compare current month vs previous month |
+| Recurring detection | Same merchant + same amount ± 5% + interval 28–31 days |
+
+### Sample Dashboard Output (5 Transactions)
+
+| Merchant | Amount | Category |
+|----------|--------|----------|
+| Swiggy | ₹450 | Food |
+| Amazon | ₹1,200 | Shopping |
+| Uber | ₹230 | Travel |
+| Netflix | ₹499 | Subscription |
+| Electricity | ₹1,500 | Bills |
+
+**Total:** ₹3,879
+
+**Insights Generated:**
+- "Bills are your highest expense category (39%)"
+- "You have 1 active subscription (Netflix ₹499/mo)"
+- "Food spending is moderate at 12%"
+
+---
+
+## 7. Security & Privacy
+
+| Requirement | Implementation |
+|------------|---------------|
+| OAuth only | No password storage — Google OAuth 2.0 |
+| Token encryption | Encrypt access/refresh tokens at rest (AES-256) |
+| Minimal storage | Store only transaction-relevant email fields |
+| Data masking | Mask account numbers: `XX1234` |
+| Read-only access | Gmail scope: `gmail.readonly` |
+| Disconnect | User can revoke access and delete data anytime |
+
+> [!CAUTION]
+> Store `access_token_ref` and `refresh_token_ref` as **references to a secrets manager** (e.g., AWS Secrets Manager, HashiCorp Vault), NOT as plaintext in the database.
+
+---
+
+## 8. Risk Assessment
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Email format variability | 🔴 High | Bank-specific parser registry + generic fallback |
+| Parsing errors (wrong amount) | 🔴 High | Confidence scoring + user review for low confidence |
+| Duplicate transactions | 🟡 Medium | Fingerprint-based dedup with ref_id |
+| Missing data fields | 🟡 Medium | Partial transactions stored with low confidence |
+| Gmail API rate limits | 🟡 Medium | Exponential backoff + incremental sync |
+| User trust erosion | 🔴 High | Show confidence, allow manual correction |
+| Privacy concerns | 🔴 High | Read-only access, encryption, minimal storage |
+| Bank template changes | 🟡 Medium | Versioned parser rules, monitoring for parse failures |
+
+---
+
+## 9. Phased Roadmap
+
+### Phase 1 — Week 1: Ingestion
+- [ ] Gmail OAuth integration
+- [ ] Email fetching (filtered by known bank senders)
+- [ ] Raw email storage in PostgreSQL
+- [ ] Background sync worker
+
+### Phase 2 — Week 2: Parsing & Processing
+- [ ] Parser registry (HDFC, SBI, ICICI, generic)
+- [ ] Amount, merchant, date, type extraction
+- [ ] Deduplication engine
+- [ ] Merchant normalization
+- [ ] Category assignment (rule-based)
+- [ ] Confidence scoring
+- [ ] Transaction storage
+
+### Phase 3 — Week 3: Dashboard & Reports
+- [ ] Next.js dashboard
+- [ ] Transaction list view
+- [ ] Monthly summary
+- [ ] Category breakdown (pie chart)
+- [ ] Top merchants
+- [ ] Daily trend (line chart)
+- [ ] Basic insights cards
+- [ ] Monthly report generation
+- [ ] CSV export
+
+### MVP Feature Checklist
+
+| Feature | Priority | Status |
+|---------|----------|--------|
+| Gmail integration | 🔴 Must | Phase 1 |
+| Email parsing | 🔴 Must | Phase 2 |
+| Transaction storage | 🔴 Must | Phase 2 |
+| Deduplication | 🔴 Must | Phase 2 |
+| Category mapping | 🔴 Must | Phase 2 |
+| Dashboard | 🔴 Must | Phase 3 |
+| Monthly report | 🔴 Must | Phase 3 |
+| Recurring detection | 🟡 Nice | Phase 3 |
+| Basic insights | 🟡 Nice | Phase 3 |
+| AI predictions | ⚪ Later | — |
+| Fraud detection | ⚪ Later | — |
+| Multi-source | ⚪ Later | — |
+
+---
+
+## 10. Recommendations
+
+### What's Strong in This Plan
+1. **Automation-first philosophy** — genuine differentiator
+2. **Confidence scoring** — handles uncertainty gracefully
+3. **Raw data retention** — enables re-processing as parsers improve
+4. **Layered architecture** — clean separation of concerns
+5. **Deduplication strategy** — fingerprint-based approach is sound
+
+### What Needs Strengthening
+
+| Gap | Recommendation |
+|-----|---------------|
+| No parser versioning | Add `parser_version` column to transactions — enables re-parsing |
+| No user feedback loop | Add "Mark as incorrect" button → feeds back into parser rules |
+| No sync monitoring | Add `sync_runs` table tracking each sync's success/failure |
+| Single-regex approach | Use bank-specific parser registry, not one universal regex |
+| No error recovery | Add dead-letter queue for failed parses — retry with updated rules |
+| No test data strategy | Build a corpus of 50+ real email formats for parser testing |
+
+### Suggested Architecture Enhancement
+
+```mermaid
+flowchart TD
+    GMAIL["Gmail API"] --> QUEUE["Message Queue"]
+    QUEUE --> WORKER["Background Worker"]
+    WORKER --> FILTER["Filter Engine"]
+    FILTER --> REGISTRY["Parser Registry"]
+    REGISTRY --> HDFC["HDFC Parser"]
+    REGISTRY --> SBI["SBI Parser"]
+    REGISTRY --> GENERIC["Generic Parser"]
+    HDFC --> DEDUP["Dedup Engine"]
+    SBI --> DEDUP
+    GENERIC --> DEDUP
+    DEDUP --> NORM["Normalizer"]
+    NORM --> CAT["Categorizer"]
+    CAT --> DB["PostgreSQL"]
+    DB --> INSIGHTS["Insights Engine"]
+    INSIGHTS --> API["REST API"]
+    API --> DASH["Dashboard"]
+    
+    FAIL["Failed Parses"] --> DLQ["Dead Letter Queue"]
+    DLQ --> REVIEW["Manual Review / Re-parse"]
+    WORKER --> FAIL
+```
+
+---
+
+> [!NOTE]
+> **Bottom line:** This is a well-thought-out plan with a clear vision. The critical success factor is **parsing accuracy**. I recommend investing 60% of Phase 2 effort into building a robust, testable parser registry with bank-specific rules and a comprehensive test corpus. Everything else — dashboard, insights, reports — is straightforward once the data is clean.
+
+**Ready to start building? Let me know which phase you'd like to begin with.**

@@ -1,0 +1,495 @@
+# 🔥 PFIS — Revised Plan (Post Architect Review)
+
+> This document incorporates all feedback from the senior-architect review into a battle-tested execution plan.
+
+---
+
+## 1. Revised Verdict: 80–85% → Targeting 95%+
+
+### What Was Strong (Kept As-Is)
+- ✅ Product positioning ("intelligence system" not "tracker")
+- ✅ 9-layer separation of concerns
+- ✅ Raw email retention for re-processing
+- ✅ Confidence scoring on transactions
+- ✅ Merchant normalization layer
+- ✅ Pipeline design (matches real fintech patterns)
+
+### 7 Critical Fixes Applied
+
+| # | Problem | Fix Applied |
+|---|---------|-------------|
+| 1 | Regex overconfidence | Multi-tier parsing: Rules → Heuristics → AI fallback |
+| 2 | No parser versioning | `parser_version` column + re-parse capability |
+| 3 | No feedback loop | User correction layer → feeds back into rules |
+| 4 | Dedup fragility | Multi-level dedup strategy (strong/medium/weak) |
+| 5 | No sync tracking | `sync_runs` table added |
+| 6 | No error recovery | Dead Letter Queue (DLQ) for failed parses |
+| 7 | Insights too basic | Trend comparison + anomaly detection added |
+
+---
+
+## 2. Revised Data Model
+
+### New Tables Added
+
+```sql
+-- Parser versioning on transactions
+ALTER TABLE transactions ADD COLUMN parser_version INTEGER DEFAULT 1;
+
+-- Sync tracking
+CREATE TABLE sync_runs (
+    id UUID PRIMARY KEY,
+    user_id UUID REFERENCES users(id),
+    start_time TIMESTAMP,
+    end_time TIMESTAMP,
+    emails_fetched INTEGER,
+    emails_processed INTEGER,
+    emails_failed INTEGER,
+    errors JSONB,
+    status VARCHAR(20) -- 'running', 'completed', 'failed'
+);
+
+-- User corrections (feedback loop)
+CREATE TABLE user_corrections (
+    id UUID PRIMARY KEY,
+    transaction_id UUID REFERENCES transactions(id),
+    field_corrected VARCHAR(50), -- 'merchant', 'category', 'amount'
+    old_value TEXT,
+    new_value TEXT,
+    corrected_at TIMESTAMP
+);
+
+-- Dead Letter Queue
+CREATE TABLE parse_failures (
+    id UUID PRIMARY KEY,
+    email_id UUID REFERENCES raw_emails(id),
+    error_message TEXT,
+    parser_version INTEGER,
+    retry_count INTEGER DEFAULT 0,
+    last_retry_at TIMESTAMP,
+    resolved BOOLEAN DEFAULT FALSE
+);
+
+-- Transaction fingerprint for dedup
+ALTER TABLE transactions ADD COLUMN fingerprint VARCHAR(64) UNIQUE;
+```
+
+### Complete Entity Diagram (Revised)
+
+```mermaid
+erDiagram
+    USERS ||--o{ GMAIL_ACCOUNTS : has
+    USERS ||--o{ RAW_EMAILS : receives
+    USERS ||--o{ TRANSACTIONS : owns
+    USERS ||--o{ BUDGETS : sets
+    USERS ||--o{ SYNC_RUNS : triggers
+    RAW_EMAILS ||--o| TRANSACTIONS : generates
+    RAW_EMAILS ||--o| PARSE_FAILURES : fails_to
+    TRANSACTIONS ||--o{ USER_CORRECTIONS : corrected_by
+    TRANSACTIONS }o--|| CATEGORIES : belongs_to
+    TRANSACTIONS }o--|| MERCHANTS : references
+```
+
+---
+
+## 3. Revised Parsing Architecture
+
+### The Real Problem (Acknowledged)
+
+Emails are **NOT consistent**:
+- Some banks omit merchant
+- Some include HTML formatting
+- Some have partial data
+- Formats change without notice
+
+### Multi-Tier Parsing Strategy
+
+```mermaid
+flowchart TD
+    EMAIL["Raw Email"] --> DETECT["Sender Detection<br/>Which bank?"]
+    DETECT --> REGISTRY["Parser Registry"]
+    REGISTRY --> BANK["Bank-Specific Parser<br/>(Rule-based regex)"]
+    BANK -->|Success| CONF["Confidence Check"]
+    BANK -->|Partial| HEUR["Heuristic Parser<br/>(Fuzzy extraction)"]
+    HEUR -->|Success| CONF
+    HEUR -->|Fail| AI["AI Fallback<br/>(LLM extraction)"]
+    AI --> CONF
+    CONF -->|≥ 0.7| STORE["Store Transaction"]
+    CONF -->|< 0.7| FLAG["Store + Flag for Review"]
+    BANK -->|Total Fail| DLQ["Dead Letter Queue"]
+```
+
+### Parser Versioning
+
+```
+Transaction stored with:
+  parser_version: 3
+  
+When parser improves to v4:
+  → Re-run on raw emails
+  → Update transactions
+  → Keep old version in audit log
+```
+
+### Bank-Specific Parser Registry
+
+```python
+# Conceptual design
+class ParserRegistry:
+    parsers = {
+        "alerts@hdfcbank.com": HDFCParser,
+        "alerts@sbi.co.in": SBIParser,
+        "noreply@icicibank.com": ICICIParser,
+    }
+    fallback = GenericParser
+    ai_fallback = LLMParser  # only when confidence < 0.5
+```
+
+---
+
+## 4. Revised Deduplication Strategy
+
+### Multi-Level Approach
+
+| Level | Match Criteria | Action |
+|-------|---------------|--------|
+| **Strong** | `ref_id` matches exactly | Skip (100% duplicate) |
+| **Medium** | `amount + merchant + date + account` within ±5 min | Skip (95% duplicate) |
+| **Weak** | `amount + merchant + date` same day | Flag for review |
+| **None** | No match | Store as new |
+
+### Fingerprint Computation
+
+```
+fingerprint = SHA256(
+    amount + "|" + 
+    date + "|" + 
+    merchant_normalized + "|" + 
+    ref_id_or_empty + "|" +
+    account_last4
+)
+```
+
+---
+
+## 5. User Feedback Loop (NEW)
+
+```mermaid
+flowchart LR
+    DASH["Dashboard"] -->|"Wrong category"| CORRECT["User Correction"]
+    CORRECT --> STORE["Store Correction"]
+    STORE --> RULES["Update Category Rules"]
+    STORE --> ALIAS["Update Merchant Aliases"]
+    RULES --> PARSER["Improved Parsing"]
+    ALIAS --> PARSER
+```
+
+### How Corrections Improve the System
+
+| User Action | System Learning |
+|------------|----------------|
+| "This isn't Swiggy, it's Zomato" | Add alias mapping |
+| "This should be Groceries, not Food" | Update category rule |
+| "Wrong amount" | Flag parser for this bank format |
+| "This is not a transaction" | Improve filter engine |
+
+---
+
+## 6. Confidence Handling in UI (NEW)
+
+| Confidence | UI Treatment |
+|-----------|-------------|
+| ≥ 0.85 | ✅ Auto-accepted, shown normally |
+| 0.60–0.84 | ⚠️ Subtle warning icon, editable |
+| < 0.60 | 🔴 "Needs Review" badge, prominent edit button |
+
+---
+
+## 7. Error Handling & DLQ (NEW)
+
+```mermaid
+flowchart TD
+    PARSE["Parse Attempt"] -->|Success| STORE["Store Transaction"]
+    PARSE -->|Failure| DLQ["Dead Letter Queue"]
+    DLQ --> RETRY["Auto-Retry (3x with backoff)"]
+    RETRY -->|Success| STORE
+    RETRY -->|Final Fail| MANUAL["Flag for Manual Review"]
+    MANUAL -->|Parser Updated| REPROCESS["Re-process with new parser"]
+```
+
+### Non-Negotiable Rules
+- Never block pipeline on errors
+- Always store raw email regardless of parse result
+- Log every failure with error details
+- Failed emails get re-processed when parser improves
+
+---
+
+## 8. Sync Strategy (Revised)
+
+### Use Gmail `historyId` (Not Polling)
+
+```
+First sync:
+  → Fetch last 100 emails
+  → Store historyId
+
+Subsequent syncs:
+  → Use history.list(startHistoryId)
+  → Only get NEW emails
+  → Far more efficient
+```
+
+### Sync Tracking
+
+Every sync run logged:
+```json
+{
+  "id": "sync_001",
+  "start_time": "2026-05-05T10:00:00",
+  "end_time": "2026-05-05T10:00:03",
+  "emails_fetched": 12,
+  "emails_processed": 8,
+  "emails_failed": 1,
+  "errors": [{"email_id": "...", "error": "Amount not found"}],
+  "status": "completed"
+}
+```
+
+---
+
+## 9. MCP Connector Interface (Formalized)
+
+```python
+class FinanceConnector:
+    """Standard interface for all data sources"""
+    
+    def fetch_raw_data(self) -> List[RawRecord]:
+        """Returns raw records from source"""
+        pass
+    
+    def get_source_name(self) -> str:
+        pass
+
+# Output contract (all connectors must produce this):
+{
+    "raw_text": "...",
+    "source": "gmail|sms|bank_api",
+    "timestamp": "2026-05-05T10:00:00",
+    "metadata": {"sender": "...", "subject": "..."}
+}
+```
+
+Pipeline stays identical regardless of source.
+
+---
+
+## 10. Success Metrics (DEFINED)
+
+| Metric | Target | How to Measure |
+|--------|--------|---------------|
+| Parsing accuracy | ≥ 80% | Correct extractions / total emails |
+| Duplicate rate | ≤ 2% | Duplicate txns / total txns |
+| Processing speed | < 2 sec/email | Timer on parse pipeline |
+| Dashboard refresh | < 10 sec after sync | End-to-end timing |
+| User corrections | Decreasing over time | Corrections per week |
+
+---
+
+## 11. Test Dataset Requirement (CRITICAL)
+
+### Before writing ANY parser code:
+
+Create **30–50 sample emails** covering:
+
+| Bank | Count | Formats |
+|------|-------|---------|
+| HDFC | 10 | Debit, Credit, UPI, Card |
+| SBI | 8 | Debit, Credit, NEFT |
+| ICICI | 8 | Debit, Credit, UPI |
+| UPI Apps | 8 | GPay, PhonePe, Paytm |
+| Edge Cases | 6 | Missing merchant, no ref_id, HTML emails |
+
+Each sample has **expected output** → this is your ground truth for testing.
+
+---
+
+## 12. Execution Strategy: Vertical Slices
+
+### ❌ Wrong: Horizontal (Build All Backend → All Parser → All UI)
+### ✅ Right: Vertical (Each iteration = end-to-end working flow)
+
+```mermaid
+gantt
+    title Vertical Slice Execution
+    dateFormat  YYYY-MM-DD
+    section Phase 0
+    Setup & Foundation           :p0, 2026-05-05, 3d
+    section Phase 1
+    Gmail Integration            :p1, after p0, 4d
+    section Phase 2
+    Parsing Engine               :p2, after p1, 7d
+    section Phase 3
+    Processing Layer             :p3, after p2, 5d
+    section Phase 4
+    Dashboard                    :p4, after p3, 5d
+    section Phase 5
+    Insights (MVP+)              :p5, after p4, 3d
+```
+
+### Phase 0: Setup (2–3 days)
+- [x] Repo setup
+- [x] PostgreSQL + schema
+- [x] Backend skeleton (FastAPI)
+- [x] Can insert/fetch dummy transactions
+- **Exit criteria:** Dummy transaction visible via API
+
+### Phase 1: Gmail (3–4 days)
+- [ ] OAuth flow
+- [ ] Fetch last 20 emails
+- [ ] Store raw emails
+- [ ] No duplicates on re-fetch
+- **Exit criteria:** Raw emails visible in DB
+
+### Phase 2: Parsing (5–7 days) — **60% effort here**
+- [ ] Test dataset created (30+ emails)
+- [ ] HDFC parser working
+- [ ] Amount extraction ≥ 90%
+- [ ] Merchant extraction ≥ 70%
+- [ ] Confidence scoring
+- [ ] Parser versioning
+- **Exit criteria:** 60–70% correct parsing on test dataset
+
+### Phase 3: Processing (4–5 days)
+- [ ] Dedup engine (multi-level)
+- [ ] Merchant normalization
+- [ ] Category mapping (rule-based)
+- [ ] DLQ for failed parses
+- **Exit criteria:** Clean transaction table, no duplicates
+
+### Phase 4: Dashboard (4–5 days)
+- [ ] Transaction list
+- [ ] Monthly total
+- [ ] Category chart
+- [ ] Confidence indicators in UI
+- [ ] User correction buttons
+- **Exit criteria:** User can "see" their money
+
+### Phase 5: Insights (3 days, optional MVP+)
+- [ ] Top merchants
+- [ ] Category percentages
+- [ ] Month-over-month trend
+- **Exit criteria:** At least 3 auto-generated insights
+
+---
+
+## 13. Iteration Cycle (Per Feature)
+
+```
+Plan → Build → Test → Measure → Fix → Repeat
+```
+
+**Example — Parsing Feature:**
+1. **Iteration 1:** Parse amount only → measure accuracy
+2. **Iteration 2:** Add merchant extraction → measure
+3. **Iteration 3:** Add date extraction → measure
+4. **Iteration 4:** Edge cases + improve → measure
+
+> [!CAUTION]
+> **Don't try to build perfect parser in one go.** Iterate.
+
+---
+
+## 14. Testing Strategy
+
+| Type | What | When |
+|------|------|------|
+| **Unit** | Each parser: input email → expected output | Every parser change |
+| **Integration** | Email → Parsed → Stored → API returns it | Each phase |
+| **Regression** | Old emails still parse correctly after parser update | Before deploy |
+| **Edge Case** | Missing merchant, no amount, HTML emails | Phase 2 |
+
+---
+
+## 15. Engineering Discipline
+
+### Logging (Non-Negotiable)
+```
+✅ Email received: {sender, subject, id}
+✅ Parse result: {success/fail, confidence, fields_extracted}
+✅ Dedup result: {new/duplicate/flagged}
+✅ Sync run: {fetched, processed, failed}
+```
+
+### Observability Dashboard
+- Emails processed today
+- Parse success rate
+- Average confidence score
+- Failed parses count
+- User corrections count
+
+### Common Mistakes to Avoid
+
+| Mistake | Why It's Bad |
+|---------|-------------|
+| Overbuilding AI early | You don't have enough data yet |
+| Ignoring data quality | Garbage in → garbage out |
+| No logging | Can't debug production issues |
+| No test dataset | You'll keep guessing |
+| Building UI first | Biggest trap — backend is the core |
+
+---
+
+## 16. MVP Definition (Testable Outcome)
+
+> **"User connects Gmail → system shows at least 10 correct transactions → dashboard updates automatically"**
+
+That's the testable MVP. Not a feature list — an outcome.
+
+---
+
+## 17. Architecture Diagram (Final Revised)
+
+```mermaid
+flowchart TD
+    GMAIL["Gmail API<br/>(historyId sync)"] --> QUEUE["Message Queue<br/>(BullMQ/Celery)"]
+    QUEUE --> WORKER["Background Worker"]
+    WORKER --> FILTER["Filter Engine<br/>(Transaction vs OTP vs Promo)"]
+    FILTER --> REGISTRY["Parser Registry"]
+    REGISTRY --> HDFC["HDFC Parser"]
+    REGISTRY --> SBI["SBI Parser"]
+    REGISTRY --> GENERIC["Generic Parser"]
+    REGISTRY -->|"conf < 0.5"| LLM["AI Fallback"]
+    
+    HDFC --> DEDUP["Multi-Level Dedup"]
+    SBI --> DEDUP
+    GENERIC --> DEDUP
+    LLM --> DEDUP
+    
+    DEDUP --> NORM["Merchant Normalizer"]
+    NORM --> CAT["Categorizer"]
+    CAT --> DB["PostgreSQL"]
+    
+    WORKER -->|"Parse Fail"| DLQ["Dead Letter Queue"]
+    DLQ -->|"Retry 3x"| WORKER
+    DLQ -->|"Final Fail"| REVIEW["Manual Review"]
+    
+    DB --> INSIGHTS["Insights Engine"]
+    INSIGHTS --> API["REST API"]
+    API --> DASH["Dashboard"]
+    DASH -->|"Corrections"| FEEDBACK["Feedback Loop"]
+    FEEDBACK --> REGISTRY
+    FEEDBACK --> NORM
+    
+    SYNC["Sync Tracker"] --> DB
+    WORKER --> SYNC
+```
+
+---
+
+> [!IMPORTANT]
+> **The single most important takeaway:**  
+> *"Don't try to build a complete system. Build a working pipeline first."*  
+> Email → Parse → Store → Display. Get this loop working end-to-end, then iterate.
+
+**Ready to start Phase 0? Say the word.**
