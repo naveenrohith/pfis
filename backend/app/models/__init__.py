@@ -8,7 +8,7 @@ from app.models.user import User
 from app.models.category import Category, Merchant
 from app.models.email import RawEmail, GmailAccount
 from app.models.transaction import Transaction
-from app.models.sync import SyncRun, Budget, UserCorrection, ParseFailure
+from app.models.sync import SyncRun, Budget, UserCorrection, ParseFailure, BackgroundJob
 
 __all__ = [
     "User",
@@ -21,4 +21,5 @@ __all__ = [
     "Budget",
     "UserCorrection",
     "ParseFailure",
+    "BackgroundJob",
 ]

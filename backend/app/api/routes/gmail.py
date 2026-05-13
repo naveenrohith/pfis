@@ -21,11 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.email import RawEmail, GmailAccount
 from app.models.sync import SyncRun
+from app.models.user import User
+from app.security import encrypt_secret
+from app.security import get_current_user_optional, resolve_user_scope
 from app.services.gmail.oauth_service import (
     get_authorization_url,
     exchange_code_for_tokens,
 )
-from app.services.gmail.sync_service import sync_gmail_emails
+from app.services.gmail.sync_service import sync_gmail_emails, demo_sync_gmail_emails
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +43,15 @@ _oauth_states: dict[str, str] = {}
 # ─── OAuth Flow ───
 
 @auth_router.get("/connect")
-async def gmail_connect(user_id: str = Query(..., description="User ID to connect Gmail for")):
+async def gmail_connect(
+    user_id: str = Query(..., description="User ID to connect Gmail for"),
+    current_user: User | None = Depends(get_current_user_optional),
+):
     """
     Step 1: Redirect user to Google OAuth consent screen.
     After consent, Google redirects back to /callback.
     """
+    user_id = resolve_user_scope(user_id, current_user)
     try:
         auth_url, state = get_authorization_url()
         _oauth_states[state] = user_id
@@ -82,8 +89,8 @@ async def gmail_callback(
 
         if existing:
             # Update tokens
-            existing.access_token_ref = token_data["access_token"]
-            existing.refresh_token_ref = token_data["refresh_token"]
+            existing.access_token_ref = encrypt_secret(token_data["access_token"])
+            existing.refresh_token_ref = encrypt_secret(token_data["refresh_token"])
             gmail_account_id = existing.id
             logger.info(f"Updated Gmail tokens for user {user_id[:8]}...")
         else:
@@ -91,8 +98,8 @@ async def gmail_callback(
             gmail_account = GmailAccount(
                 user_id=user_id,
                 google_account_id=f"gmail_{user_id[:8]}",
-                access_token_ref=token_data["access_token"],
-                refresh_token_ref=token_data["refresh_token"],
+                access_token_ref=encrypt_secret(token_data["access_token"]),
+                refresh_token_ref=encrypt_secret(token_data["refresh_token"]),
             )
             db.add(gmail_account)
             await db.flush()
@@ -119,12 +126,14 @@ async def gmail_callback(
 async def trigger_sync(
     user_id: str = Query(...),
     max_results: int = Query(50, ge=1, le=200),
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Trigger a Gmail sync for a user.
     Fetches new emails, filters financial ones, stores them.
     """
+    user_id = resolve_user_scope(user_id, current_user)
     # Find Gmail account for user
     result = await db.execute(
         select(GmailAccount).where(GmailAccount.user_id == user_id)
@@ -156,9 +165,11 @@ async def trigger_sync(
 @gmail_router.get("/status")
 async def get_sync_status(
     user_id: str = Query(...),
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """Get the latest sync run status for a user."""
+    user_id = resolve_user_scope(user_id, current_user)
     result = await db.execute(
         select(SyncRun)
         .where(SyncRun.user_id == user_id)
@@ -193,27 +204,55 @@ async def list_raw_emails(
     processed: bool = Query(None, description="Filter by processed flag"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """List stored raw emails for a user."""
-    query = select(RawEmail).where(RawEmail.user_id == user_id)
+    user_id = resolve_user_scope(user_id, current_user)
+    base_query = select(RawEmail).where(RawEmail.user_id == user_id)
+    query = base_query
+    count_query = select(func.count(RawEmail.id)).where(RawEmail.user_id == user_id)
 
     if processed is not None:
         query = query.where(RawEmail.processed_flag == processed)
+        count_query = count_query.where(RawEmail.processed_flag == processed)
 
     query = query.order_by(RawEmail.received_at.desc()).limit(limit).offset(offset)
 
     result = await db.execute(query)
     emails = result.scalars().all()
 
-    # Get total count
-    count_result = await db.execute(
+    # Get filtered count and overall processed/unprocessed totals.
+    count_result = await db.execute(count_query)
+    total = int(count_result.scalar() or 0)
+
+    all_total_result = await db.execute(
         select(func.count(RawEmail.id)).where(RawEmail.user_id == user_id)
     )
-    total = count_result.scalar()
+    all_total = int(all_total_result.scalar() or 0)
+
+    processed_total_result = await db.execute(
+        select(func.count(RawEmail.id)).where(
+            RawEmail.user_id == user_id,
+            RawEmail.processed_flag.is_(True),
+        )
+    )
+    processed_total = int(processed_total_result.scalar() or 0)
+
+    unprocessed_total_result = await db.execute(
+        select(func.count(RawEmail.id)).where(
+            RawEmail.user_id == user_id,
+            RawEmail.processed_flag.is_(False),
+        )
+    )
+    unprocessed_total = int(unprocessed_total_result.scalar() or 0)
 
     return {
         "total": total,
+        "all_total": all_total,
+        "processed_total": processed_total,
+        "unprocessed_total": unprocessed_total,
+        "applied_filter": processed,
         "emails": [
             {
                 "id": e.id,
@@ -234,6 +273,7 @@ async def list_raw_emails(
 @gmail_router.post("/demo-sync")
 async def demo_sync(
     user_id: str = Query(...),
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -241,84 +281,8 @@ async def demo_sync(
     No OAuth required — perfect for testing the pipeline.
     Injects 15 realistic Indian bank emails into the system.
     """
-    from app.services.gmail.demo_data import SAMPLE_EMAILS
-    from app.services.gmail.email_filter import classify_email, EmailType
-    import uuid
-
-    stats = {
-        "emails_fetched": len(SAMPLE_EMAILS),
-        "emails_stored": 0,
-        "emails_skipped_otp": 0,
-        "emails_skipped_promo": 0,
-        "emails_skipped_duplicate": 0,
-        "classifications": [],
-    }
-
-    # Create sync run
-    sync_run = SyncRun(user_id=user_id, status="running")
-    db.add(sync_run)
-    await db.commit()
-
-    for i, email_data in enumerate(SAMPLE_EMAILS):
-        fake_gmail_id = f"demo_{uuid.uuid5(uuid.NAMESPACE_DNS, email_data['body'][:50])}"
-
-        # Check for duplicate
-        existing = await db.execute(
-            select(RawEmail).where(RawEmail.gmail_message_id == fake_gmail_id)
-        )
-        if existing.scalar_one_or_none():
-            stats["emails_skipped_duplicate"] += 1
-            stats["classifications"].append({
-                "subject": email_data["subject"][:60],
-                "type": "DUPLICATE",
-            })
-            continue
-
-        # Classify the email
-        email_type, bank_name, confidence = classify_email(
-            email_data["sender"],
-            email_data["subject"],
-            email_data["body"],
-        )
-
-        stats["classifications"].append({
-            "subject": email_data["subject"][:60],
-            "sender": email_data["sender"],
-            "type": email_type.value,
-            "bank": bank_name,
-            "confidence": confidence,
-        })
-
-        if email_type == EmailType.OTP:
-            stats["emails_skipped_otp"] += 1
-            continue
-        elif email_type == EmailType.PROMOTION:
-            stats["emails_skipped_promo"] += 1
-            continue
-        elif email_type == EmailType.IGNORE:
-            continue
-
-        # Store as raw email
-        raw_email = RawEmail(
-            user_id=user_id,
-            gmail_message_id=fake_gmail_id,
-            subject=email_data["subject"],
-            body=email_data["body"],
-            sender=email_data["sender"],
-            received_at=datetime.now(timezone.utc),
-            processed_flag=False,
-        )
-        db.add(raw_email)
-        stats["emails_stored"] += 1
-
-    await db.commit()
-
-    # Update sync run
-    sync_run.status = "completed"
-    sync_run.end_time = datetime.now(timezone.utc)
-    sync_run.emails_fetched = stats["emails_fetched"]
-    sync_run.emails_processed = stats["emails_stored"]
-    await db.commit()
+    user_id = resolve_user_scope(user_id, current_user)
+    stats = await demo_sync_gmail_emails(db, user_id)
 
     logger.info(
         f"Demo sync complete: {stats['emails_stored']} stored, "

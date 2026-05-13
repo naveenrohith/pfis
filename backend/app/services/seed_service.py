@@ -6,10 +6,13 @@ Seeds the database with default categories and sample merchants.
 import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.config import get_settings
 from app.models.category import Category, Merchant
 from app.models.user import User
+from app.security import hash_password
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 # Default categories with icons
 DEFAULT_CATEGORIES = [
@@ -98,9 +101,24 @@ async def seed_demo_user(db: AsyncSession) -> str:
     existing = result.scalar_one_or_none()
 
     if existing:
+        updated = False
+        if not existing.password_hash:
+            existing.password_hash = hash_password(settings.DEMO_USER_PASSWORD)
+            updated = True
+        if not existing.is_active:
+            existing.is_active = True
+            updated = True
+        if updated:
+            await db.commit()
         return existing.id
 
-    user = User(email="demo@pfis.local", name="Demo User", currency="INR")
+    user = User(
+        email="demo@pfis.local",
+        name="Demo User",
+        currency="INR",
+        password_hash=hash_password(settings.DEMO_USER_PASSWORD),
+        is_active=True,
+    )
     db.add(user)
     await db.commit()
     await db.refresh(user)

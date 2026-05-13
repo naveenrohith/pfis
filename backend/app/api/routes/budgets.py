@@ -14,6 +14,8 @@ from app.database import get_db
 from app.models.sync import Budget
 from app.models.transaction import Transaction, TransactionType
 from app.models.category import Category
+from app.models.user import User
+from app.security import ensure_user_owns_resource, get_current_user_optional, resolve_user_scope
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +60,11 @@ class BudgetTracker(BaseModel):
 async def create_budget(
     user_id: str = Query(...),
     data: BudgetCreate = ...,
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a monthly budget for a category."""
+    user_id = resolve_user_scope(user_id, current_user)
     # Check if budget already exists for this user+category
     existing = await db.execute(
         select(Budget).where(
@@ -87,9 +91,11 @@ async def create_budget(
 @router.get("/", response_model=list[BudgetResponse])
 async def list_budgets(
     user_id: str = Query(...),
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """List all budgets for a user."""
+    user_id = resolve_user_scope(user_id, current_user)
     result = await db.execute(
         select(Budget, Category.name, Category.icon)
         .join(Category, Budget.category_id == Category.id, isouter=True)
@@ -111,6 +117,7 @@ async def list_budgets(
 async def update_budget(
     budget_id: str,
     data: BudgetUpdate,
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a budget's monthly limit."""
@@ -118,6 +125,7 @@ async def update_budget(
     budget = result.scalar_one_or_none()
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
+    ensure_user_owns_resource(budget.user_id, current_user)
 
     budget.monthly_limit = data.monthly_limit
     await db.commit()
@@ -127,6 +135,7 @@ async def update_budget(
 @router.delete("/{budget_id}")
 async def delete_budget(
     budget_id: str,
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a budget."""
@@ -134,6 +143,7 @@ async def delete_budget(
     budget = result.scalar_one_or_none()
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
+    ensure_user_owns_resource(budget.user_id, current_user)
 
     await db.delete(budget)
     await db.commit()
@@ -147,12 +157,14 @@ async def track_budgets(
     user_id: str = Query(...),
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2020, le=2030),
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Get budget vs actual spending for all budgeted categories.
     Returns usage percentage and status (under/warning/over).
     """
+    user_id = resolve_user_scope(user_id, current_user)
     # Get all budgets
     budget_result = await db.execute(
         select(Budget, Category.name, Category.icon)

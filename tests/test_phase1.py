@@ -9,43 +9,19 @@ Tests:
 """
 import sys
 import os
-import urllib.request
-import urllib.error
-import json
+
+from test_support import api_get, api_post, create_test_user
 
 sys.stdout.reconfigure(encoding="utf-8")
-
-BASE = "http://localhost:8000"
-
-
-def api_get(path):
-    if not path.endswith("/") and "?" not in path:
-        path += "/"
-    r = urllib.request.urlopen(f"{BASE}{path}")
-    return json.loads(r.read())
-
-
-def api_post(path, data=None):
-    # Don't modify paths with query params — FastAPI redirects break POST
-    body = json.dumps(data).encode() if data else b""
-    req = urllib.request.Request(
-        f"{BASE}{path}",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    r = urllib.request.urlopen(req)
-    return json.loads(r.read())
-
 
 print("=" * 65)
 print("  PFIS Phase 1 — Gmail Integration Verification")
 print("=" * 65)
 
-# 1. Get demo user ID
-users = api_get("/api/users")
-user_id = users[0]["id"]
-print(f"\n1. Demo User: {users[0]['name']} (id={user_id[:12]}...)")
+# 1. Create isolated user
+user = create_test_user("phase1")
+user_id = user["id"]
+print(f"\n1. Test User: {user['name']} (id={user_id[:12]}...)")
 
 # 2. Run demo sync
 print(f"\n2. Running Demo Sync (15 sample bank emails)...")

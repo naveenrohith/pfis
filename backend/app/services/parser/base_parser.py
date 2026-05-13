@@ -28,6 +28,7 @@ class ParseResult:
     reference_id: Optional[str] = None
     bank: str = ""
     parser_version: int = 1
+    merchant_source: str = "missing"  # exact | inferred | generic | missing
 
     # Computed
     confidence_score: float = 0.0
@@ -44,7 +45,12 @@ class ParseResult:
         if self.amount is not None and self.amount > 0:
             score += 40
         if self.merchant_raw:
-            score += 30
+            merchant_score = {
+                "exact": 30,
+                "inferred": 20,
+                "generic": 10,
+            }.get(self.merchant_source, 30)
+            score += merchant_score
         if self.date is not None:
             score += 20
         if self.transaction_type is not None:

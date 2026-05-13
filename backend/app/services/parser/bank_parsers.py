@@ -36,6 +36,13 @@ class GenericParser(BaseParser):
         result.account_last4 = patterns.extract_account(combined)
         result.reference_id = patterns.extract_reference_id(combined)
         result.merchant_raw = patterns.extract_merchant(combined)
+        if result.merchant_raw:
+            result.merchant_source = "exact"
+        else:
+            inferred = patterns.infer_generic_merchant(combined, txn_type)
+            if inferred:
+                result.merchant_raw = inferred
+                result.merchant_source = "generic"
 
         # Compute confidence
         result.compute_confidence()
@@ -73,6 +80,13 @@ class HDFCParser(BaseParser):
         result.account_last4 = patterns.extract_account(combined)
         result.reference_id = patterns.extract_reference_id(combined)
         result.merchant_raw = patterns.extract_merchant(combined)
+        if result.merchant_raw:
+            result.merchant_source = "exact"
+        else:
+            inferred = patterns.infer_generic_merchant(combined, txn_type)
+            if inferred:
+                result.merchant_raw = inferred
+                result.merchant_source = "generic"
 
         result.compute_confidence()
         return result
@@ -102,6 +116,13 @@ class SBIParser(BaseParser):
         result.account_last4 = patterns.extract_account(combined)
         result.reference_id = patterns.extract_reference_id(combined)
         result.merchant_raw = patterns.extract_merchant(combined)
+        if result.merchant_raw:
+            result.merchant_source = "exact"
+        else:
+            inferred = patterns.infer_generic_merchant(combined, txn_type)
+            if inferred:
+                result.merchant_raw = inferred
+                result.merchant_source = "generic"
 
         result.compute_confidence()
         return result
@@ -131,6 +152,13 @@ class ICICIParser(BaseParser):
         result.account_last4 = patterns.extract_account(combined)
         result.reference_id = patterns.extract_reference_id(combined)
         result.merchant_raw = patterns.extract_merchant(combined)
+        if result.merchant_raw:
+            result.merchant_source = "exact"
+        else:
+            inferred = patterns.infer_generic_merchant(combined, txn_type)
+            if inferred:
+                result.merchant_raw = inferred
+                result.merchant_source = "generic"
 
         result.compute_confidence()
         return result

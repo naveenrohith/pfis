@@ -15,6 +15,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
+import uuid
 
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.email import RawEmail, GmailAccount
 from app.models.sync import SyncRun, SyncStatus
+from app.security import decrypt_secret, encrypt_secret
 from app.services.gmail.oauth_service import build_credentials, refresh_access_token
 from app.services.gmail.email_filter import (
     classify_email,
@@ -33,16 +35,106 @@ from app.services.gmail.email_filter import (
 logger = logging.getLogger(__name__)
 
 
+async def demo_sync_gmail_emails(
+    db: AsyncSession,
+    user_id: str,
+) -> dict:
+    """Simulate Gmail sync using deterministic sample emails for demo/testing."""
+    from app.services.gmail.demo_data import SAMPLE_EMAILS
+
+    stats = {
+        "emails_fetched": len(SAMPLE_EMAILS),
+        "emails_stored": 0,
+        "emails_skipped_otp": 0,
+        "emails_skipped_promo": 0,
+        "emails_skipped_duplicate": 0,
+        "classifications": [],
+    }
+
+    sync_run = SyncRun(user_id=user_id, status=SyncStatus.RUNNING)
+    db.add(sync_run)
+    await db.commit()
+    await db.refresh(sync_run)
+
+    try:
+        for email_data in SAMPLE_EMAILS:
+            fake_gmail_id = f"demo_{uuid.uuid5(uuid.NAMESPACE_DNS, email_data['body'][:50])}"
+            scoped_gmail_id = f"{user_id}:{fake_gmail_id}"
+
+            existing = await db.execute(
+                select(RawEmail).where(RawEmail.gmail_message_id == scoped_gmail_id)
+            )
+            if existing.scalar_one_or_none():
+                stats["emails_skipped_duplicate"] += 1
+                stats["classifications"].append({
+                    "subject": email_data["subject"][:60],
+                    "type": "DUPLICATE",
+                })
+                continue
+
+            email_type, bank_name, confidence = classify_email(
+                email_data["sender"],
+                email_data["subject"],
+                email_data["body"],
+            )
+
+            stats["classifications"].append({
+                "subject": email_data["subject"][:60],
+                "sender": email_data["sender"],
+                "type": email_type.value,
+                "bank": bank_name,
+                "confidence": confidence,
+            })
+
+            if email_type == EmailType.OTP:
+                stats["emails_skipped_otp"] += 1
+                continue
+            if email_type == EmailType.PROMOTION:
+                stats["emails_skipped_promo"] += 1
+                continue
+            if email_type == EmailType.IGNORE:
+                continue
+
+            db.add(
+                RawEmail(
+                    user_id=user_id,
+                    gmail_message_id=scoped_gmail_id,
+                    subject=email_data["subject"],
+                    body=email_data["body"],
+                    sender=email_data["sender"],
+                    received_at=datetime.now(timezone.utc),
+                    processed_flag=False,
+                )
+            )
+            stats["emails_stored"] += 1
+
+        sync_run.status = SyncStatus.COMPLETED
+        sync_run.end_time = datetime.now(timezone.utc)
+        sync_run.emails_fetched = stats["emails_fetched"]
+        sync_run.emails_processed = stats["emails_stored"]
+        await db.commit()
+
+        return stats
+    except Exception as e:
+        sync_run.status = SyncStatus.FAILED
+        sync_run.end_time = datetime.now(timezone.utc)
+        sync_run.errors = json.dumps([{"error": str(e)}])
+        await db.commit()
+        raise
+
+
 def _build_gmail_service(access_token: str, refresh_token: str):
     """Build an authenticated Gmail API service instance."""
     credentials = build_credentials(access_token, refresh_token)
+    refreshed = False
 
     # Refresh if expired
     if credentials.expired:
         logger.info("Access token expired, refreshing...")
         credentials.refresh(Request())
+        refreshed = True
 
-    return build("gmail", "v1", credentials=credentials)
+    return build("gmail", "v1", credentials=credentials), credentials, refreshed
 
 
 def _build_sender_query() -> str:
@@ -145,10 +237,17 @@ async def sync_gmail_emails(
             raise ValueError(f"Gmail account {gmail_account_id} not found")
 
         # Build Gmail service
-        service = _build_gmail_service(
-            gmail_account.access_token_ref,
-            gmail_account.refresh_token_ref,
+        service, credentials, refreshed = _build_gmail_service(
+            decrypt_secret(gmail_account.access_token_ref) or "",
+            decrypt_secret(gmail_account.refresh_token_ref) or "",
         )
+
+        if refreshed:
+            gmail_account.access_token_ref = encrypt_secret(credentials.token)
+            gmail_account.refresh_token_ref = encrypt_secret(
+                credentials.refresh_token or decrypt_secret(gmail_account.refresh_token_ref) or ""
+            )
+            await db.commit()
 
         # Build search query for bank emails
         query = _build_sender_query()
@@ -168,12 +267,13 @@ async def sync_gmail_emails(
         # Process each message
         for msg_ref in messages:
             gmail_msg_id = msg_ref["id"]
+            scoped_gmail_msg_id = f"{user_id}:{gmail_msg_id}"
 
             try:
                 # Check if already stored (dedup by gmail_message_id)
                 existing = await db.execute(
                     select(RawEmail).where(
-                        RawEmail.gmail_message_id == gmail_msg_id
+                        RawEmail.gmail_message_id == scoped_gmail_msg_id
                     )
                 )
                 if existing.scalar_one_or_none():
@@ -218,7 +318,7 @@ async def sync_gmail_emails(
                 # Store raw email (TRANSACTION or STATEMENT type)
                 raw_email = RawEmail(
                     user_id=user_id,
-                    gmail_message_id=gmail_msg_id,
+                    gmail_message_id=scoped_gmail_msg_id,
                     subject=subject,
                     body=body,
                     sender=sender,

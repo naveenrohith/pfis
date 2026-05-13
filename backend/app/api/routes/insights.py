@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.user import User
+from app.security import get_current_user_optional, resolve_user_scope
 from app.services.insights_service import InsightsService
 
 logger = logging.getLogger(__name__)
@@ -22,12 +24,14 @@ async def get_insights(
     user_id: str = Query(...),
     month: int = Query(None, ge=1, le=12),
     year: int = Query(None, ge=2020, le=2030),
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Generate financial insights for a user's given month.
     Returns insight cards, daily spending trend, and recurring payments.
     """
+    user_id = resolve_user_scope(user_id, current_user)
     # Default to current month
     if month is None:
         month = date.today().month

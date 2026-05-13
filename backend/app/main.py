@@ -24,6 +24,8 @@ from fastapi.responses import FileResponse
 from app.config import get_settings
 from app.database import init_db, close_db, AsyncSessionLocal
 from app.api.routes import health, users, transactions, categories
+from app.api.routes import auth
+from app.api.routes import jobs
 from app.api.routes.gmail import auth_router as gmail_auth_router, gmail_router
 from app.api.routes import pipeline
 from app.api.routes import insights
@@ -81,7 +83,7 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -93,6 +95,8 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Register routes
 app.include_router(health.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
+app.include_router(jobs.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(transactions.router, prefix="/api")
 app.include_router(categories.router, prefix="/api")

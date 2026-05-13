@@ -4,35 +4,18 @@ Tests the full flow: Demo Sync → Process Pipeline → Verify Transactions
 """
 import sys
 import os
-import urllib.request
-import urllib.error
-import json
+
+from test_support import api_get, api_post, create_test_user
 
 sys.stdout.reconfigure(encoding="utf-8")
-BASE = "http://localhost:8000"
-
-
-def api_get(path):
-    if not path.endswith("/") and "?" not in path:
-        path += "/"
-    return json.loads(urllib.request.urlopen(f"{BASE}{path}").read())
-
-
-def api_post(path, data=None):
-    body = json.dumps(data).encode() if data else b""
-    req = urllib.request.Request(f"{BASE}{path}", data=body,
-                                headers={"Content-Type": "application/json"}, method="POST")
-    return json.loads(urllib.request.urlopen(req).read())
-
-
 print("=" * 70)
 print("  PFIS Phase 2+3 — Parsing Engine + Processing Pipeline")
 print("=" * 70)
 
-# 1. Get user
-users = api_get("/api/users")
-user_id = users[0]["id"]
-print(f"\n1. User: {users[0]['name']} (id={user_id[:12]}...)")
+# 1. Create isolated user
+user = create_test_user("phase2")
+user_id = user["id"]
+print(f"\n1. User: {user['name']} (id={user_id[:12]}...)")
 
 # 2. Inject demo emails (if not already done)
 print("\n2. Injecting demo emails...")

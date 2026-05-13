@@ -5,7 +5,7 @@ Centralizing these avoids duplication and makes improvement easier.
 """
 
 import re
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
 
@@ -181,7 +181,31 @@ MERCHANT_PATTERNS = [
     re.compile(r"(?:refund|reversal)\s+from\s+([A-Z][A-Z0-9\s.]+?)(?:\s*[.\-]|\s+Avl)", re.IGNORECASE),
     # "paid Rs. 350.00 to BIGBASKET via"
     re.compile(r"paid\s+(?:Rs\.?\s?[\d,.]+\s+)?to\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:via|on))", re.IGNORECASE),
+    # "charged for FLIPKART INTERNET on"
+    re.compile(r"charged\s+for\s+([A-Z][A-Z0-9\s./-]+?)(?:\s+on|\s*\.|\s+Available)", re.IGNORECASE),
+    # "credited to ... as refund from AMAZON PAY"
+    re.compile(r"as\s+refund\s+from\s+([A-Z][A-Z0-9\s./-]+?)(?:\s*[.\-]|\s+Avl)", re.IGNORECASE),
 ]
+
+MERCHANT_NOISE = {
+    "UPI", "POS", "NEFT", "IMPS", "RTGS", "TXN", "TRANSACTION",
+    "PAYMENT", "PURCHASE", "CARD", "DEBIT", "CREDIT", "BANK", "ACCOUNT",
+    "CUSTOMER", "AVAILABLE", "BALANCE", "LIMIT", "ALERT",
+}
+
+
+def _sanitize_merchant(merchant: str) -> Optional[str]:
+    merchant = re.sub(r"[-_]+", " ", merchant.upper())
+    merchant = re.sub(r"\s+", " ", merchant).strip(" .:-")
+    merchant = re.sub(r"\b(?:VPA|UTIB|HDFC|ICIC|SBIN)\b", "", merchant).strip()
+    merchant = re.sub(r"\s+", " ", merchant).strip(" .:-")
+    if not merchant:
+        return None
+    if merchant in MERCHANT_NOISE:
+        return None
+    if merchant.isdigit() or len(merchant) < 3:
+        return None
+    return merchant
 
 
 def extract_merchant(text: str) -> Optional[str]:
@@ -195,5 +219,39 @@ def extract_merchant(text: str) -> Optional[str]:
                 # Skip if it starts with Rs/INR/amount pattern
                 if re.match(r'^(?:Rs|INR|\d)', merchant, re.IGNORECASE):
                     continue
-                return merchant.upper()
+                sanitized = _sanitize_merchant(merchant)
+                if sanitized:
+                    return sanitized
+    return None
+
+
+def infer_generic_merchant(text: str, txn_type: Optional[str]) -> Optional[str]:
+    """Infer a best-effort generic counterparty when the email omits merchant details."""
+    text_upper = text.upper()
+
+    if "UPI" in text_upper:
+        if txn_type == "refund":
+            return "UPI REFUND"
+        if txn_type == "credit":
+            return "UPI CREDIT"
+        return "UPI TRANSFER"
+
+    if "NEFT" in text_upper:
+        return "NEFT CREDIT" if txn_type == "credit" else "NEFT TRANSFER"
+
+    if "IMPS" in text_upper:
+        return "IMPS CREDIT" if txn_type == "credit" else "IMPS TRANSFER"
+
+    if "RTGS" in text_upper:
+        return "RTGS CREDIT" if txn_type == "credit" else "RTGS TRANSFER"
+
+    if any(token in text_upper for token in ["POS", "DEBIT CARD", "CREDIT CARD", "CHARGED", "SPENT"]):
+        return "CARD PURCHASE"
+
+    if txn_type == "credit":
+        return "BANK CREDIT"
+    if txn_type == "refund":
+        return "BANK REFUND"
+    if txn_type == "debit":
+        return "BANK DEBIT"
     return None

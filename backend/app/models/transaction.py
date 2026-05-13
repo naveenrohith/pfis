@@ -43,6 +43,8 @@ class Transaction(Base):
 
     # Quality & traceability
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
+    reviewed_flag: Mapped[bool] = mapped_column(default=False, index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     parser_version: Mapped[int] = mapped_column(Integer, default=1)
     fingerprint: Mapped[str] = mapped_column(
         String(64), unique=True, nullable=True, index=True

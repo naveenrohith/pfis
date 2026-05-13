@@ -1,40 +1,14 @@
 """Quick API test script for Phase 0 verification."""
 import sys
 import os
-import urllib.request
 import urllib.error
 import json
+
+from test_support import api_get, api_post, api_patch, create_test_user
 
 # Fix Windows console encoding
 sys.stdout.reconfigure(encoding="utf-8")
 os.environ["PYTHONIOENCODING"] = "utf-8"
-
-BASE = "http://localhost:8000"
-
-def api_get(path):
-    # Ensure trailing slash to avoid 307 redirects
-    if not path.endswith("/") and "?" not in path:
-        path += "/"
-    r = urllib.request.urlopen(f"{BASE}{path}")
-    return json.loads(r.read())
-
-
-def api_post(path, data):
-    # Ensure trailing slash to avoid 307 redirects  
-    if "?" in path:
-        parts = path.split("?")
-        if not parts[0].endswith("/"):
-            path = parts[0] + "/" + "?" + parts[1]
-    elif not path.endswith("/"):
-        path += "/"
-    req = urllib.request.Request(
-        f"{BASE}{path}",
-        data=json.dumps(data).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    r = urllib.request.urlopen(req)
-    return json.loads(r.read())
-
 
 print("=" * 60)
 print("PFIS Phase 0 — API Verification")
@@ -45,16 +19,15 @@ health = api_get("/api/health")
 print(f"\n1. Health: {health['status']} (v{health['version']})")
 
 # 2. Categories
-cats = api_get("/api/categories")
+cats = api_get("/api/categories/")
 print(f"\n2. Categories ({len(cats)} loaded):")
 for c in cats:
     print(f"   {c['icon']} {c['name']} (id={c['id'][:8]}...)")
 
-# 3. Users
-users = api_get("/api/users")
-demo_user = users[0]
-print(f"\n3. Demo User: {demo_user['name']} ({demo_user['email']})")
-user_id = demo_user["id"]
+# 3. Create isolated user
+test_user = create_test_user("phase0")
+print(f"\n3. Test User: {test_user['name']} ({test_user['email']})")
+user_id = test_user["id"]
 
 # 4. Get food category ID
 food_cat = next((c for c in cats if c["name"] == "Food"), None)
@@ -62,6 +35,7 @@ shopping_cat = next((c for c in cats if c["name"] == "Shopping"), None)
 transport_cat = next((c for c in cats if c["name"] == "Transport"), None)
 sub_cat = next((c for c in cats if c["name"] == "Subscription"), None)
 bills_cat = next((c for c in cats if c["name"] == "Bills"), None)
+groceries_cat = next((c for c in cats if c["name"] == "Groceries"), None)
 
 # 5. Create test transactions
 print("\n4. Creating test transactions...")
@@ -125,16 +99,13 @@ test_txns = [
 
 created = []
 for txn in test_txns:
-    try:
-        result = api_post(f"/api/transactions?user_id={user_id}", txn)
-        created.append(result)
-        print(f"   + {result['merchant_normalized']:15s} INR {result['amount']:>8.2f}  [{result['transaction_type']}]  conf={result['confidence_score']}")
-    except Exception as e:
-        print(f"   ! Skipped (likely duplicate): {txn['merchant_normalized']}")
+    result = api_post(f"/api/transactions/?user_id={user_id}", txn)
+    created.append(result)
+    print(f"   + {result['merchant_normalized']:15s} INR {result['amount']:>8.2f}  [{result['transaction_type']}]  conf={result['confidence_score']}")
 
 # 6. List transactions
 print(f"\n5. Fetching transactions for May 2026...")
-txns = api_get(f"/api/transactions?user_id={user_id}&month=5&year=2026")
+txns = api_get(f"/api/transactions/?user_id={user_id}&month=5&year=2026")
 print(f"   Found {len(txns)} transactions")
 
 # 7. Monthly summary
@@ -157,7 +128,7 @@ for m in summary["top_merchants"]:
 # 8. Test dedup
 print(f"\n7. Dedup Test (re-inserting Swiggy)...")
 try:
-    api_post(f"/api/transactions?user_id={user_id}", test_txns[0])
+    api_post(f"/api/transactions/?user_id={user_id}", test_txns[0])
     print("   FAIL - Duplicate was not caught!")
 except urllib.error.HTTPError as e:
     error_body = e.read().decode()
@@ -168,6 +139,22 @@ except urllib.error.HTTPError as e:
         print(f"   PASS - Blocked with HTTP {e.code}")
 except Exception as e:
     print(f"   PASS - Blocked: {e}")
+
+# 8. Correction test
+print(f"\n8. Correction Test (update first transaction)...")
+updated = api_patch(
+    f"/api/transactions/{created[0]['id']}",
+    {
+        "merchant_normalized": "Swiggy Instamart",
+        "category_id": groceries_cat["id"],
+        "amount": 475,
+        "transaction_type": "debit",
+    },
+)
+print(
+    f"   PASS - Updated to {updated['merchant_normalized']} "
+    f"INR {updated['amount']:.2f} (category={updated['category_id'][:8]}...)"
+)
 
 print("\n" + "=" * 60)
 print("Phase 0 Verification COMPLETE")

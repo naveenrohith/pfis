@@ -21,6 +21,13 @@ class SyncStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class JobStatus(str, enum.Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class SyncRun(Base):
     """Tracks each Gmail sync operation for observability and debugging."""
     __tablename__ = "sync_runs"
@@ -116,3 +123,30 @@ class ParseFailure(Base):
 
     def __repr__(self) -> str:
         return f"<ParseFailure retries={self.retry_count} resolved={self.resolved}>"
+
+
+class BackgroundJob(Base):
+    """Persistent background orchestration record for async job execution."""
+    __tablename__ = "background_jobs"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True, index=True
+    )
+    job_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.QUEUED)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User", back_populates="jobs")
+
+    def __repr__(self) -> str:
+        return f"<BackgroundJob {self.job_type} status={self.status.value}>"

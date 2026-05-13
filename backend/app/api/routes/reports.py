@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.transaction import Transaction, TransactionType
 from app.models.category import Category
+from app.models.user import User
+from app.security import get_current_user_optional, resolve_user_scope
 from app.services.insights_service import InsightsService
 
 logger = logging.getLogger(__name__)
@@ -28,12 +30,14 @@ async def export_csv(
     user_id: str = Query(...),
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2020, le=2030),
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Export transactions as CSV for the given month.
     Returns a downloadable CSV file.
     """
+    user_id = resolve_user_scope(user_id, current_user)
     result = await db.execute(
         select(Transaction, Category.name.label("cat_name"))
         .join(Category, Transaction.category_id == Category.id, isouter=True)
@@ -83,12 +87,14 @@ async def monthly_report(
     user_id: str = Query(...),
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2020, le=2030),
+    current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Generate a printable monthly financial report as HTML.
     Can be printed to PDF from the browser.
     """
+    user_id = resolve_user_scope(user_id, current_user)
     import calendar
 
     month_name = calendar.month_name[month]

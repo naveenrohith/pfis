@@ -6,35 +6,69 @@ Processes unprocessed raw emails end-to-end.
 """
 
 import logging
-import json
 from datetime import date as date_type, datetime, timezone
-from typing import Optional
+from typing import Iterable
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.email import RawEmail
-from app.models.transaction import Transaction
 from app.models.sync import ParseFailure
 from app.services.parser.registry import get_parser_registry
-from app.services.parser.normalizer import normalize_merchant, get_default_category_id
+from app.services.parser.normalizer import (
+    normalize_merchant,
+    get_default_category_id,
+    infer_merchant_from_text,
+)
 from app.services.transaction_service import TransactionService
 from app.schemas.transaction import TransactionCreate
 
 logger = logging.getLogger(__name__)
 
 
-async def process_raw_emails(
+async def _record_parse_failure(
+    db: AsyncSession,
+    email: RawEmail,
+    error_message: str,
+    parser_version: int,
+) -> None:
+    result = await db.execute(
+        select(ParseFailure).where(ParseFailure.email_id == email.id)
+    )
+    failure = result.scalar_one_or_none()
+    if failure is None:
+        failure = ParseFailure(
+            email_id=email.id,
+            error_message=error_message,
+            parser_version=parser_version,
+            resolved=False,
+        )
+        db.add(failure)
+    else:
+        failure.error_message = error_message
+        failure.parser_version = parser_version
+        failure.resolved = False
+
+
+async def _resolve_parse_failure(db: AsyncSession, email_id: str) -> None:
+    result = await db.execute(
+        select(ParseFailure).where(ParseFailure.email_id == email_id)
+    )
+    failure = result.scalar_one_or_none()
+    if failure:
+        failure.resolved = True
+        failure.error_message = None
+
+
+async def _process_email_batch(
     db: AsyncSession,
     user_id: str,
-    limit: int = 50,
+    emails: Iterable[RawEmail],
 ) -> dict:
-    """
-    Process all unprocessed raw emails for a user.
-    Pipeline: Parse → Normalize → Categorize → Dedup → Store
-    """
+    emails = list(emails)
     stats = {
-        "total_unprocessed": 0,
+        "total_unprocessed": len(emails),
         "parsed_success": 0,
         "parsed_failed": 0,
         "stored": 0,
@@ -42,16 +76,6 @@ async def process_raw_emails(
         "low_confidence": 0,
         "results": [],
     }
-
-    # Fetch unprocessed emails
-    result = await db.execute(
-        select(RawEmail)
-        .where(RawEmail.user_id == user_id, RawEmail.processed_flag == False)
-        .order_by(RawEmail.received_at.asc())
-        .limit(limit)
-    )
-    emails = list(result.scalars().all())
-    stats["total_unprocessed"] = len(emails)
 
     if not emails:
         logger.info("No unprocessed emails found")
@@ -69,7 +93,6 @@ async def process_raw_emails(
         }
 
         try:
-            # Step 1: Parse
             parse_result = registry.parse_email(
                 sender=email.sender or "",
                 subject=email.subject or "",
@@ -79,49 +102,56 @@ async def process_raw_emails(
             email_result["amount"] = parse_result.amount
             email_result["type"] = parse_result.transaction_type.value if parse_result.transaction_type else None
             email_result["merchant_raw"] = parse_result.merchant_raw
+            email_result["merchant_source"] = parse_result.merchant_source
             email_result["date"] = str(parse_result.date) if parse_result.date else None
             email_result["confidence"] = parse_result.confidence_score
             email_result["bank"] = parse_result.bank
 
-            # Check if parse result is valid
             if not parse_result.is_valid:
                 stats["parsed_failed"] += 1
                 email_result["status"] = "parse_failed"
-
-                # Store in DLQ
-                dlq = ParseFailure(
-                    email_id=email.id,
-                    error_message=f"Invalid parse: amount={parse_result.amount}, type={parse_result.transaction_type}",
-                    parser_version=parse_result.parser_version,
+                await _record_parse_failure(
+                    db,
+                    email,
+                    f"Invalid parse: amount={parse_result.amount}, type={parse_result.transaction_type}",
+                    parse_result.parser_version,
                 )
-                db.add(dlq)
                 email.processed_flag = True
                 await db.commit()
-
                 stats["results"].append(email_result)
                 continue
 
-            stats["parsed_success"] += 1
+            inferred_category_id = None
+            if not parse_result.merchant_raw or parse_result.merchant_source != "exact":
+                inferred_merchant, inferred_category_id = await infer_merchant_from_text(
+                    db,
+                    f"{email.subject or ''} {email.body or ''}",
+                )
+                if inferred_merchant:
+                    parse_result.merchant_raw = inferred_merchant
+                    parse_result.merchant_source = "inferred"
+                    parse_result.compute_confidence()
+                    email_result["merchant_raw"] = inferred_merchant
+                    email_result["merchant_source"] = "inferred"
+                    email_result["merchant_inferred"] = True
 
-            # Flag low confidence
+            stats["parsed_success"] += 1
             if parse_result.confidence_score < 0.7:
                 stats["low_confidence"] += 1
 
-            # Step 2: Normalize merchant
             merchant_normalized, category_id = await normalize_merchant(
                 db, parse_result.merchant_raw or ""
             )
-
-            # Use merchant's default category, or fall back to "Others"
+            if not category_id and inferred_category_id:
+                category_id = inferred_category_id
             if not category_id:
                 category_id = default_category_id
 
             email_result["merchant_normalized"] = merchant_normalized
             email_result["category_id"] = category_id
+            email_result["confidence"] = parse_result.confidence_score
 
-            # Step 3: Create transaction (with dedup)
             txn_date = parse_result.date or date_type.today()
-
             txn_data = TransactionCreate(
                 amount=parse_result.amount,
                 currency=parse_result.currency,
@@ -142,11 +172,10 @@ async def process_raw_emails(
                 email_result["status"] = "stored"
                 email_result["transaction_id"] = txn.id
             except ValueError:
-                # Duplicate
                 stats["duplicates"] += 1
                 email_result["status"] = "duplicate"
 
-            # Mark email as processed
+            await _resolve_parse_failure(db, email.id)
             email.processed_flag = True
             await db.commit()
 
@@ -156,13 +185,7 @@ async def process_raw_emails(
             email_result["error"] = str(e)
             logger.error(f"Pipeline error for email {email.id}: {e}")
 
-            # Store in DLQ
-            dlq = ParseFailure(
-                email_id=email.id,
-                error_message=str(e),
-                parser_version=1,
-            )
-            db.add(dlq)
+            await _record_parse_failure(db, email, str(e), parser_version=1)
             email.processed_flag = True
             await db.commit()
 
@@ -173,5 +196,56 @@ async def process_raw_emails(
         f"{stats['stored']} stored, {stats['duplicates']} dupes, "
         f"{stats['parsed_failed']} failed"
     )
+    return stats
 
+
+async def process_raw_emails(
+    db: AsyncSession,
+    user_id: str,
+    limit: int = 50,
+) -> dict:
+    """
+    Process all unprocessed raw emails for a user.
+    Pipeline: Parse → Normalize → Categorize → Dedup → Store
+    """
+    # Fetch unprocessed emails
+    result = await db.execute(
+        select(RawEmail)
+        .where(RawEmail.user_id == user_id, RawEmail.processed_flag.is_(False))
+        .order_by(RawEmail.received_at.asc())
+        .limit(limit)
+    )
+    emails = list(result.scalars().all())
+    return await _process_email_batch(db, user_id, emails)
+
+
+async def retry_parse_failures(
+    db: AsyncSession,
+    user_id: str,
+    limit: int = 20,
+) -> dict:
+    """Retry unresolved parse failures for a user as a reprocessing batch."""
+    result = await db.execute(
+        select(ParseFailure)
+        .options(selectinload(ParseFailure.email))
+        .join(RawEmail, ParseFailure.email_id == RawEmail.id)
+        .where(
+            ParseFailure.resolved.is_(False),
+            RawEmail.user_id == user_id,
+        )
+        .order_by(ParseFailure.last_retry_at.asc().nullsfirst(), ParseFailure.id.asc())
+        .limit(limit)
+    )
+    failures = list(result.scalars().all())
+
+    for failure in failures:
+        failure.retry_count += 1
+        failure.last_retry_at = datetime.now(timezone.utc)
+        if failure.email:
+            failure.email.processed_flag = False
+    await db.commit()
+
+    emails = [failure.email for failure in failures if failure.email is not None]
+    stats = await _process_email_batch(db, user_id, emails)
+    stats["retried_failures"] = len(failures)
     return stats

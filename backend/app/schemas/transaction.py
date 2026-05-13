@@ -38,6 +38,21 @@ class TransactionUpdate(BaseModel):
     category_id: Optional[str] = None
     transaction_type: Optional[TransactionTypeEnum] = None
     amount: Optional[float] = Field(None, gt=0)
+    reviewed_flag: Optional[bool] = None
+
+
+class BulkTransactionUpdate(BaseModel):
+    """Schema for updating multiple transactions at once."""
+    transaction_ids: list[str] = Field(..., min_length=1)
+    category_id: Optional[str] = None
+    transaction_type: Optional[TransactionTypeEnum] = None
+    reviewed_flag: Optional[bool] = None
+
+
+class BulkTransactionUpdateResponse(BaseModel):
+    requested_count: int
+    updated_count: int
+    failed: list[dict] = []
 
 
 # --- Response Schemas ---
@@ -57,6 +72,8 @@ class TransactionResponse(BaseModel):
     account_last4: Optional[str]
     reference_id: Optional[str]
     confidence_score: float
+    reviewed_flag: bool = False
+    reviewed_at: Optional[datetime] = None
     parser_version: int
     created_at: datetime
 
