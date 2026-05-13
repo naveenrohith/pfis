@@ -8,6 +8,13 @@ const API = 'http://localhost:8000/api';
 let USER_ID = null;
 let SUMMARY = null;
 let CATEGORIES = [];
+let ALL_TRANSACTIONS = [];
+let ACTIVE_JOB_ID = null;
+let LAST_JOB = null;
+const transactionFilters = {
+  type: 'all',
+  search: '',
+};
 
 // Current month/year for navigation
 let currentMonth = new Date().getMonth() + 1;
@@ -19,6 +26,7 @@ let currentYear = new Date().getFullYear();
 
 document.addEventListener('DOMContentLoaded', async () => {
   updateMonthLabel();
+  setSyncStatus('neutral', 'Pipeline ready', 'No sync or retry job has run yet.');
   try {
     await loadUser();
     await loadCategories();
@@ -48,6 +56,7 @@ async function loadCategories() {
 
 async function refreshDashboard() {
   showLoading(true);
+  setDashboardError('');
 
   try {
     // Fetch all data in parallel (Phases 4-6)
@@ -60,13 +69,15 @@ async function refreshDashboard() {
     ]);
 
     SUMMARY = summary;
+  ALL_TRANSACTIONS = txns;
 
     updateStatCards(summary);
+  updateOverviewStrip(summary, txns, emailsResp, budgetTrack);
     renderCategoryChart(summary.category_breakdown);
     renderCategoryList(summary.category_breakdown, summary.total_spend);
     renderTopMerchants(summary.top_merchants);
-    renderTransactionTable(txns);
-    updateEmailCount(emailsResp.total);
+  applyTransactionFilters();
+    updateEmailCount(emailsResp.processed_total ?? emailsResp.total);
 
     // Phase 5: Insights
     renderInsightCards(insightsResp.insights);
@@ -78,11 +89,37 @@ async function refreshDashboard() {
 
     document.getElementById('last-updated').textContent =
       `Updated: ${new Date().toLocaleTimeString()}`;
+
+    if (!ACTIVE_JOB_ID && !LAST_JOB) {
+      const lowConfidenceCount = txns.filter(t => (t.confidence_score || 0) < 0.7).length;
+      const unprocessed = emailsResp.unprocessed_total ?? 0;
+      setSyncStatus(
+        'neutral',
+        'Pipeline ready',
+        `${unprocessed} unprocessed emails • ${lowConfidenceCount} transactions need review`,
+      );
+    }
   } catch (e) {
     console.error('Dashboard refresh failed:', e);
+    setDashboardError(`Dashboard refresh failed: ${e.message}`);
+    showToast('Dashboard refresh failed', 'error');
   } finally {
     showLoading(false);
   }
+}
+
+function updateOverviewStrip(summary, txns, emailsResp, budgets) {
+  const reviewCount = txns.filter(t => (t.confidence_score || 0) < 0.7).length;
+  const unprocessedCount = emailsResp.unprocessed_total ?? 0;
+  const budgetCount = Array.isArray(budgets) ? budgets.length : 0;
+  const savingsRate = summary.total_income > 0
+    ? `${Math.max(Math.round((summary.net / summary.total_income) * 100), -999)}%`
+    : '0%';
+
+  setText('review-count', reviewCount);
+  setText('unprocessed-email-count', unprocessedCount);
+  setText('budget-count', budgetCount);
+  setText('savings-rate', savingsRate);
 }
 
 // ═══════════════════════════════════════════
@@ -161,12 +198,17 @@ function renderCategoryChart(categories) {
   const ctx = document.getElementById('category-chart');
   if (!ctx) return;
 
-  if (categoryChart) categoryChart.destroy();
+  if (categoryChart) {
+    categoryChart.destroy();
+    categoryChart = null;
+  }
 
   if (!categories || categories.length === 0) {
-    ctx.parentElement.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><h3>No spending data</h3></div>';
+    setChartState('category-chart-container', 'category-chart', 'category-chart-empty', false);
     return;
   }
+
+  setChartState('category-chart-container', 'category-chart', 'category-chart-empty', true);
 
   categoryChart = new Chart(ctx, {
     type: 'doughnut',
@@ -288,15 +330,20 @@ function switchTab(tab) {
 // ═══════════════════════════════════════════
 
 function renderTransactionTable(txns) {
+  let options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
   const tbody = document.getElementById('txn-tbody');
   if (!tbody) return;
 
   if (!txns || txns.length === 0) {
+    const emptyTitle = options.isFiltered ? 'No matches for current filters' : 'No transactions yet';
+    const emptyDescription = options.isFiltered
+      ? 'Try a different search or clear the active filters.'
+      : 'Click "Sync & Process" to import demo bank emails';
     tbody.innerHTML = `
       <tr><td colspan="7" class="empty-state">
         <div class="empty-icon">📋</div>
-        <h3>No transactions yet</h3>
-        <p>Click "Sync & Process" to import demo bank emails</p>
+        <h3>${emptyTitle}</h3>
+        <p>${emptyDescription}</p>
       </td></tr>
     `;
     return;
@@ -341,7 +388,7 @@ function renderTransactionTable(txns) {
         </td>
         <td style="color:var(--text-muted);font-size:0.78rem">${t.account_last4 ? '••' + t.account_last4 : '—'}</td>
         <td>
-          <button class="btn-edit" onclick="openEditModal('${t.id}', '${(t.merchant_normalized || '').replace(/'/g, "\\'")}', '${t.category_id || ''}')">✏️ Edit</button>
+          <button class="btn-edit" onclick='openEditModal(${JSON.stringify(t.id)}, ${JSON.stringify(t.merchant_normalized || '')}, ${JSON.stringify(t.category_id || '')}, ${JSON.stringify(type)}, ${JSON.stringify(t.amount)})'>✏️ Edit</button>
         </td>
       </tr>
     `;
@@ -352,9 +399,16 @@ function renderTransactionTable(txns) {
 // Edit Modal & User Corrections
 // ═══════════════════════════════════════════
 
-function openEditModal(txnId, merchantName, categoryId) {
+function openEditModal(txnId, merchantName, categoryId, transactionType, amount) {
+  const modal = document.getElementById('edit-modal');
   document.getElementById('edit-txn-id').value = txnId;
   document.getElementById('edit-merchant').value = merchantName;
+  document.getElementById('edit-amount').value = amount ?? '';
+  document.getElementById('edit-type').value = transactionType || 'debit';
+  modal.dataset.originalMerchant = merchantName || '';
+  modal.dataset.originalCategoryId = categoryId || '';
+  modal.dataset.originalAmount = amount != null ? String(amount) : '';
+  modal.dataset.originalType = transactionType || 'debit';
 
   // Populate category dropdown
   const select = document.getElementById('edit-category');
@@ -364,7 +418,7 @@ function openEditModal(txnId, merchantName, categoryId) {
     select.innerHTML += `<option value="${c.id}" ${selected}>${c.icon || ''} ${c.name}</option>`;
   });
 
-  document.getElementById('edit-modal').style.display = '';
+  modal.style.display = '';
 }
 
 function closeModal() {
@@ -372,18 +426,38 @@ function closeModal() {
 }
 
 async function saveCorrection() {
+  const modal = document.getElementById('edit-modal');
   const txnId = document.getElementById('edit-txn-id').value;
   const merchant = document.getElementById('edit-merchant').value.trim();
   const categoryId = document.getElementById('edit-category').value;
-
-  if (!merchant && !categoryId) {
-    showToast('Please enter a correction', 'error');
-    return;
-  }
+  const amountValue = document.getElementById('edit-amount').value.trim();
+  const transactionType = document.getElementById('edit-type').value;
 
   const body = {};
-  if (merchant) body.merchant_normalized = merchant;
-  if (categoryId) body.category_id = categoryId;
+  if (merchant && merchant !== (modal.dataset.originalMerchant || '')) {
+    body.merchant_normalized = merchant;
+  }
+  if (categoryId && categoryId !== (modal.dataset.originalCategoryId || '')) {
+    body.category_id = categoryId;
+  }
+  if (amountValue) {
+    const amount = Number.parseFloat(amountValue);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast('Please enter a valid amount', 'error');
+      return;
+    }
+    if (String(amount) !== (modal.dataset.originalAmount || '')) {
+      body.amount = amount;
+    }
+  }
+  if (transactionType && transactionType !== (modal.dataset.originalType || 'debit')) {
+    body.transaction_type = transactionType;
+  }
+
+  if (Object.keys(body).length === 0) {
+    showToast('No changes to save', 'info');
+    return;
+  }
 
   try {
     await apiPatch(`/transactions/${txnId}`, body);
@@ -404,7 +478,10 @@ document.addEventListener('click', (e) => {
 
 // Close modal on Escape key
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeModal();
+  if (e.key === 'Escape') {
+    closeModal();
+    closeBudgetModal();
+  }
 });
 
 // ═══════════════════════════════════════════
@@ -412,61 +489,167 @@ document.addEventListener('keydown', (e) => {
 // ═══════════════════════════════════════════
 
 async function syncAndProcess() {
-  const btn = document.getElementById('btn-sync');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Syncing...';
+  const pre = beginSyncLog('Demo sync + pipeline job');
+  try {
+    appendLog(pre, '⏳ Queueing background demo sync pipeline...\n');
+    const job = await apiPost(`/jobs/demo-sync-pipeline?user_id=${USER_ID}&limit=50`);
+    await monitorJob(job, pre, {
+      actionLabel: 'sync pipeline',
+      buttonId: 'btn-sync',
+      idleButtonText: '🔄 Sync & Process',
+      queuedMessage: '✅ Job queued. Waiting for worker loop...\n',
+      runningMessage: '⏳ Background pipeline is running...\n',
+      successToast: (completedJob) => {
+        const stored = completedJob.result?.pipeline?.stored ?? 0;
+        return `${stored} transactions imported`;
+      },
+    });
+  } catch (e) {
+    appendLog(pre, `\n❌ Error: ${e.message}`);
+    setSyncStatus('error', 'Pipeline failed to start', e.message);
+    showToast('Sync failed: ' + e.message, 'error');
+  }
+}
 
+async function retryFailedParses() {
+  const pre = beginSyncLog('Retry parse failures job');
+  try {
+    appendLog(pre, '⏳ Queueing retry for unresolved parse failures...\n');
+    const job = await apiPost(`/jobs/retry-parse-failures?user_id=${USER_ID}&limit=20`);
+    await monitorJob(job, pre, {
+      actionLabel: 'retry parse failures',
+      buttonId: 'btn-retry-failures',
+      idleButtonText: '🛠 Retry Failures',
+      queuedMessage: '✅ Retry job queued. Waiting for execution...\n',
+      runningMessage: '⏳ Retrying unresolved parse failures...\n',
+      successToast: (completedJob) => {
+        const retried = completedJob.result?.retried_failures ?? 0;
+        return retried > 0 ? `Retried ${retried} parse failures` : 'No parse failures were waiting';
+      },
+    });
+  } catch (e) {
+    appendLog(pre, `\n❌ Error: ${e.message}`);
+    setSyncStatus('error', 'Retry failed to start', e.message);
+    showToast('Retry failed: ' + e.message, 'error');
+  }
+}
+
+async function monitorJob(job, pre, options) {
+  ACTIVE_JOB_ID = job.id;
+  LAST_JOB = job;
+  setSyncStatus('warning', 'Job queued', `${options.actionLabel} has been queued.`);
+  appendLog(pre, options.queuedMessage || '✅ Job queued.\n');
+  setActionButtonLoading(options.buttonId, true, 'Working...');
+  toggleSyncButtons(true, options.buttonId);
+
+  let runningLogged = false;
+
+  try {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const snapshot = await apiGet(`/jobs/${job.id}`);
+      LAST_JOB = snapshot;
+
+      if (snapshot.status === 'queued') {
+        await delay(500);
+        continue;
+      }
+
+      if (snapshot.status === 'running') {
+        setSyncStatus('progress', 'Job running', `${options.actionLabel} is in progress.`);
+        if (!runningLogged) {
+          appendLog(pre, options.runningMessage || '⏳ Job is running...\n');
+          runningLogged = true;
+        }
+        await delay(500);
+        continue;
+      }
+
+      if (snapshot.status === 'completed') {
+        appendLog(pre, `✅ ${formatJobCompletion(snapshot)}\n`);
+        appendJobResult(pre, snapshot);
+        const summary = summarizeJob(snapshot);
+        setSyncStatus('online', summary.title, summary.detail);
+        showToast(
+          typeof options.successToast === 'function' ? options.successToast(snapshot) : 'Background job completed',
+          'success',
+        );
+        await refreshDashboard();
+        return;
+      }
+
+      if (snapshot.status === 'failed') {
+        appendLog(pre, `❌ Job failed: ${snapshot.error_message || 'Unknown error'}\n`);
+        setSyncStatus('error', 'Job failed', snapshot.error_message || 'Unknown error');
+        showToast(snapshot.error_message || 'Background job failed', 'error');
+        return;
+      }
+
+      await delay(500);
+    }
+
+    throw new Error('Job polling timed out');
+  } finally {
+    ACTIVE_JOB_ID = null;
+    setActionButtonLoading(options.buttonId, false, options.idleButtonText);
+    toggleSyncButtons(false);
+  }
+}
+
+function beginSyncLog(title) {
   const log = document.getElementById('sync-log');
   log.classList.add('open');
   const pre = log.querySelector('pre');
-  pre.textContent = '';
+  const timeLabel = new Date().toLocaleTimeString();
+  pre.textContent = `── ${title} • ${timeLabel} ──\n`;
+  return pre;
+}
 
-  try {
-    // Step 1: Demo sync
-    appendLog(pre, '⏳ Fetching emails from Gmail (demo mode)...\n');
-    const syncResult = await apiPost(`/gmail/demo-sync?user_id=${USER_ID}`);
-    const ss = syncResult.stats;
-    appendLog(pre, `✅ Fetched ${ss.emails_fetched} emails\n`);
-    appendLog(pre, `   📧 Stored: ${ss.emails_stored}\n`);
-    appendLog(pre, `   🚫 OTP skipped: ${ss.emails_skipped_otp}\n`);
-    appendLog(pre, `   🚫 Promo skipped: ${ss.emails_skipped_promo}\n`);
-    appendLog(pre, `   ♻️ Duplicates: ${ss.emails_skipped_duplicate}\n\n`);
+function appendJobResult(pre, job) {
+  const result = job.result || {};
 
-    // Step 2: Process pipeline
-    btn.innerHTML = '<span class="spinner"></span> Processing...';
-    appendLog(pre, '⏳ Running parsing pipeline...\n');
-    const pipeResult = await apiPost(`/pipeline/process?user_id=${USER_ID}`);
-    const ps = pipeResult.stats;
-    appendLog(pre, `✅ Pipeline complete\n`);
-    appendLog(pre, `   📊 Parsed: ${ps.parsed_success}/${ps.total_unprocessed}\n`);
-    appendLog(pre, `   💾 Stored: ${ps.stored}\n`);
-    appendLog(pre, `   ♻️ Duplicates: ${ps.duplicates}\n`);
-    appendLog(pre, `   ❌ Failed: ${ps.parsed_failed}\n\n`);
-
-    // Show parsed details
-    if (ps.results && ps.results.length > 0) {
-      appendLog(pre, '─── Transaction Details ───\n');
-      ps.results.forEach(r => {
-        const icon = r.status === 'stored' ? '✅' : r.status === 'duplicate' ? '♻️' : '❌';
-        const amt = r.amount ? `₹${r.amount.toLocaleString('en-IN')}` : '—';
-        const merch = r.merchant_normalized || r.merchant_raw || 'Unknown';
-        appendLog(pre, `${icon} ${merch.padEnd(18)} ${amt.padStart(10)}  [${(r.type || '?').padEnd(7)}] ${r.bank || ''}\n`);
-      });
-    }
-
-    appendLog(pre, '\n🎉 Sync & process complete!');
-    showToast(`${ps.stored} transactions imported`, 'success');
-
-    // Refresh dashboard
-    await refreshDashboard();
-
-  } catch (e) {
-    appendLog(pre, `\n❌ Error: ${e.message}`);
-    showToast('Sync failed: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '🔄 Sync & Process';
+  if (job.job_type === 'demo_sync_pipeline' || job.job_type === 'gmail_sync_pipeline') {
+    const syncStats = result.sync || {};
+    const pipelineStats = result.pipeline || {};
+    appendLog(pre, `   📧 Stored emails: ${syncStats.emails_stored ?? 0}\n`);
+    appendLog(pre, `   💾 Transactions stored: ${pipelineStats.stored ?? 0}\n`);
+    appendLog(pre, `   ♻️ Duplicates: ${pipelineStats.duplicates ?? 0}\n`);
+    appendLog(pre, `   ⚠️ Review items: ${pipelineStats.low_confidence ?? 0}\n`);
+    appendLog(pre, `   ❌ Parse failures: ${pipelineStats.parsed_failed ?? 0}\n`);
+    return;
   }
+
+  if (job.job_type === 'retry_parse_failures') {
+    appendLog(pre, `   🔁 Retried failures: ${result.retried_failures ?? 0}\n`);
+    appendLog(pre, `   💾 Transactions stored: ${result.stored ?? 0}\n`);
+    appendLog(pre, `   ❌ Remaining failures this run: ${result.parsed_failed ?? 0}\n`);
+  }
+}
+
+function summarizeJob(job) {
+  const result = job.result || {};
+  if (job.job_type === 'retry_parse_failures') {
+    const retried = result.retried_failures ?? 0;
+    const stored = result.stored ?? 0;
+    return {
+      title: retried > 0 ? `Retried ${retried} parse failures` : 'Retry completed',
+      detail: stored > 0
+        ? `${stored} transactions were recovered in the retry pass.`
+        : 'No new transactions were created during the retry pass.',
+    };
+  }
+
+  const syncStats = result.sync || {};
+  const pipelineStats = result.pipeline || {};
+  return {
+    title: `Imported ${pipelineStats.stored ?? 0} transactions`,
+    detail: `${syncStats.emails_stored ?? 0} emails stored • ${pipelineStats.low_confidence ?? 0} need review • ${pipelineStats.parsed_failed ?? 0} failed`,
+  };
+}
+
+function formatJobCompletion(job) {
+  const label = job.job_type === 'retry_parse_failures' ? 'Retry job completed' : 'Pipeline job completed';
+  const finishedAt = job.finished_at ? new Date(job.finished_at).toLocaleTimeString() : 'just now';
+  return `${label} at ${finishedAt}`;
 }
 
 function appendLog(el, text) {
@@ -479,34 +662,47 @@ function appendLog(el, text) {
 // ═══════════════════════════════════════════
 
 async function apiGet(path) {
-  const res = await fetch(`${API}${path}`);
-  if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
-  return res.json();
+  return apiRequest(path, { method: 'GET' });
 }
 
 async function apiPost(path, body = null) {
-  const res = await fetch(`${API}${path}`, {
+  return apiRequest(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : '{}',
   });
-  if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`);
-  return res.json();
 }
 
 async function apiPatch(path, body) {
-  const res = await fetch(`${API}${path}`, {
+  return apiRequest(path, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`PATCH ${path} failed: ${res.status}`);
-  return res.json();
 }
 
 async function apiDelete(path) {
-  const res = await fetch(`${API}${path}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
+  return apiRequest(path, { method: 'DELETE' });
+}
+
+async function apiRequest(path, options) {
+  const res = await fetch(`${API}${path}`, options);
+
+  if (!res.ok) {
+    let message = `${options.method || 'GET'} ${path} failed: ${res.status}`;
+    try {
+      const payload = await res.json();
+      if (payload?.detail) {
+        message = typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail);
+      }
+    } catch {
+      const text = await res.text();
+      if (text) message = text;
+    }
+    throw new Error(message);
+  }
+
+  if (res.status === 204) return null;
   return res.json();
 }
 
@@ -550,12 +746,17 @@ function renderTrendChart(dailyTrend) {
   const ctx = document.getElementById('trend-chart');
   if (!ctx) return;
 
-  if (trendChart) trendChart.destroy();
+  if (trendChart) {
+    trendChart.destroy();
+    trendChart = null;
+  }
 
   if (!dailyTrend || dailyTrend.length === 0) {
-    ctx.parentElement.innerHTML = '<div class="empty-state"><div class="empty-icon">📈</div><h3>No trend data</h3></div>';
+    setChartState('trend-chart-container', 'trend-chart', 'trend-chart-empty', false);
     return;
   }
+
+  setChartState('trend-chart-container', 'trend-chart', 'trend-chart-empty', true);
 
   const labels = dailyTrend.map(d => d.date);
   const amounts = dailyTrend.map(d => d.total);
@@ -835,7 +1036,179 @@ document.addEventListener('click', (e) => {
 });
 
 function showLoading(show) {
-  // Future: add skeleton loading
+  document.body.classList.toggle('dashboard-loading', show);
+  ['btn-refresh', 'btn-export', 'btn-report'].forEach((id) => {
+    const element = document.getElementById(id);
+    if (element) element.disabled = show;
+  });
+}
+
+function setDashboardError(message) {
+  const banner = document.getElementById('dashboard-error');
+  if (!banner) return;
+
+  if (!message) {
+    banner.hidden = true;
+    banner.textContent = '';
+    return;
+  }
+
+  banner.hidden = false;
+  banner.textContent = message;
+}
+
+function setSyncStatus(state, headline, detail) {
+  const badge = document.getElementById('sync-job-status');
+  const summary = document.getElementById('sync-job-summary');
+  const meta = document.getElementById('sync-job-meta');
+  const live = document.getElementById('sync-live-region');
+  const labelMap = {
+    neutral: 'Ready',
+    progress: 'Running',
+    warning: 'Queued',
+    online: 'Complete',
+    error: 'Error',
+  };
+
+  if (badge) {
+    badge.className = `status-badge ${state}`;
+    badge.innerHTML = `<span class="dot"></span> ${labelMap[state] || 'Ready'}`;
+  }
+  if (summary) summary.textContent = headline;
+  if (meta) meta.textContent = detail;
+  if (live) live.textContent = `${labelMap[state] || 'Ready'}. ${headline}. ${detail}`;
+}
+
+function setChartState(containerId, canvasId, emptyId, hasData) {
+  const container = document.getElementById(containerId);
+  const canvas = document.getElementById(canvasId);
+  const empty = document.getElementById(emptyId);
+  if (!container || !canvas || !empty) return;
+
+  container.classList.toggle('is-empty', !hasData);
+  canvas.hidden = !hasData;
+  empty.hidden = hasData;
+}
+
+function applyTransactionFilters() {
+  const filtered = ALL_TRANSACTIONS.filter(matchesTransactionFilters);
+  const hasActiveFilters = transactionFilters.type !== 'all' || transactionFilters.search.length > 0;
+
+  if (filtered.length === 0) {
+    renderTransactionTable([], { isFiltered: hasActiveFilters && ALL_TRANSACTIONS.length > 0 });
+  } else {
+    renderTransactionTable(filtered);
+  }
+
+  updateTransactionFilterUi(filtered.length, ALL_TRANSACTIONS.length);
+}
+
+function matchesTransactionFilters(txn) {
+  const type = (txn.transaction_type || 'debit').toLowerCase();
+  if (transactionFilters.type === 'review' && (txn.confidence_score || 0) >= 0.7) {
+    return false;
+  }
+  if (['debit', 'credit', 'refund'].includes(transactionFilters.type) && type !== transactionFilters.type) {
+    return false;
+  }
+
+  if (!transactionFilters.search) {
+    return true;
+  }
+
+  const haystack = [
+    txn.merchant_normalized,
+    txn.merchant_raw,
+    txn.account_last4,
+    txn.reference_id,
+    txn.transaction_date,
+    txn.transaction_type,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes(transactionFilters.search);
+}
+
+function setTransactionFilter(filter) {
+  transactionFilters.type = filter;
+  applyTransactionFilters();
+}
+
+function handleTransactionSearch(event) {
+  transactionFilters.search = event.target.value.trim().toLowerCase();
+  applyTransactionFilters();
+}
+
+function clearTransactionFilters() {
+  transactionFilters.type = 'all';
+  transactionFilters.search = '';
+  const input = document.getElementById('txn-search');
+  if (input) input.value = '';
+  applyTransactionFilters();
+}
+
+function updateTransactionFilterUi(filteredCount, totalCount) {
+  document.querySelectorAll('.filter-chip').forEach((chip) => {
+    chip.classList.toggle('active', chip.dataset.filter === transactionFilters.type);
+  });
+
+  const clearButton = document.getElementById('btn-clear-filters');
+  if (clearButton) {
+    clearButton.disabled = transactionFilters.type === 'all' && transactionFilters.search.length === 0;
+  }
+
+  setText('txn-results-summary', `Showing ${filteredCount} of ${totalCount} transactions`);
+  setText('txn-filter-summary', describeActiveTransactionFilters(filteredCount));
+}
+
+function describeActiveTransactionFilters(filteredCount) {
+  const filters = [];
+  if (transactionFilters.type === 'review') filters.push('needs review');
+  if (['debit', 'credit', 'refund'].includes(transactionFilters.type)) filters.push(transactionFilters.type);
+  if (transactionFilters.search) filters.push(`search: “${transactionFilters.search}”`);
+
+  if (filters.length === 0) {
+    return 'All activity for this month';
+  }
+
+  return `${filteredCount} match${filteredCount === 1 ? '' : 'es'} • ${filters.join(' • ')}`;
+}
+
+function toggleSyncButtons(disabled, activeButtonId = null) {
+  ['btn-sync', 'btn-retry-failures'].forEach((id) => {
+    const button = document.getElementById(id);
+    if (!button) return;
+    button.disabled = disabled;
+    if (!disabled && id !== activeButtonId && id === 'btn-sync') {
+      button.innerHTML = '🔄 Sync & Process';
+    }
+    if (!disabled && id !== activeButtonId && id === 'btn-retry-failures') {
+      button.innerHTML = '🛠 Retry Failures';
+    }
+  });
+}
+
+function setActionButtonLoading(buttonId, isLoading, idleText) {
+  const button = document.getElementById(buttonId);
+  if (!button) return;
+  if (isLoading) {
+    button.innerHTML = '<span class="spinner"></span> Working...';
+    button.disabled = true;
+    return;
+  }
+
+  button.innerHTML = idleText;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function setText(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = value;
 }
 
 // ═══════════════════════════════════════════
