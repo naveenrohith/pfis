@@ -3,317 +3,476 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="PFIS — Personal Finance Intelligence System Dashboard. Automated financial insights from your transaction emails." />
-  <title>PFIS — Finance Dashboard</title>
-
-  <!-- Google Fonts -->
+  <meta name="description" content="PFIS — a professional personal finance operations dashboard with secure auth, review workflows, and rich monthly analytics." />
+  <title>PFIS — Financial Operations Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-
-  <!-- Styles -->
-  <link rel="stylesheet" href="/static/css/dashboard.css?v=6" />
-
-  <!-- Favicon (emoji-based data URI) -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.86em' font-size='88'>💠</text></svg>" />
+  <link rel="stylesheet" href="/static/css/dashboard-revamp.css?v=1" />
 </head>
 <body>
+  <div class="app-backdrop" aria-hidden="true"></div>
+  <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+  <div id="live-region" class="sr-only" aria-live="polite"></div>
 
-  <!-- Toast notifications -->
-  <div id="toast-container" class="toast-container"></div>
+  <div id="auth-shell" class="auth-shell">
+    <div class="auth-card">
+      <section class="auth-spotlight">
+        <span class="eyebrow">PFIS • Financial operating system</span>
+        <h1>Professional finance intelligence with secure auth and high-confidence review workflows.</h1>
+        <p>
+          Manage monthly performance, review low-confidence parses fast, and keep your dashboard feeling more Bloomberg Terminal than brave spreadsheet.
+        </p>
+        <div class="spotlight-grid">
+          <article>
+            <strong>Secure session</strong>
+            <span>JWT-backed login, expiry awareness, and user state in one polished shell.</span>
+          </article>
+          <article>
+            <strong>Review workspace</strong>
+            <span>Dedicated queue, side-panel correction flow, and bulk review shortcuts.</span>
+          </article>
+          <article>
+            <strong>Executive dashboard</strong>
+            <span>Drill-down charts, rich budget visuals, sticky command bar, and faster decision loops.</span>
+          </article>
+        </div>
+      </section>
 
-  <div class="dashboard">
+      <section class="auth-panel">
+        <div class="auth-panel-header">
+          <div>
+            <span class="eyebrow">Get started</span>
+            <h2>Open your workspace</h2>
+          </div>
+          <div class="auth-tabs" role="tablist" aria-label="Authentication tabs">
+            <button type="button" class="auth-tab active" data-auth-tab="login">Sign in</button>
+            <button type="button" class="auth-tab" data-auth-tab="register">Create account</button>
+          </div>
+        </div>
 
-    <!-- ═══ Header ═══ -->
-    <header class="header" id="header">
-      <div class="header-left">
-        <div class="logo">₹</div>
-        <div class="header-title">
-          <h1>Finance Intelligence</h1>
-          <p>
-            <span id="user-name">Loading...</span>
-            <span style="color: var(--text-dim); margin: 0 6px;">•</span>
-            <span id="user-email" style="color: var(--text-muted);"></span>
-          </p>
+        <div id="auth-error" class="inline-banner error" hidden></div>
+
+        <form id="login-form" class="auth-form">
+          <label>
+            <span>Email</span>
+            <input type="email" id="login-email" autocomplete="email" placeholder="you@example.com" required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input type="password" id="login-password" autocomplete="current-password" placeholder="••••••••" required />
+          </label>
+          <button type="submit" id="btn-login" class="btn btn-primary btn-block">Sign in securely</button>
+        </form>
+
+        <form id="register-form" class="auth-form" hidden>
+          <label>
+            <span>Name</span>
+            <input type="text" id="register-name" autocomplete="name" placeholder="A. Finance Lead" required />
+          </label>
+          <label>
+            <span>Email</span>
+            <input type="email" id="register-email" autocomplete="email" placeholder="you@example.com" required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input type="password" id="register-password" autocomplete="new-password" placeholder="Minimum 8 characters" minlength="8" required />
+          </label>
+          <label>
+            <span>Currency</span>
+            <input type="text" id="register-currency" value="INR" maxlength="3" required />
+          </label>
+          <button type="submit" id="btn-register" class="btn btn-primary btn-block">Create secure workspace</button>
+        </form>
+
+        <div class="auth-divider"><span>or</span></div>
+
+        <button type="button" id="btn-demo-session" class="btn btn-secondary btn-block">Try demo workspace</button>
+        <p class="auth-footnote">
+          Demo mode uses the seeded workspace if your backend allows guest access. Secure sign-in is recommended for the full auth-aware experience.
+        </p>
+      </section>
+    </div>
+  </div>
+
+  <div id="app-shell" class="app-shell" hidden>
+    <header class="app-header">
+      <div class="brand-lockup">
+        <div class="brand-mark">₹</div>
+        <div>
+          <span class="eyebrow">PFIS dashboard</span>
+          <h1>Financial Operations Console</h1>
         </div>
       </div>
-      <div class="header-actions">
-        <!-- Month Selector -->
-        <div class="month-nav" style="display:flex; align-items:center; gap: 6px;">
-          <button class="btn btn-secondary btn-sm" id="btn-prev-month" onclick="changeMonth(-1)" title="Previous month">◀</button>
-          <span id="month-label" style="min-width:110px; text-align:center; font-size:0.85rem; font-weight:600; color:var(--text-secondary);"></span>
-          <button class="btn btn-secondary btn-sm" id="btn-next-month" onclick="changeMonth(1)" title="Next month">▶</button>
+
+      <nav class="section-nav" aria-label="Dashboard sections">
+        <button type="button" class="section-link active" data-scroll-target="overview">Overview</button>
+        <button type="button" class="section-link" data-scroll-target="review">Review queue</button>
+        <button type="button" class="section-link" data-scroll-target="budgets">Budgets</button>
+        <button type="button" class="section-link" data-scroll-target="transactions">Explorer</button>
+      </nav>
+
+      <div class="session-panel">
+        <span id="session-chip" class="session-chip">Secure session</span>
+        <div class="session-user-card">
+          <div id="user-avatar" class="user-avatar">PF</div>
+          <div>
+            <div id="header-user-name" class="session-user-name">Loading...</div>
+            <div id="header-user-meta" class="session-user-meta">Preparing workspace…</div>
+          </div>
         </div>
-        <span class="status-badge online"><span class="dot"></span> Live</span>
-        <span id="last-updated" style="font-size:0.78rem; color:var(--text-dim); align-self:center;"></span>
+        <button type="button" id="btn-logout" class="btn btn-ghost">Sign out</button>
       </div>
     </header>
 
-    <!-- ═══ Stat Cards ═══ -->
-    <div class="stats-grid" id="stats-grid">
-      <div class="stat-card spend">
-        <div class="stat-label">Total Spend</div>
-        <div class="stat-value" id="stat-spend" data-value="0">₹0</div>
-        <div class="stat-sub">This month's debits</div>
-      </div>
-      <div class="stat-card income">
-        <div class="stat-label">Total Income</div>
-        <div class="stat-value" id="stat-income" data-value="0">₹0</div>
-        <div class="stat-sub">This month's credits</div>
-      </div>
-      <div class="stat-card net" id="stat-net-card">
-        <div class="stat-label">Net Balance</div>
-        <div class="stat-value" id="stat-net" data-value="0">₹0</div>
-        <div class="stat-sub">Income − Spend</div>
-      </div>
-      <div class="stat-card count">
-        <div class="stat-label">Transactions</div>
-        <div class="stat-value" id="stat-count">0</div>
-        <div class="stat-sub">
-          <span id="email-count" style="font-weight:600;">0</span> emails processed
+    <div id="global-banner" class="global-banner" hidden></div>
+
+    <section id="action-bar" class="action-bar">
+      <div class="month-switcher">
+        <button type="button" id="btn-prev-month" class="btn btn-ghost icon-only" aria-label="Previous month">←</button>
+        <div class="month-panel">
+          <span class="eyebrow">Reporting month</span>
+          <strong id="month-label">—</strong>
         </div>
+        <button type="button" id="btn-next-month" class="btn btn-ghost icon-only" aria-label="Next month">→</button>
+        <button type="button" id="btn-current-month" class="btn btn-secondary">Today</button>
       </div>
-    </div>
 
-    <!-- ═══ Sync Panel ═══ -->
-    <div class="sync-panel" id="sync-panel">
-      <div class="sync-info">
-        <span style="font-size: 1.3rem;">📧</span>
-        <div>
-          <div style="font-weight: 600; font-size: 0.9rem;">Email Pipeline</div>
-          <div style="font-size: 0.78rem; color: var(--text-muted);">Import demo bank emails and process through the parsing pipeline</div>
-        </div>
+      <div class="action-meta-row">
+        <span id="month-pill" class="meta-pill">Month ready</span>
+        <span id="filter-pill" class="meta-pill">All transactions</span>
+        <span id="session-expiry-pill" class="meta-pill">Session status loading…</span>
+        <span id="sync-pill" class="meta-pill accent">Pipeline idle</span>
       </div>
-      <div class="sync-actions">
-        <button class="btn btn-primary" id="btn-sync" onclick="syncAndProcess()">
-          🔄 Sync & Process
-        </button>
-        <button class="btn btn-secondary btn-sm" onclick="refreshDashboard()">
-          ↻ Refresh
-        </button>
-        <button class="btn btn-secondary btn-sm" onclick="exportCSV()" title="Download CSV">
-          📄 CSV
-        </button>
-        <button class="btn btn-secondary btn-sm" onclick="openReport()" title="Monthly Report">
-          📋 Report
-        </button>
+
+      <div class="action-buttons">
+        <button type="button" id="btn-sync" class="btn btn-primary">Sync &amp; Process</button>
+        <button type="button" id="btn-retry" class="btn btn-secondary">Retry failures</button>
+        <button type="button" id="btn-refresh" class="btn btn-secondary">Refresh</button>
+        <button type="button" id="btn-export" class="btn btn-secondary">Export CSV</button>
+        <button type="button" id="btn-report" class="btn btn-secondary">Monthly report</button>
+        <button type="button" id="btn-budget-modal" class="btn btn-secondary">Set budget</button>
       </div>
-    </div>
+    </section>
 
-    <!-- Sync Log (expandable) -->
-    <div class="sync-log" id="sync-log">
-      <pre></pre>
-    </div>
+    <main class="dashboard-layout">
+      <section id="overview" class="hero-grid">
+        <article class="surface-card hero-card">
+          <div class="hero-copy">
+            <span class="eyebrow">Operational snapshot</span>
+            <h2 id="hero-title">Your monthly finance operating picture.</h2>
+            <p id="hero-summary-text">Loading your income, spend, review queue, and budget posture…</p>
+          </div>
+          <div id="hero-focus-pills" class="hero-focus-pills"></div>
+          <div id="hero-metrics" class="hero-metrics"></div>
+        </article>
 
-    <!-- ═══ Charts Grid ═══ -->
-    <div class="main-grid" id="charts-grid">
+        <aside class="surface-card command-card">
+          <div class="surface-header">
+            <div>
+              <span class="eyebrow">Command center</span>
+              <h3>Email pipeline &amp; auth</h3>
+            </div>
+            <span id="command-status" class="status-badge neutral">Ready</span>
+          </div>
 
-      <!-- Category Chart -->
-      <div class="card">
-        <div class="card-header">
-          <h2>Category Breakdown</h2>
-          <div class="card-icon" style="background: var(--accent-purple-bg); color: var(--accent-purple);">📊</div>
-        </div>
-        <div class="card-body">
-          <div class="chart-container">
+          <div id="command-summary" class="command-summary">Waiting for your first sync of the session.</div>
+
+          <div class="command-grid">
+            <article>
+              <span>Processed emails</span>
+              <strong id="processed-emails-value">0</strong>
+            </article>
+            <article>
+              <span>Unprocessed emails</span>
+              <strong id="unprocessed-emails-value">0</strong>
+            </article>
+            <article>
+              <span>Pending review</span>
+              <strong id="pending-review-value">0</strong>
+            </article>
+            <article>
+              <span>Active mode</span>
+              <strong id="active-mode-value">Secure</strong>
+            </article>
+          </div>
+
+          <div class="surface-subsection">
+            <div class="subsection-header">
+              <h4>Activity log</h4>
+              <button type="button" id="btn-clear-log" class="text-link">Clear</button>
+            </div>
+            <pre id="sync-log" class="activity-log">No background activity yet.</pre>
+          </div>
+        </aside>
+      </section>
+
+      <section id="metrics-grid" class="metrics-grid"></section>
+
+      <section class="section-grid analytics-grid">
+        <article class="surface-card chart-card">
+          <div class="surface-header">
+            <div>
+              <span class="eyebrow">Drill-down analytics</span>
+              <h3>Category distribution</h3>
+            </div>
+            <button type="button" id="btn-clear-category-drilldown" class="text-link" hidden>Clear drill-down</button>
+          </div>
+          <div class="chart-shell">
             <canvas id="category-chart"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Category List + Top Merchants -->
-      <div class="card">
-        <div class="card-header">
-          <h2>Spending Details</h2>
-          <div class="card-icon" style="background: var(--accent-blue-bg); color: var(--accent-blue);">📋</div>
-        </div>
-        <div class="card-body">
-          <!-- Tab switcher -->
-          <div class="tab-bar" style="display:flex; gap:0; margin-bottom:16px; border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden;">
-            <button class="tab-btn active" id="tab-categories" onclick="switchTab('categories')"
-              style="flex:1; padding:8px 12px; border:none; background:var(--bg-card-hover); color:var(--text-primary); font-family:inherit; font-size:0.8rem; font-weight:600; cursor:pointer; transition:var(--transition);">
-              Categories
-            </button>
-            <button class="tab-btn" id="tab-merchants" onclick="switchTab('merchants')"
-              style="flex:1; padding:8px 12px; border:none; background:transparent; color:var(--text-muted); font-family:inherit; font-size:0.8rem; font-weight:600; cursor:pointer; transition:var(--transition);">
-              Top Merchants
-            </button>
-          </div>
-
-          <!-- Category list -->
-          <ul class="category-list" id="category-list">
-            <li class="empty-state"><p>No categories yet</p></li>
-          </ul>
-
-          <!-- Merchant list (hidden initially) -->
-          <ul class="merchant-rank-list" id="merchant-list" style="display:none;">
-            <li class="empty-state"><p>No merchants yet</p></li>
-          </ul>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══ Insights Cards ═══ -->
-    <div class="insights-section" id="insights-section">
-      <div class="card">
-        <div class="card-header">
-          <h2>🧠 Smart Insights</h2>
-          <div class="card-icon" style="background: var(--accent-amber-bg); color: var(--accent-amber);">💡</div>
-        </div>
-        <div class="card-body">
-          <div class="insights-grid" id="insights-grid">
-            <div class="empty-state">
-              <div class="empty-icon">💡</div>
-              <h3>No insights yet</h3>
-              <p>Sync some transactions to generate financial insights</p>
+            <div id="category-chart-empty" class="empty-panel" hidden>
+              <span class="empty-icon">📊</span>
+              <h4>No category data yet</h4>
+              <p>Run a sync or switch to a month with debit activity to unlock drill-down analytics.</p>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
+          <div id="category-legend" class="legend-grid"></div>
+        </article>
 
-    <!-- ═══ Spending Trend + Recurring ═══ -->
-    <div class="main-grid" id="trend-grid">
+        <article class="surface-card insights-card">
+          <div class="surface-header">
+            <div>
+              <span class="eyebrow">Decision support</span>
+              <h3>Insights, merchants, and recurring spend</h3>
+            </div>
+          </div>
 
-      <!-- Daily Spending Trend -->
-      <div class="card">
-        <div class="card-header">
-          <h2>Daily Spending Trend</h2>
-          <div class="card-icon" style="background: var(--accent-cyan); background: rgba(6, 182, 212, 0.12); color: var(--accent-cyan);">📈</div>
-        </div>
-        <div class="card-body">
-          <div class="chart-container">
+          <div class="insight-columns">
+            <div>
+              <div class="subsection-header compact"><h4>Smart insights</h4></div>
+              <div id="insight-feed" class="insight-feed"></div>
+            </div>
+
+            <div class="secondary-stack">
+              <div>
+                <div class="subsection-header compact"><h4>Top merchants</h4></div>
+                <div id="merchant-stack" class="stack-list"></div>
+              </div>
+              <div>
+                <div class="subsection-header compact"><h4>Recurring charges</h4></div>
+                <div id="recurring-stack" class="stack-list"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="section-grid trend-budget-grid">
+        <article id="budgets" class="surface-card budget-board-card">
+          <div class="surface-header">
+            <div>
+              <span class="eyebrow">Budget posture</span>
+              <h3>Monthly budget board</h3>
+            </div>
+            <button type="button" id="btn-new-budget" class="text-link">Create / update</button>
+          </div>
+          <div id="budget-board" class="budget-board"></div>
+        </article>
+
+        <article class="surface-card trend-card">
+          <div class="surface-header">
+            <div>
+              <span class="eyebrow">Run-rate analysis</span>
+              <h3>Daily spending trend</h3>
+            </div>
+          </div>
+          <div class="chart-shell trend-shell">
             <canvas id="trend-chart"></canvas>
+            <div id="trend-chart-empty" class="empty-panel" hidden>
+              <span class="empty-icon">📈</span>
+              <h4>No trend data yet</h4>
+              <p>Once there is debit activity for the selected month, this curve will show your daily spend tempo.</p>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="review" class="review-grid">
+        <article class="surface-card review-queue-card">
+          <div class="surface-header">
+            <div>
+              <span class="eyebrow">Dedicated review workspace</span>
+              <h3>Low-confidence queue</h3>
+            </div>
+            <span id="review-queue-count" class="status-badge neutral">0 pending</span>
+          </div>
+
+          <div class="review-toolbar">
+            <div class="segmented-control" role="tablist" aria-label="Review queue tabs">
+              <button type="button" class="segment active" data-review-filter="pending">Pending</button>
+              <button type="button" class="segment" data-review-filter="all">All candidates</button>
+            </div>
+            <label class="search-shell review-search">
+              <span>🔎</span>
+              <input type="search" id="review-search" placeholder="Search merchant, account, or reference" />
+            </label>
+          </div>
+
+          <div class="bulk-toolbar">
+            <div class="bulk-toolbar-head">
+              <strong id="bulk-selection-count">0 selected</strong>
+              <div class="bulk-toolbar-actions">
+                <button type="button" id="btn-select-pending" class="btn btn-ghost">Select visible</button>
+                <button type="button" id="btn-clear-selection" class="btn btn-ghost">Clear</button>
+              </div>
+            </div>
+            <div class="bulk-controls">
+              <select id="bulk-category-select">
+                <option value="">Apply category…</option>
+              </select>
+              <select id="bulk-type-select">
+                <option value="">Apply type…</option>
+                <option value="debit">Debit</option>
+                <option value="credit">Credit</option>
+                <option value="refund">Refund</option>
+              </select>
+              <button type="button" id="btn-apply-bulk" class="btn btn-secondary">Apply to selected</button>
+              <button type="button" id="btn-mark-selected-reviewed" class="btn btn-primary ghost-accent">Mark reviewed</button>
+            </div>
+          </div>
+
+          <div id="review-list" class="review-list"></div>
+        </article>
+
+        <aside class="surface-card review-detail-card">
+          <div class="surface-header">
+            <div>
+              <span class="eyebrow">Rapid correction panel</span>
+              <h3>Review detail</h3>
+            </div>
+            <button type="button" id="btn-focus-next-review" class="text-link">Next pending</button>
+          </div>
+
+          <div id="review-empty-state" class="empty-panel detail-empty">
+            <span class="empty-icon">🧠</span>
+            <h4>Nothing selected yet</h4>
+            <p>Choose a transaction from the review queue to inspect confidence, fix fields, and move through the queue quickly.</p>
+          </div>
+
+          <form id="review-form" class="review-form" hidden>
+            <div class="review-meta-grid">
+              <div class="meta-chip"><span>Confidence</span><strong id="review-confidence">—</strong></div>
+              <div class="meta-chip"><span>Date</span><strong id="review-date">—</strong></div>
+              <div class="meta-chip"><span>Account</span><strong id="review-account">—</strong></div>
+              <div class="meta-chip"><span>Reference</span><strong id="review-reference">—</strong></div>
+            </div>
+
+            <div class="inline-banner info" id="review-guidance">Correct the fields below, or simply mark the item reviewed if it is already accurate enough.</div>
+
+            <label>
+              <span>Merchant</span>
+              <input type="text" id="review-merchant" placeholder="Merchant name" />
+            </label>
+            <label>
+              <span>Category</span>
+              <select id="review-category"></select>
+            </label>
+            <div class="form-row two-up">
+              <label>
+                <span>Amount (₹)</span>
+                <input type="number" id="review-amount" min="0.01" step="0.01" />
+              </label>
+              <label>
+                <span>Type</span>
+                <select id="review-type">
+                  <option value="debit">Debit</option>
+                  <option value="credit">Credit</option>
+                  <option value="refund">Refund</option>
+                </select>
+              </label>
+            </div>
+
+            <div>
+              <div class="subsection-header compact"><h4>Quick category shortcuts</h4></div>
+              <div id="review-category-shortcuts" class="shortcut-grid"></div>
+            </div>
+
+            <div class="review-actions">
+              <button type="button" id="btn-save-review" class="btn btn-primary">Save review</button>
+              <button type="button" id="btn-save-next" class="btn btn-secondary">Save &amp; next</button>
+              <button type="button" id="btn-mark-reviewed" class="btn btn-ghost">Mark reviewed</button>
+            </div>
+          </form>
+        </aside>
+      </section>
+
+      <section id="transactions" class="surface-card explorer-card">
+        <div class="surface-header explorer-header">
+          <div>
+            <span class="eyebrow">Explorer</span>
+            <h3>Transactions</h3>
+          </div>
+          <div class="explorer-status">
+            <span id="explorer-count" class="status-badge neutral">0 shown</span>
+            <button type="button" id="btn-clear-explorer-filters" class="text-link" hidden>Clear filters</button>
           </div>
         </div>
-      </div>
 
-      <!-- Recurring Payments -->
-      <div class="card">
-        <div class="card-header">
-          <h2>Recurring Payments</h2>
-          <div class="card-icon" style="background: rgba(236, 72, 153, 0.12); color: #ec4899;">🔁</div>
-        </div>
-        <div class="card-body">
-          <ul class="recurring-list" id="recurring-list">
-            <li class="empty-state"><p>No recurring payments detected</p></li>
-          </ul>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══ Budget Tracker ═══ -->
-    <div class="budget-section card" id="budget-section">
-      <div class="card-header">
-        <h2>💰 Budget Tracker</h2>
-        <button class="btn btn-secondary btn-sm" onclick="openBudgetModal()" style="margin-left:auto;">+ Set Budget</button>
-      </div>
-      <div class="card-body">
-        <div class="budget-grid" id="budget-grid">
-          <div class="empty-state">
-            <div class="empty-icon">💰</div>
-            <h3>No budgets set</h3>
-            <p>Click "Set Budget" to create monthly spending limits per category</p>
+        <div class="explorer-toolbar">
+          <label class="search-shell explorer-search">
+            <span>🔎</span>
+            <input type="search" id="explorer-search" placeholder="Search merchant, raw source, account, or reference" />
+          </label>
+          <div class="segmented-control" role="tablist" aria-label="Transaction type filters">
+            <button type="button" class="segment active" data-explorer-filter="all">All</button>
+            <button type="button" class="segment" data-explorer-filter="review">Needs review</button>
+            <button type="button" class="segment" data-explorer-filter="debit">Debits</button>
+            <button type="button" class="segment" data-explorer-filter="credit">Credits</button>
+            <button type="button" class="segment" data-explorer-filter="refund">Refunds</button>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- ═══ Transaction Table ═══ -->
-    <div class="txn-section card" id="txn-section">
-      <div class="card-header">
-        <h2>Recent Transactions</h2>
-        <div class="card-icon" style="background: var(--accent-green-bg); color: var(--accent-green);">💳</div>
-      </div>
-      <div class="card-body">
-        <div class="txn-table-wrap">
-          <table class="txn-table">
+        <div id="active-filter-chips" class="active-filter-chips"></div>
+
+        <div class="table-wrap">
+          <table class="data-table">
             <thead>
               <tr>
                 <th>Merchant</th>
+                <th>Category</th>
                 <th>Amount</th>
-                <th>Type</th>
                 <th>Date</th>
                 <th>Confidence</th>
-                <th>Account</th>
-                <th>Actions</th>
+                <th>Status</th>
+                <th></th>
               </tr>
             </thead>
-            <tbody id="txn-tbody">
-              <tr><td colspan="7" class="empty-state">
-                <div class="empty-icon">📋</div>
-                <h3>No transactions yet</h3>
-                <p>Click "Sync & Process" to import demo bank emails</p>
-              </td></tr>
-            </tbody>
+            <tbody id="explorer-tbody"></tbody>
           </table>
         </div>
-      </div>
-    </div>
-
-    <!-- ═══ Footer ═══ -->
-    <footer style="text-align:center; padding:32px 0 16px; color:var(--text-dim); font-size:0.78rem;">
-      PFIS v0.1.0 — Personal Finance Intelligence System
-    </footer>
-
+      </section>
+    </main>
   </div>
 
-  <!-- ═══ Edit Modal ═══ -->
-  <div id="edit-modal" class="modal-overlay" style="display:none;">
+  <div id="budget-modal" class="modal-shell" hidden>
     <div class="modal-card">
-      <div class="modal-header">
-        <h3 id="modal-title">Edit Transaction</h3>
-        <button class="modal-close" onclick="closeModal()">✕</button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="edit-txn-id" />
-        <div class="form-group">
-          <label for="edit-merchant">Merchant Name</label>
-          <input type="text" id="edit-merchant" class="form-input" placeholder="Corrected merchant name" />
+      <div class="surface-header">
+        <div>
+          <span class="eyebrow">Budget planner</span>
+          <h3 id="budget-modal-title">Set budget</h3>
         </div>
-        <div class="form-group">
-          <label for="edit-category">Category</label>
-          <select id="edit-category" class="form-input">
-            <option value="">— Select —</option>
-          </select>
+        <button type="button" id="btn-close-budget-modal" class="btn btn-ghost icon-only" aria-label="Close budget modal">✕</button>
+      </div>
+
+      <form id="budget-form" class="budget-form">
+        <label>
+          <span>Category</span>
+          <select id="budget-category"></select>
+        </label>
+        <label>
+          <span>Monthly limit (₹)</span>
+          <input type="number" id="budget-limit" min="100" step="100" placeholder="5000" required />
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-budget" class="btn btn-secondary">Cancel</button>
+          <button type="submit" id="btn-save-budget" class="btn btn-primary">Save budget</button>
         </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary btn-sm" onclick="saveCorrection()">💾 Save Correction</button>
-      </div>
+      </form>
     </div>
   </div>
 
-  <!-- ═══ Budget Modal ═══ -->
-  <div id="budget-modal" class="modal-overlay" style="display:none;">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h3>Set Category Budget</h3>
-        <button class="modal-close" onclick="closeBudgetModal()">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="budget-category">Category</label>
-          <select id="budget-category" class="form-input">
-            <option value="">— Select —</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="budget-limit">Monthly Limit (₹)</label>
-          <input type="number" id="budget-limit" class="form-input" placeholder="e.g. 5000" min="100" step="100" />
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary btn-sm" onclick="closeBudgetModal()">Cancel</button>
-        <button class="btn btn-primary btn-sm" onclick="saveBudget()">💰 Save Budget</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Dashboard JS -->
-  <script src="/static/js/dashboard.js?v=6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script type="module" src="/static/js/dashboard-revamp.js?v=1"></script>
 </body>
 </html>
