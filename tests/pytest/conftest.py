@@ -50,6 +50,7 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         DEMO_USER_PASSWORD="demo12345",
         SECRET_KEY="pytest-secret-key-long-enough-32-bytes",
         TOKEN_ENCRYPTION_KEY="",
+        GOOGLE_ALLOWED_EMAILS=[],
     )
 
     async with engine.begin() as conn:
