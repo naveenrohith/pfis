@@ -126,7 +126,10 @@ async def root():
 @app.get("/dashboard")
 async def serve_dashboard():
     """Serve the PFIS dashboard HTML."""
-    return FileResponse(
+    response = FileResponse(
         str(STATIC_DIR / "dashboard.html"),
         media_type="text/html",
     )
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response

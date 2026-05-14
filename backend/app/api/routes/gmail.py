@@ -18,6 +18,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_db
 from app.models.email import RawEmail, GmailAccount
 from app.models.sync import SyncRun
@@ -31,6 +32,7 @@ from app.services.gmail.oauth_service import (
 from app.services.gmail.sync_service import sync_gmail_emails, demo_sync_gmail_emails
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 # Two routers: one for auth, one for gmail operations
 auth_router = APIRouter(prefix="/auth/gmail", tags=["Gmail Auth"])
@@ -53,7 +55,7 @@ async def gmail_connect(
     """
     user_id = resolve_user_scope(user_id, current_user)
     try:
-        auth_url, state = get_authorization_url()
+        auth_url, state = get_authorization_url(redirect_uri=settings.GMAIL_OAUTH_REDIRECT_URI)
         _oauth_states[state] = user_id
         logger.info(f"OAuth flow started for user {user_id[:8]}...")
         return RedirectResponse(url=auth_url)
@@ -79,7 +81,7 @@ async def gmail_callback(
 
     try:
         # Exchange code for tokens
-        token_data = exchange_code_for_tokens(code)
+        token_data = exchange_code_for_tokens(code, redirect_uri=settings.GMAIL_OAUTH_REDIRECT_URI)
 
         # Check if Gmail account already exists for this user
         result = await db.execute(

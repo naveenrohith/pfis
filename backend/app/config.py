@@ -30,7 +30,17 @@ class Settings(BaseSettings):
     # Gmail OAuth (Phase 1)
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
-    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/auth/callback"
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/google/callback"
+    GMAIL_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/auth/gmail/callback"
+    GOOGLE_ALLOWED_EMAILS: Annotated[list[str], NoDecode] = []
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug(cls, value: Any) -> bool:
+        """Accept common deployment labels for DEBUG."""
+        if isinstance(value, str) and value.strip().lower() in {"release", "production", "prod"}:
+            return False
+        return value
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
@@ -43,6 +53,18 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         raise ValueError("Invalid CORS_ORIGINS value")
+
+    @field_validator("GOOGLE_ALLOWED_EMAILS", mode="before")
+    @classmethod
+    def parse_google_allowed_emails(cls, value: Any) -> list[str]:
+        """Allow Google sign-in allowlist to be provided as CSV."""
+        if value is None or value == "":
+            return []
+        if isinstance(value, list):
+            return [str(item).strip().lower() for item in value if str(item).strip()]
+        if isinstance(value, str):
+            return [item.strip().lower() for item in value.split(",") if item.strip()]
+        raise ValueError("Invalid GOOGLE_ALLOWED_EMAILS value")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

@@ -9,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.models.category import Category, Merchant
 from app.models.user import User
-from app.security import hash_password
+from app.security import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+DEMO_USER_EMAIL = "demo@pfis.app"
+LEGACY_DEMO_USER_EMAIL = "demo@pfis.local"
 
 # Default categories with icons
 DEFAULT_CATEGORIES = [
@@ -96,13 +98,16 @@ async def seed_merchants(db: AsyncSession, category_map: dict[str, str]):
 async def seed_demo_user(db: AsyncSession) -> str:
     """Create a demo user for testing. Returns user ID."""
     result = await db.execute(
-        select(User).where(User.email == "demo@pfis.local")
+        select(User).where(User.email.in_([DEMO_USER_EMAIL, LEGACY_DEMO_USER_EMAIL]))
     )
     existing = result.scalar_one_or_none()
 
     if existing:
         updated = False
-        if not existing.password_hash:
+        if existing.email != DEMO_USER_EMAIL:
+            existing.email = DEMO_USER_EMAIL
+            updated = True
+        if not verify_password(settings.DEMO_USER_PASSWORD, existing.password_hash):
             existing.password_hash = hash_password(settings.DEMO_USER_PASSWORD)
             updated = True
         if not existing.is_active:
@@ -113,7 +118,7 @@ async def seed_demo_user(db: AsyncSession) -> str:
         return existing.id
 
     user = User(
-        email="demo@pfis.local",
+        email=DEMO_USER_EMAIL,
         name="Demo User",
         currency="INR",
         password_hash=hash_password(settings.DEMO_USER_PASSWORD),

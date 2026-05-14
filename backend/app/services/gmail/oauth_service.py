@@ -10,7 +10,11 @@ Flow:
 """
 
 import logging
+from typing import Any
+
+from fastapi import HTTPException
 from google_auth_oauthlib.flow import Flow
+from google.oauth2 import id_token
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 
@@ -20,10 +24,15 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Gmail read-only scope — minimum access needed
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 
 
-def create_oauth_flow(redirect_uri: str = None) -> Flow:
+def create_oauth_flow(redirect_uri: str | None = None) -> Flow:
     """
     Create a Google OAuth flow instance.
     Uses client ID/secret from environment (no credentials.json file needed).
@@ -34,7 +43,10 @@ def create_oauth_flow(redirect_uri: str = None) -> Flow:
             "client_secret": settings.GOOGLE_CLIENT_SECRET,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [settings.GOOGLE_REDIRECT_URI],
+            "redirect_uris": [
+                settings.GOOGLE_REDIRECT_URI,
+                settings.GMAIL_OAUTH_REDIRECT_URI,
+            ],
         }
     }
 
@@ -47,12 +59,18 @@ def create_oauth_flow(redirect_uri: str = None) -> Flow:
     return flow
 
 
-def get_authorization_url() -> tuple[str, str]:
+def get_authorization_url(redirect_uri: str | None = None) -> tuple[str, str]:
     """
     Generate the Google OAuth authorization URL.
     Returns (auth_url, state) tuple.
     """
-    flow = create_oauth_flow()
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=500,
+            detail="Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.",
+        )
+
+    flow = create_oauth_flow(redirect_uri=redirect_uri)
 
     auth_url, state = flow.authorization_url(
         access_type="offline",       # Get refresh token
@@ -64,12 +82,12 @@ def get_authorization_url() -> tuple[str, str]:
     return auth_url, state
 
 
-def exchange_code_for_tokens(code: str) -> dict:
+def exchange_code_for_tokens(code: str, redirect_uri: str | None = None) -> dict:
     """
     Exchange the authorization code for access and refresh tokens.
     Returns dict with access_token, refresh_token, expiry.
     """
-    flow = create_oauth_flow()
+    flow = create_oauth_flow(redirect_uri=redirect_uri)
     flow.fetch_token(code=code)
 
     credentials = flow.credentials
@@ -77,12 +95,44 @@ def exchange_code_for_tokens(code: str) -> dict:
     token_data = {
         "access_token": credentials.token,
         "refresh_token": credentials.refresh_token,
+        "id_token": credentials.id_token,
         "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
         "scopes": list(credentials.scopes) if credentials.scopes else SCOPES,
     }
 
     logger.info("Successfully exchanged auth code for tokens")
     return token_data
+
+
+def verify_google_identity(token_data: dict[str, Any]) -> dict[str, Any]:
+    """
+    Verify Google's ID token and return normalized profile fields.
+    """
+    raw_id_token = token_data.get("id_token")
+    if not raw_id_token:
+        raise HTTPException(status_code=401, detail="Google did not return an ID token")
+
+    try:
+        payload = id_token.verify_oauth2_token(
+            raw_id_token,
+            Request(),
+            settings.GOOGLE_CLIENT_ID,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid Google identity token") from exc
+
+    email = str(payload.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="Google account email is missing")
+    if payload.get("email_verified") is False:
+        raise HTTPException(status_code=401, detail="Google account email is not verified")
+
+    return {
+        "google_account_id": str(payload.get("sub") or ""),
+        "email": email,
+        "name": str(payload.get("name") or email.split("@")[0]),
+        "picture": payload.get("picture"),
+    }
 
 
 def refresh_access_token(refresh_token: str) -> dict:
