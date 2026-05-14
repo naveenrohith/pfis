@@ -1,7 +1,7 @@
-const API = 'http://localhost:8000/api';
+const API = '/api';
 const SESSION_KEY = 'pfis.session.v3';
 const REVIEW_CONFIDENCE_THRESHOLD = 0.85;
-const CHART_COLORS = ['#7c3aed', '#22c55e', '#38bdf8', '#f59e0b', '#ef4444', '#14b8a6', '#ec4899', '#a3e635', '#6366f1', '#f97316'];
+const CHART_COLORS = ['#6366f1', '#22c55e', '#38bdf8', '#f59e0b', '#ef4444', '#14b8a6', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316'];
 
 const state = {
   session: {
@@ -51,7 +51,7 @@ async function init() {
 function cacheElements() {
   const ids = [
     'auth-shell', 'app-shell', 'auth-error', 'login-form', 'register-form', 'login-email', 'login-password',
-    'register-name', 'register-email', 'register-password', 'register-currency', 'btn-login', 'btn-register', 'btn-demo-session',
+    'register-name', 'register-email', 'register-password', 'register-currency', 'btn-login', 'btn-register', 'btn-google-login', 'btn-demo-session',
     'session-chip', 'user-avatar', 'header-user-name', 'header-user-meta', 'btn-logout', 'global-banner', 'btn-prev-month', 'btn-next-month',
     'btn-current-month', 'month-label', 'month-pill', 'filter-pill', 'session-expiry-pill', 'sync-pill', 'btn-sync', 'btn-retry', 'btn-refresh',
     'btn-export', 'btn-report', 'btn-budget-modal', 'hero-title', 'hero-summary-text', 'hero-focus-pills', 'hero-metrics', 'command-status',
@@ -77,8 +77,9 @@ function cacheElements() {
 
 function bindStaticEvents() {
   el.authTabs.forEach((tab) => tab.addEventListener('click', () => switchAuthTab(tab.dataset.authTab)));
-  el.loginForm.addEventListener('submit', handleLogin);
-  el.registerForm.addEventListener('submit', handleRegister);
+  el['login-form'].addEventListener('submit', handleLogin);
+  el['register-form'].addEventListener('submit', handleRegister);
+  el['btn-google-login'].addEventListener('click', handleGoogleLogin);
   el['btn-demo-session'].addEventListener('click', handleDemoSession);
   el['btn-logout'].addEventListener('click', () => signOut(true));
 
@@ -161,6 +162,7 @@ function observeSections() {
 
 async function hydrateSession() {
   setLoading(true);
+  consumeOAuthStatus();
   const storedSession = readStoredSession();
   if (!storedSession) {
     showAuthShell();
@@ -198,6 +200,14 @@ async function hydrateSession() {
     showAuthShell(error.message || 'Please sign in to continue.');
   } finally {
     setLoading(false);
+  }
+}
+
+function consumeOAuthStatus() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('google_auth') === 'success') {
+    window.history.replaceState({}, document.title, window.location.pathname);
+    showToast('Signed in with Google', 'success');
   }
 }
 
@@ -319,6 +329,13 @@ async function handleDemoSession() {
   }
 }
 
+function handleGoogleLogin(event) {
+  event.preventDefault();
+  setAuthError('');
+  setButtonLoading(el['btn-google-login'], true, 'Opening Google...');
+  window.location.href = `${API}/auth/google/login`;
+}
+
 async function completeAuthSession(payload) {
   state.session = {
     mode: 'auth',
@@ -334,7 +351,7 @@ async function resolveDemoUser(preferredId = null) {
   const users = await apiRequest('/users/', { auth: false, tolerate401: true });
   if (!Array.isArray(users) || users.length === 0) return null;
   return users.find((user) => user.id === preferredId)
-    || users.find((user) => user.email?.toLowerCase() === 'demo@pfis.local')
+    || users.find((user) => user.email?.toLowerCase() === 'demo@pfis.app')
     || users[0];
 }
 
@@ -516,7 +533,6 @@ function renderActionBarMeta() {
 function renderHero() {
   const summary = state.summary;
   const pending = getPendingReviewTransactions().length;
-  const flaggedBudgets = state.budgets.filter((budget) => budget.status !== 'under').length;
   const processedEmails = state.emails?.processed_total ?? 0;
   const unprocessedEmails = state.emails?.unprocessed_total ?? 0;
   const savingsRate = summary?.total_income > 0
@@ -524,33 +540,33 @@ function renderHero() {
     : 0;
 
   if (!summary) {
-    el['hero-title'].textContent = 'Your monthly finance operating picture.';
-    el['hero-summary-text'].textContent = 'Connect a session and load transaction activity to see the professional dashboard in motion.';
+    el['hero-title'].textContent = 'Your money, made easy to understand.';
+    el['hero-summary-text'].textContent = 'Connect a session and sync your inbox to see savings, spending, budgets, and review items in one calm view.';
     el['hero-focus-pills'].innerHTML = '';
     el['hero-metrics'].innerHTML = '';
     return;
   }
 
   el['hero-title'].textContent = summary.transaction_count > 0
-    ? `${formatCurrency(summary.net)} net for ${formatMonthLabel()}`
+    ? `You saved ${formatCurrency(Math.max(summary.net, 0))} this month`
     : `No posted activity yet for ${formatMonthLabel()}`;
 
   el['hero-summary-text'].textContent = summary.transaction_count > 0
-    ? `You processed ${summary.transaction_count} transactions this month, with ${pending} item${pending === 1 ? '' : 's'} still waiting for review and ${flaggedBudgets} budget area${flaggedBudgets === 1 ? '' : 's'} needing attention.`
-    : 'Start with a demo sync or secure sign-in workflow, then the review queue, analytics, and budgets will all populate automatically.';
+    ? `${savingsRate}% savings rate from ${formatCurrency(summary.total_income)} income. ${pending ? `${pending} transaction${pending === 1 ? '' : 's'} need a quick check.` : 'Your review queue is clear.'}`
+    : 'Start with a demo sync or secure sign-in workflow, then PFIS will organize transactions and insights automatically.';
 
   const focusItems = [
     {
-      title: pending > 0 ? `${pending} pending review${pending === 1 ? '' : 's'}` : 'Review queue clear',
-      detail: pending > 0 ? 'Dedicated queue is ready for rapid correction.' : 'All current low-confidence items have been reviewed.',
+      title: pending > 0 ? `${pending} needs confirmation` : 'Everything reviewed',
+      detail: pending > 0 ? 'Low-confidence transactions are ready for one-click correction.' : 'All current transactions look clean.',
     },
     {
-      title: `${unprocessedEmails} unprocessed email${unprocessedEmails === 1 ? '' : 's'}`,
-      detail: processedEmails > 0 ? `${processedEmails} financial email${processedEmails === 1 ? '' : 's'} already processed.` : 'Run the pipeline to bring fresh emails into analytics.',
+      title: `${unprocessedEmails} email${unprocessedEmails === 1 ? '' : 's'} waiting`,
+      detail: processedEmails > 0 ? `${processedEmails} financial email${processedEmails === 1 ? '' : 's'} already understood.` : 'Sync your inbox to refresh the month.',
     },
     {
-      title: `${savingsRate}% savings rate`,
-      detail: state.budgets.length > 0 ? `${state.budgets.length} budget${state.budgets.length === 1 ? '' : 's'} tracked on the board.` : 'Create budgets to turn insight into action.',
+      title: `${savingsRate}% savings health`,
+      detail: state.budgets.length > 0 ? `${state.budgets.length} budget${state.budgets.length === 1 ? '' : 's'} watched for overspending.` : 'Add budgets to get early warnings.',
     },
   ];
 
@@ -562,10 +578,10 @@ function renderHero() {
   `).join('');
 
   const heroMetrics = [
-    { label: 'Processed emails', value: processedEmails },
-    { label: 'Transactions', value: summary.transaction_count },
-    { label: 'Budgets at risk', value: flaggedBudgets },
-    { label: 'Top spend category', value: summary.category_breakdown?.[0]?.name || '—' },
+    { label: 'Income', value: formatCurrency(summary.total_income) },
+    { label: 'Expenses', value: formatCurrency(summary.total_spend) },
+    { label: 'Savings', value: formatCurrency(summary.net) },
+    { label: 'Pending reviews', value: pending },
   ];
 
   el['hero-metrics'].innerHTML = heroMetrics.map((item) => `
@@ -589,12 +605,12 @@ function renderMetrics() {
   const totalEmails = state.emails?.all_total ?? 0;
 
   const cards = [
-    { label: 'Total spend', value: formatCurrency(summary.total_spend), detail: 'Monthly debits posted to the ledger.' },
-    { label: 'Total income', value: formatCurrency(summary.total_income), detail: 'Credits recorded for the selected month.' },
-    { label: 'Net result', value: formatCurrency(summary.net), detail: 'Income minus spend for the active month.' },
-    { label: 'Transactions', value: summary.transaction_count, detail: `${totalEmails} financial email${totalEmails === 1 ? '' : 's'} captured in the workspace.` },
-    { label: 'Pending review', value: pending, detail: pending > 0 ? 'Low-confidence items still waiting for confirmation.' : 'Queue is currently clean.' },
-    { label: 'Recurring detected', value: recurringCount, detail: flaggedBudgets > 0 ? `${flaggedBudgets} budget area${flaggedBudgets === 1 ? '' : 's'} need attention.` : 'Budget posture is stable.' },
+    { label: 'Spent', value: formatCurrency(summary.total_spend), detail: 'Money that left your accounts this month.' },
+    { label: 'Income', value: formatCurrency(summary.total_income), detail: 'Credits PFIS recognized for the selected month.' },
+    { label: 'Saved', value: formatCurrency(summary.net), detail: 'What remains after monthly spending.' },
+    { label: 'Transactions', value: summary.transaction_count, detail: `${totalEmails} financial email${totalEmails === 1 ? '' : 's'} scanned for activity.` },
+    { label: 'Needs review', value: pending, detail: pending > 0 ? 'Quick confirmations keep insights accurate.' : 'No transaction needs attention right now.' },
+    { label: 'Subscriptions', value: recurringCount, detail: flaggedBudgets > 0 ? `${flaggedBudgets} budget area${flaggedBudgets === 1 ? '' : 's'} may need attention.` : 'No budget pressure detected.' },
   ];
 
   el['metrics-grid'].innerHTML = cards.map((card) => `
@@ -643,7 +659,7 @@ function renderCommandCenter() {
   const status = latestSync.status || state.syncStatus.latest_status || 'completed';
   el['command-status'].className = `status-badge ${status === 'completed' ? 'success' : status === 'failed' ? 'error' : status === 'running' ? 'progress' : 'warning'}`;
   el['command-status'].textContent = status[0].toUpperCase() + status.slice(1);
-  el['command-summary'].textContent = `${latestSync.emails_processed || 0} emails processed from the latest sync run. ${pending} transaction${pending === 1 ? '' : 's'} are still pending review.`;
+  el['command-summary'].textContent = `${latestSync.emails_processed || 0} emails processed in the latest sync. ${pending ? `${pending} transaction${pending === 1 ? '' : 's'} need confirmation.` : 'No transaction needs confirmation.'}`;
 }
 
 function renderCategoryAnalytics() {
@@ -980,44 +996,6 @@ function renderCategoryShortcuts(activeCategoryId) {
   `).join('');
 }
 
-function renderExplorer() {
-  toggleSegments(el.explorerSegments, state.explorerType, 'explorerFilter');
-
-  const transactions = getFilteredExplorerTransactions();
-  el['explorer-count'].className = `status-badge ${transactions.length ? 'neutral' : 'warning'}`;
-  el['explorer-count'].textContent = `${transactions.length} shown`;
-  el['btn-clear-explorer-filters'].hidden = !hasActiveExplorerFilters();
-  renderActiveFilterChips();
-
-  if (!transactions.length) {
-    el['explorer-tbody'].innerHTML = `
-      <tr>
-        <td colspan="7">
-          ${buildEmptyBlock('No transactions match these filters', 'Clear the current search or drill-down to see the full monthly ledger again.', '🧭')}
-        </td>
-      </tr>
-    `;
-    return;
-  }
-
-  el['explorer-tbody'].innerHTML = transactions.map((txn) => `
-    <tr>
-      <td>
-        <div class="table-primary">
-          <strong>${escapeHtml(txn.merchant_normalized || txn.merchant_raw || 'Unknown merchant')}</strong>
-          <span>${escapeHtml(txn.merchant_raw || 'No raw source')}</span>
-        </div>
-      </td>
-      <td>${escapeHtml(txn.category_name || lookupCategoryName(txn.category_id))}</td>
-      <td class="amount ${txn.transaction_type === 'credit' ? 'positive' : txn.transaction_type === 'refund' ? 'neutral' : 'negative'}">${formatSignedAmount(txn)}</td>
-      <td>${formatDate(txn.transaction_date)}</td>
-      <td>${renderConfidencePill(txn.confidence_score)}</td>
-      <td><span class="status-badge ${txn.reviewed_flag ? 'success' : 'warning'}">${txn.reviewed_flag ? 'Reviewed' : 'Needs review'}</span></td>
-      <td><button type="button" class="row-action" data-open-review="${txn.id}">Open</button></td>
-    </tr>
-  `).join('');
-}
-
 function renderActiveFilterChips() {
   const chips = [];
   if (state.categoryDrilldown) {
@@ -1030,6 +1008,51 @@ function renderActiveFilterChips() {
     chips.push(`<button type="button" class="active-filter-chip" data-filter-chip="search">Search: “${escapeHtml(state.explorerSearch)}” ✕</button>`);
   }
   el['active-filter-chips'].innerHTML = chips.join('');
+}
+
+function renderExplorer() {
+  toggleSegments(el.explorerSegments, state.explorerType, 'explorerFilter');
+
+  const transactions = getFilteredExplorerTransactions();
+  el['explorer-count'].className = `status-badge ${transactions.length ? 'neutral' : 'warning'}`;
+  el['explorer-count'].textContent = `${transactions.length} shown`;
+  el['btn-clear-explorer-filters'].hidden = !hasActiveExplorerFilters();
+  renderActiveFilterChips();
+
+  if (!transactions.length) {
+    el['explorer-tbody'].innerHTML = buildEmptyBlock('No transactions match these filters', 'Clear the current search or drill-down to see the full month again.', 'Search');
+    return;
+  }
+
+  const grouped = groupTransactionsByTime(transactions);
+  el['explorer-tbody'].innerHTML = grouped.map((group) => `
+    <section class="transaction-group">
+      <h4>${group.label}</h4>
+      <div class="transaction-group-list">
+        ${group.items.map((txn) => {
+          const merchant = txn.merchant_normalized || txn.merchant_raw || 'Unknown merchant';
+          const tone = txn.transaction_type === 'credit' ? 'positive' : txn.transaction_type === 'refund' ? 'neutral' : 'negative';
+          const confidence = Math.round((txn.confidence_score || 0) * 100);
+          return `
+            <article class="transaction-row" data-open-review="${txn.id}">
+              <div class="merchant-avatar">${escapeHtml(getMerchantInitials(merchant))}</div>
+              <div class="transaction-main">
+                <strong>${escapeHtml(merchant)}</strong>
+                <span>${escapeHtml(txn.category_name || lookupCategoryName(txn.category_id))} - ${formatDate(txn.transaction_date)}</span>
+              </div>
+              <div class="transaction-meta">
+                <strong class="amount ${tone}">${formatSignedAmount(txn)}</strong>
+                <span class="confidence-pill ${confidence >= 85 ? 'high' : confidence >= 65 ? 'medium' : 'low'}"><i></i>${confidence}%</span>
+              </div>
+              <button type="button" class="review-nudge ${txn.reviewed_flag ? 'reviewed' : 'needs-review'}" data-open-review="${txn.id}">
+                ${txn.reviewed_flag ? 'Reviewed' : 'Needs confirmation'}
+              </button>
+            </article>
+          `;
+        }).join('')}
+      </div>
+    </section>
+  `).join('');
 }
 
 function populateCategorySelects() {
@@ -1072,6 +1095,45 @@ function getFilteredExplorerTransactions() {
     if (state.explorerSearch && !buildTransactionSearchHaystack(txn).includes(state.explorerSearch)) return false;
     return true;
   });
+}
+
+function groupTransactionsByTime(transactions) {
+  const buckets = [
+    { key: 'today', label: 'Today', items: [] },
+    { key: 'yesterday', label: 'Yesterday', items: [] },
+    { key: 'week', label: 'This week', items: [] },
+    { key: 'earlier', label: 'Earlier', items: [] },
+  ];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() - 6);
+
+  transactions
+    .slice()
+    .sort((a, b) => compareDates(b.transaction_date, a.transaction_date))
+    .forEach((txn) => {
+      const date = parseDateValue(txn.transaction_date);
+      date.setHours(0, 0, 0, 0);
+      if (date.getTime() === today.getTime()) buckets[0].items.push(txn);
+      else if (date.getTime() === yesterday.getTime()) buckets[1].items.push(txn);
+      else if (date >= weekStart) buckets[2].items.push(txn);
+      else buckets[3].items.push(txn);
+    });
+
+  return buckets.filter((bucket) => bucket.items.length);
+}
+
+function getMerchantInitials(value) {
+  return String(value || 'PF')
+    .replace(/[^a-zA-Z0-9 ]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('') || 'PF';
 }
 
 function buildTransactionSearchHaystack(txn) {
@@ -1413,7 +1475,7 @@ async function deleteBudget(budgetId) {
 }
 
 async function startDemoSyncPipeline() {
-  await runBackgroundJob(`/jobs/demo-sync-pipeline?user_id=${encodeURIComponent(state.session.user.id)}&limit=80`, 'Demo sync pipeline', 'Sync & Process', el['btn-sync']);
+  await runBackgroundJob(`/jobs/demo-sync-pipeline?user_id=${encodeURIComponent(state.session.user.id)}&limit=80`, 'Inbox sync', 'Sync inbox', el['btn-sync']);
 }
 
 async function retryParseFailures() {
@@ -1659,7 +1721,7 @@ function buildEmptyBlock(title, description, icon) {
 
 function setButtonLoading(button, loading, label) {
   if (!button) return;
-  button.disabled = loading;
+  if ('disabled' in button) button.disabled = loading;
   button.innerHTML = loading ? `<span class="spinner"></span> ${label}` : label;
 }
 

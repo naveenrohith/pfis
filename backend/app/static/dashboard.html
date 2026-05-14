@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="PFIS — a professional personal finance operations dashboard with secure auth, review workflows, and rich monthly analytics." />
-  <title>PFIS — Financial Operations Dashboard</title>
+  <meta name="description" content="PFIS is a calm personal finance intelligence system for savings, spending awareness, budgets, and quick transaction review." />
+  <title>PFIS - Personal Finance Intelligence</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.86em' font-size='88'>💠</text></svg>" />
-  <link rel="stylesheet" href="/static/css/dashboard-revamp.css?v=1" />
+  <link rel="stylesheet" href="/static/css/dashboard-revamp.css?v=4" />
 </head>
 <body>
   <div class="app-backdrop" aria-hidden="true"></div>
@@ -19,23 +19,23 @@
   <div id="auth-shell" class="auth-shell">
     <div class="auth-card">
       <section class="auth-spotlight">
-        <span class="eyebrow">PFIS • Financial operating system</span>
-        <h1>Professional finance intelligence with secure auth and high-confidence review workflows.</h1>
+        <span class="eyebrow">PFIS personal finance</span>
+        <h1>Understand your money instantly.</h1>
         <p>
-          Manage monthly performance, review low-confidence parses fast, and keep your dashboard feeling more Bloomberg Terminal than brave spreadsheet.
+          Connect your inbox, turn transaction emails into clean spending awareness, and get simple guidance before money decisions become stressful.
         </p>
         <div class="spotlight-grid">
           <article>
             <strong>Secure session</strong>
-            <span>JWT-backed login, expiry awareness, and user state in one polished shell.</span>
+            <span>Your workspace stays private, signed in, and clear about session state.</span>
           </article>
           <article>
-            <strong>Review workspace</strong>
-            <span>Dedicated queue, side-panel correction flow, and bulk review shortcuts.</span>
+            <strong>One-tap review</strong>
+            <span>Low-confidence transactions are easy to confirm without entering an admin flow.</span>
           </article>
           <article>
-            <strong>Executive dashboard</strong>
-            <span>Drill-down charts, rich budget visuals, sticky command bar, and faster decision loops.</span>
+            <strong>Smart insights</strong>
+            <span>See where money went, what changed, and what needs attention this month.</span>
           </article>
         </div>
       </section>
@@ -44,7 +44,7 @@
         <div class="auth-panel-header">
           <div>
             <span class="eyebrow">Get started</span>
-            <h2>Open your workspace</h2>
+            <h2>Open PFIS</h2>
           </div>
           <div class="auth-tabs" role="tablist" aria-label="Authentication tabs">
             <button type="button" class="auth-tab active" data-auth-tab="login">Sign in</button>
@@ -53,6 +53,16 @@
         </div>
 
         <div id="auth-error" class="inline-banner error" hidden></div>
+
+        <div class="oauth-block">
+          <a id="btn-google-login" class="btn btn-google-primary btn-block" href="/api/auth/google/login">
+            <span class="google-mark">G</span>
+            Continue with Gmail
+          </a>
+          <p>Use your Gmail account to sign in and connect the inbox used by PFIS.</p>
+        </div>
+
+        <div class="auth-divider"><span>Email password fallback</span></div>
 
         <form id="login-form" class="auth-form">
           <label>
@@ -83,14 +93,14 @@
             <span>Currency</span>
             <input type="text" id="register-currency" value="INR" maxlength="3" required />
           </label>
-          <button type="submit" id="btn-register" class="btn btn-primary btn-block">Create secure workspace</button>
+          <button type="submit" id="btn-register" class="btn btn-primary btn-block">Create workspace</button>
         </form>
 
         <div class="auth-divider"><span>or</span></div>
 
         <button type="button" id="btn-demo-session" class="btn btn-secondary btn-block">Try demo workspace</button>
         <p class="auth-footnote">
-          Demo mode uses the seeded workspace if your backend allows guest access. Secure sign-in is recommended for the full auth-aware experience.
+          Demo mode uses seeded sample data. Use Gmail login for your real inbox.
         </p>
       </section>
     </div>
@@ -101,16 +111,17 @@
       <div class="brand-lockup">
         <div class="brand-mark">₹</div>
         <div>
-          <span class="eyebrow">PFIS dashboard</span>
-          <h1>Financial Operations Console</h1>
+          <span class="eyebrow">PFIS</span>
+          <h1>Personal Finance</h1>
         </div>
       </div>
 
       <nav class="section-nav" aria-label="Dashboard sections">
-        <button type="button" class="section-link active" data-scroll-target="overview">Overview</button>
-        <button type="button" class="section-link" data-scroll-target="review">Review queue</button>
+        <button type="button" class="section-link active" data-scroll-target="overview">Home</button>
+        <button type="button" class="section-link" data-scroll-target="transactions">Transactions</button>
+        <button type="button" class="section-link" data-scroll-target="insights">Insights</button>
         <button type="button" class="section-link" data-scroll-target="budgets">Budgets</button>
-        <button type="button" class="section-link" data-scroll-target="transactions">Explorer</button>
+        <button type="button" class="section-link" data-scroll-target="review">Review</button>
       </nav>
 
       <div class="session-panel">
@@ -147,7 +158,7 @@
       </div>
 
       <div class="action-buttons">
-        <button type="button" id="btn-sync" class="btn btn-primary">Sync &amp; Process</button>
+        <button type="button" id="btn-sync" class="btn btn-primary">Sync inbox</button>
         <button type="button" id="btn-retry" class="btn btn-secondary">Retry failures</button>
         <button type="button" id="btn-refresh" class="btn btn-secondary">Refresh</button>
         <button type="button" id="btn-export" class="btn btn-secondary">Export CSV</button>
@@ -160,7 +171,7 @@
       <section id="overview" class="hero-grid">
         <article class="surface-card hero-card">
           <div class="hero-copy">
-            <span class="eyebrow">Operational snapshot</span>
+              <span class="eyebrow">Financial health</span>
             <h2 id="hero-title">Your monthly finance operating picture.</h2>
             <p id="hero-summary-text">Loading your income, spend, review queue, and budget posture…</p>
           </div>
@@ -171,8 +182,8 @@
         <aside class="surface-card command-card">
           <div class="surface-header">
             <div>
-              <span class="eyebrow">Command center</span>
-              <h3>Email pipeline &amp; auth</h3>
+              <span class="eyebrow">Workspace</span>
+              <h3>Inbox sync</h3>
             </div>
             <span id="command-status" class="status-badge neutral">Ready</span>
           </div>
@@ -210,12 +221,12 @@
 
       <section id="metrics-grid" class="metrics-grid"></section>
 
-      <section class="section-grid analytics-grid">
+      <section id="insights" class="section-grid analytics-grid">
         <article class="surface-card chart-card">
           <div class="surface-header">
             <div>
-              <span class="eyebrow">Drill-down analytics</span>
-              <h3>Category distribution</h3>
+              <span class="eyebrow">Spending pattern</span>
+              <h3>Where money went</h3>
             </div>
             <button type="button" id="btn-clear-category-drilldown" class="text-link" hidden>Clear drill-down</button>
           </div>
@@ -224,7 +235,7 @@
             <div id="category-chart-empty" class="empty-panel" hidden>
               <span class="empty-icon">📊</span>
               <h4>No category data yet</h4>
-              <p>Run a sync or switch to a month with debit activity to unlock drill-down analytics.</p>
+              <p>Run a sync or switch to a month with debit activity to see spending patterns.</p>
             </div>
           </div>
           <div id="category-legend" class="legend-grid"></div>
@@ -233,8 +244,8 @@
         <article class="surface-card insights-card">
           <div class="surface-header">
             <div>
-              <span class="eyebrow">Decision support</span>
-              <h3>Insights, merchants, and recurring spend</h3>
+              <span class="eyebrow">Smart insights</span>
+              <h3>What needs your attention</h3>
             </div>
           </div>
 
@@ -400,7 +411,7 @@
       <section id="transactions" class="surface-card explorer-card">
         <div class="surface-header explorer-header">
           <div>
-            <span class="eyebrow">Explorer</span>
+            <span class="eyebrow">Transactions</span>
             <h3>Transactions</h3>
           </div>
           <div class="explorer-status">
@@ -425,22 +436,7 @@
 
         <div id="active-filter-chips" class="active-filter-chips"></div>
 
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Merchant</th>
-                <th>Category</th>
-                <th>Amount</th>
-                <th>Date</th>
-                <th>Confidence</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="explorer-tbody"></tbody>
-          </table>
-        </div>
+        <div id="explorer-tbody" class="transaction-list"></div>
       </section>
     </main>
   </div>
@@ -473,6 +469,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script type="module" src="/static/js/dashboard-revamp.js?v=1"></script>
+  <script type="module" src="/static/js/dashboard-revamp.js?v=4"></script>
 </body>
 </html>
