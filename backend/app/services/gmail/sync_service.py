@@ -238,6 +238,7 @@ async def sync_gmail_emails(
     stats = {
         "emails_fetched": 0,
         "emails_processed": 0,
+        "emails_stored": 0,
         "emails_skipped_otp": 0,
         "emails_skipped_promo": 0,
         "emails_skipped_duplicate": 0,
@@ -346,6 +347,7 @@ async def sync_gmail_emails(
                 )
                 db.add(raw_email)
                 stats["emails_processed"] += 1
+                stats["emails_stored"] += 1
 
                 logger.info(
                     f"Stored email: [{email_type.value}] [{bank_name}] "

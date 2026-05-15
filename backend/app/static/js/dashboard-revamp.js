@@ -21,6 +21,8 @@ const state = {
   syncStatus: null,
   activeJob: null,
   lastJob: null,
+  monthAutoSelected: false,
+  userSelectedMonth: false,
   categoryDrilldown: null,
   explorerType: 'all',
   explorerSearch: '',
@@ -480,6 +482,10 @@ async function refreshDashboardData(options = {}) {
     state.budgets = Array.isArray(budgets) ? budgets : [];
     state.syncStatus = syncStatus;
 
+    if (await maybeSwitchToLatestActivityMonth(userId, summary)) {
+      return;
+    }
+
     reconcileReviewFocus();
     syncMonthControls();
     renderAll();
@@ -491,6 +497,30 @@ async function refreshDashboardData(options = {}) {
   } finally {
     setLoading(false);
   }
+}
+
+async function maybeSwitchToLatestActivityMonth(userId, summary) {
+  if (state.userSelectedMonth || state.monthAutoSelected || (summary?.transaction_count ?? 0) > 0) {
+    return false;
+  }
+
+  const processedEmails = state.emails?.processed_total ?? 0;
+  if (processedEmails <= 0) return false;
+
+  const latestTransactions = await apiRequest(`/transactions/?user_id=${encodeURIComponent(userId)}&limit=1`);
+  const latest = Array.isArray(latestTransactions) ? latestTransactions[0] : null;
+  if (!latest?.transaction_date) return false;
+
+  const latestDate = new Date(`${latest.transaction_date}T00:00:00`);
+  const latestMonth = latestDate.getMonth() + 1;
+  const latestYear = latestDate.getFullYear();
+  if (latestMonth === state.currentMonth && latestYear === state.currentYear) return false;
+
+  state.currentMonth = latestMonth;
+  state.currentYear = latestYear;
+  state.monthAutoSelected = true;
+  await refreshDashboardData({ announceLabel: `Loaded latest Gmail activity from ${formatMonthLabel()}` });
+  return true;
 }
 
 function reconcileReviewFocus() {
@@ -662,7 +692,10 @@ function renderCommandCenter() {
   const status = latestSync.status || state.syncStatus.latest_status || 'completed';
   el['command-status'].className = `status-badge ${status === 'completed' ? 'success' : status === 'failed' ? 'error' : status === 'running' ? 'progress' : 'warning'}`;
   el['command-status'].textContent = status[0].toUpperCase() + status.slice(1);
-  el['command-summary'].textContent = `${latestSync.emails_processed || 0} emails processed in the latest sync. ${pending ? `${pending} transaction${pending === 1 ? '' : 's'} need confirmation.` : 'No transaction needs confirmation.'}`;
+  const stored = latestSync.emails_processed || 0;
+  const fetched = latestSync.emails_fetched || 0;
+  const processedTotal = state.emails?.processed_total ?? 0;
+  el['command-summary'].textContent = `${processedTotal} financial email${processedTotal === 1 ? '' : 's'} are processed. Latest sync checked ${fetched} message${fetched === 1 ? '' : 's'} and stored ${stored} new. ${pending ? `${pending} transaction${pending === 1 ? '' : 's'} need confirmation.` : 'No transaction needs confirmation.'}`;
 }
 
 function renderCategoryAnalytics() {
@@ -1629,6 +1662,7 @@ function syncMonthControls() {
 }
 
 function changeMonth(delta) {
+  state.userSelectedMonth = true;
   state.currentMonth += delta;
   if (state.currentMonth > 12) {
     state.currentMonth = 1;
@@ -1643,6 +1677,7 @@ function changeMonth(delta) {
 
 function resetToCurrentMonth() {
   const now = new Date();
+  state.userSelectedMonth = true;
   state.currentMonth = now.getMonth() + 1;
   state.currentYear = now.getFullYear();
   refreshDashboardData({ announceLabel: `Loaded ${formatMonthLabel()}` });
@@ -1760,7 +1795,11 @@ function summarizeJob(job) {
   }
   const sync = result.sync || {};
   const pipeline = result.pipeline || {};
-  return `${sync.emails_stored || 0} emails stored, ${pipeline.stored || 0} transaction${(pipeline.stored || 0) === 1 ? '' : 's'} posted, ${pipeline.low_confidence || 0} still need review.`;
+  const fetched = sync.emails_fetched || 0;
+  const stored = sync.emails_stored ?? sync.emails_processed ?? 0;
+  const duplicates = sync.emails_skipped_duplicate || 0;
+  const posted = pipeline.stored || 0;
+  return `${fetched} checked, ${stored} new, ${duplicates} already synced, ${posted} transaction${posted === 1 ? '' : 's'} posted, ${pipeline.low_confidence || 0} still need review.`;
 }
 
 function lookupCategoryName(categoryId) {
