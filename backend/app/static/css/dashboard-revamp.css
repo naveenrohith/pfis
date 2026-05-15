@@ -539,6 +539,21 @@ canvas {
   font-weight: 800;
 }
 
+.hero-stat-card.success {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.hero-stat-card.warning {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.hero-stat-card.danger {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.08);
+}
+
 .command-card {
   display: flex;
   flex-direction: column;
@@ -822,6 +837,35 @@ canvas {
 
 .budget-stat span {
   color: var(--muted);
+}
+
+.budget-forecast {
+  margin: -2px 0 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.budget-forecast.success {
+  color: #bbf7d0;
+  border-color: rgba(34, 197, 94, 0.22);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.budget-forecast.warning {
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.24);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.budget-forecast.danger {
+  color: #fecaca;
+  border-color: rgba(239, 68, 68, 0.24);
+  background: rgba(239, 68, 68, 0.08);
 }
 
 .review-toolbar,

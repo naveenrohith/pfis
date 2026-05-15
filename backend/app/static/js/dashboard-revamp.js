@@ -524,7 +524,7 @@ function renderAll() {
 function renderActionBarMeta() {
   const monthName = formatMonthLabel();
   el['month-label'].textContent = monthName;
-  el['month-pill'].textContent = `Reporting • ${monthName}`;
+  el['month-pill'].textContent = `Month: ${monthName}`;
   el['sync-pill'].textContent = buildSyncPillText();
   el['filter-pill'].textContent = buildFilterPillText();
   el['btn-clear-category-drilldown'].hidden = !state.categoryDrilldown;
@@ -538,6 +538,7 @@ function renderHero() {
   const savingsRate = summary?.total_income > 0
     ? Math.round(((summary.total_income - summary.total_spend) / summary.total_income) * 100)
     : 0;
+  const savingsHealth = getSavingsHealth(savingsRate);
 
   if (!summary) {
     el['hero-title'].textContent = 'Your money, made easy to understand.';
@@ -548,11 +549,13 @@ function renderHero() {
   }
 
   el['hero-title'].textContent = summary.transaction_count > 0
-    ? `You saved ${formatCurrency(Math.max(summary.net, 0))} this month`
+    ? summary.net >= 0
+      ? `You saved ${formatCurrency(summary.net)} this month`
+      : `You overspent by ${formatCurrency(Math.abs(summary.net))} this month`
     : `No posted activity yet for ${formatMonthLabel()}`;
 
   el['hero-summary-text'].textContent = summary.transaction_count > 0
-    ? `${savingsRate}% savings rate from ${formatCurrency(summary.total_income)} income. ${pending ? `${pending} transaction${pending === 1 ? '' : 's'} need a quick check.` : 'Your review queue is clear.'}`
+    ? `${savingsHealth.label}: ${savingsHealth.detail} ${pending ? `${pending} transaction${pending === 1 ? '' : 's'} need a quick check.` : 'Your review queue is clear.'}`
     : 'Start with a demo sync or secure sign-in workflow, then PFIS will organize transactions and insights automatically.';
 
   const focusItems = [
@@ -565,7 +568,7 @@ function renderHero() {
       detail: processedEmails > 0 ? `${processedEmails} financial email${processedEmails === 1 ? '' : 's'} already understood.` : 'Sync your inbox to refresh the month.',
     },
     {
-      title: `${savingsRate}% savings health`,
+      title: savingsHealth.label,
       detail: state.budgets.length > 0 ? `${state.budgets.length} budget${state.budgets.length === 1 ? '' : 's'} watched for overspending.` : 'Add budgets to get early warnings.',
     },
   ];
@@ -578,14 +581,14 @@ function renderHero() {
   `).join('');
 
   const heroMetrics = [
-    { label: 'Income', value: formatCurrency(summary.total_income) },
-    { label: 'Expenses', value: formatCurrency(summary.total_spend) },
-    { label: 'Savings', value: formatCurrency(summary.net) },
-    { label: 'Pending reviews', value: pending },
+    { label: 'Income', value: formatCurrency(summary.total_income), tone: 'neutral' },
+    { label: 'Expenses', value: formatCurrency(summary.total_spend), tone: summary.total_spend > summary.total_income ? 'warning' : 'neutral' },
+    { label: 'Savings', value: formatCurrency(summary.net), tone: summary.net >= 0 ? 'success' : 'danger' },
+    { label: 'Pending reviews', value: pending, tone: pending > 0 ? 'warning' : 'success' },
   ];
 
   el['hero-metrics'].innerHTML = heroMetrics.map((item) => `
-    <article class="hero-stat-card">
+    <article class="hero-stat-card ${item.tone}">
       <span>${item.label}</span>
       <strong>${item.value}</strong>
     </article>
@@ -798,6 +801,7 @@ function renderBudgetBoard() {
     const remainingLabel = budget.remaining >= 0
       ? `${formatCurrency(budget.remaining)} left`
       : `${formatCurrency(Math.abs(budget.remaining))} over`;
+    const forecast = getBudgetForecast(budget);
     return `
       <article class="budget-card">
         <div class="budget-head">
@@ -824,6 +828,7 @@ function renderBudgetBoard() {
           <span class="status-badge ${budget.status === 'over' ? 'error' : budget.status === 'warning' ? 'warning' : 'success'}">${budget.status}</span>
           <button type="button" class="text-link" data-budget-category-drill="${budget.category_id}">Focus category</button>
         </div>
+        <p class="budget-forecast ${forecast.tone}">${forecast.text}</p>
       </article>
     `;
   }).join('');
@@ -1479,7 +1484,7 @@ async function startDemoSyncPipeline() {
 }
 
 async function retryParseFailures() {
-  await runBackgroundJob(`/jobs/retry-parse-failures?user_id=${encodeURIComponent(state.session.user.id)}&limit=40`, 'Retry parse failures', 'Retry failures', el['btn-retry']);
+  await runBackgroundJob(`/jobs/retry-parse-failures?user_id=${encodeURIComponent(state.session.user.id)}&limit=40`, 'Retry sync', 'Retry sync', el['btn-retry']);
 }
 
 async function runBackgroundJob(path, label, idleText, button) {
@@ -1755,6 +1760,63 @@ function summarizeJob(job) {
 
 function lookupCategoryName(categoryId) {
   return state.categories.find((category) => category.id === categoryId)?.name || 'Uncategorized';
+}
+
+function getSavingsHealth(rate) {
+  if (rate >= 50) {
+    return {
+      label: `Excellent savings health (${rate}%)`,
+      detail: 'You are keeping a strong share of income.',
+      tone: 'success',
+    };
+  }
+  if (rate >= 20) {
+    return {
+      label: `Good savings health (${rate}%)`,
+      detail: 'Your month is stable, with room to grow savings.',
+      tone: 'success',
+    };
+  }
+  if (rate >= 0) {
+    return {
+      label: `Thin savings margin (${rate}%)`,
+      detail: 'Spending is close to income, so budgets matter this month.',
+      tone: 'warning',
+    };
+  }
+  return {
+    label: `Overspending alert (${rate}%)`,
+    detail: 'Expenses are higher than income for this month.',
+    tone: 'danger',
+  };
+}
+
+function getBudgetForecast(budget) {
+  const spend = Number(budget.actual_spend || 0);
+  const limit = Number(budget.monthly_limit || 0);
+  if (!limit) return { text: 'Add a monthly limit to unlock forecast guidance.', tone: 'neutral' };
+  if (spend <= 0) return { text: 'No spending in this category yet this month.', tone: 'success' };
+  if (spend > limit) {
+    return { text: `Already ${formatCurrency(spend - limit)} over. Reduce or reset this budget.`, tone: 'danger' };
+  }
+
+  const today = new Date();
+  const isCurrentMonth = today.getFullYear() === state.currentYear && today.getMonth() + 1 === state.currentMonth;
+  const dayOfMonth = isCurrentMonth ? today.getDate() : new Date(state.currentYear, state.currentMonth, 0).getDate();
+  const daysInMonth = new Date(state.currentYear, state.currentMonth, 0).getDate();
+  const dailyPace = spend / Math.max(dayOfMonth, 1);
+  const projectedSpend = dailyPace * daysInMonth;
+
+  if (projectedSpend <= limit) {
+    return { text: `Forecast: on track to end near ${formatCurrency(projectedSpend)}.`, tone: 'success' };
+  }
+
+  const daysUntilLimit = Math.max(1, Math.ceil((limit - spend) / dailyPace));
+  const forecastDate = new Date(state.currentYear, state.currentMonth - 1, Math.min(dayOfMonth + daysUntilLimit, daysInMonth));
+  return {
+    text: `Forecast: may exceed limit around ${formatDate(forecastDate)} at this pace.`,
+    tone: budget.status === 'warning' ? 'warning' : 'danger',
+  };
 }
 
 function formatCurrency(value) {

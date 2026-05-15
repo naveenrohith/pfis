@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.86em' font-size='88'>💠</text></svg>" />
-  <link rel="stylesheet" href="/static/css/dashboard-revamp.css?v=4" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%236366f1'/><text x='50' y='62' text-anchor='middle' font-size='36' font-family='Arial' font-weight='700' fill='white'>PF</text></svg>" />
+  <link rel="stylesheet" href="/static/css/dashboard-revamp.css?v=5" />
 </head>
 <body>
   <div class="app-backdrop" aria-hidden="true"></div>
@@ -143,7 +143,7 @@
       <div class="month-switcher">
         <button type="button" id="btn-prev-month" class="btn btn-ghost icon-only" aria-label="Previous month">←</button>
         <div class="month-panel">
-          <span class="eyebrow">Reporting month</span>
+          <span class="eyebrow">Month</span>
           <strong id="month-label">—</strong>
         </div>
         <button type="button" id="btn-next-month" class="btn btn-ghost icon-only" aria-label="Next month">→</button>
@@ -159,11 +159,11 @@
 
       <div class="action-buttons">
         <button type="button" id="btn-sync" class="btn btn-primary">Sync inbox</button>
-        <button type="button" id="btn-retry" class="btn btn-secondary">Retry failures</button>
+        <button type="button" id="btn-retry" class="btn btn-secondary">Retry sync</button>
         <button type="button" id="btn-refresh" class="btn btn-secondary">Refresh</button>
         <button type="button" id="btn-export" class="btn btn-secondary">Export CSV</button>
-        <button type="button" id="btn-report" class="btn btn-secondary">Monthly report</button>
-        <button type="button" id="btn-budget-modal" class="btn btn-secondary">Set budget</button>
+        <button type="button" id="btn-report" class="btn btn-secondary">Report</button>
+        <button type="button" id="btn-budget-modal" class="btn btn-secondary">Budget</button>
       </div>
     </section>
 
@@ -172,8 +172,8 @@
         <article class="surface-card hero-card">
           <div class="hero-copy">
               <span class="eyebrow">Financial health</span>
-            <h2 id="hero-title">Your monthly finance operating picture.</h2>
-            <p id="hero-summary-text">Loading your income, spend, review queue, and budget posture…</p>
+            <h2 id="hero-title">Your money, made easy to understand.</h2>
+            <p id="hero-summary-text">Loading your income, spending, reviews, and budgets...</p>
           </div>
           <div id="hero-focus-pills" class="hero-focus-pills"></div>
           <div id="hero-metrics" class="hero-metrics"></div>
@@ -273,8 +273,8 @@
         <article id="budgets" class="surface-card budget-board-card">
           <div class="surface-header">
             <div>
-              <span class="eyebrow">Budget posture</span>
-              <h3>Monthly budget board</h3>
+              <span class="eyebrow">Budgets</span>
+              <h3>Monthly limits</h3>
             </div>
             <button type="button" id="btn-new-budget" class="text-link">Create / update</button>
           </div>
@@ -284,8 +284,8 @@
         <article class="surface-card trend-card">
           <div class="surface-header">
             <div>
-              <span class="eyebrow">Run-rate analysis</span>
-              <h3>Daily spending trend</h3>
+              <span class="eyebrow">Spending rhythm</span>
+              <h3>Daily trend</h3>
             </div>
           </div>
           <div class="chart-shell trend-shell">
@@ -303,8 +303,8 @@
         <article class="surface-card review-queue-card">
           <div class="surface-header">
             <div>
-              <span class="eyebrow">Dedicated review workspace</span>
-              <h3>Low-confidence queue</h3>
+              <span class="eyebrow">Review</span>
+              <h3>Needs confirmation</h3>
             </div>
             <span id="review-queue-count" class="status-badge neutral">0 pending</span>
           </div>
@@ -349,8 +349,8 @@
         <aside class="surface-card review-detail-card">
           <div class="surface-header">
             <div>
-              <span class="eyebrow">Rapid correction panel</span>
-              <h3>Review detail</h3>
+              <span class="eyebrow">Quick fix</span>
+              <h3>Transaction detail</h3>
             </div>
             <button type="button" id="btn-focus-next-review" class="text-link">Next pending</button>
           </div>
@@ -469,6 +469,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script type="module" src="/static/js/dashboard-revamp.js?v=4"></script>
+  <script type="module" src="/static/js/dashboard-revamp.js?v=5"></script>
 </body>
 </html>
