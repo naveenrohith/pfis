@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%236366f1'/><text x='50' y='62' text-anchor='middle' font-size='36' font-family='Arial' font-weight='700' fill='white'>PF</text></svg>" />
-  <link rel="stylesheet" href="/static/css/dashboard-revamp.css?v=5" />
+  <link rel="stylesheet" href="/static/css/dashboard-revamp.css?v=6" />
 </head>
 <body>
   <div class="app-backdrop" aria-hidden="true"></div>
@@ -118,6 +118,7 @@
 
       <nav class="section-nav" aria-label="Dashboard sections">
         <button type="button" class="section-link active" data-scroll-target="overview">Home</button>
+        <button type="button" class="section-link" data-scroll-target="inbox">Inbox</button>
         <button type="button" class="section-link" data-scroll-target="transactions">Transactions</button>
         <button type="button" class="section-link" data-scroll-target="insights">Insights</button>
         <button type="button" class="section-link" data-scroll-target="budgets">Budgets</button>
@@ -220,6 +221,41 @@
       </section>
 
       <section id="metrics-grid" class="metrics-grid"></section>
+
+      <section id="inbox" class="section-grid inbox-grid">
+        <article class="surface-card inbox-card">
+          <div class="surface-header">
+            <div>
+              <span class="eyebrow">Gmail sync</span>
+              <h3>Recent synced emails</h3>
+            </div>
+            <span id="inbox-status-chip" class="status-badge neutral">No sync yet</span>
+          </div>
+
+          <div class="inbox-toolbar">
+            <p id="inbox-summary" class="inbox-summary">Waiting for your first sync to show recent Gmail activity.</p>
+            <button type="button" id="btn-open-transactions" class="btn btn-secondary">Open transactions</button>
+          </div>
+
+          <div id="inbox-email-list" class="email-list"></div>
+        </article>
+
+        <aside class="surface-card inbox-side-card">
+          <div class="surface-header">
+            <div>
+              <span class="eyebrow">Snapshot</span>
+              <h3>Inbox overview</h3>
+            </div>
+          </div>
+
+          <div id="inbox-stats-grid" class="inbox-stats-grid"></div>
+
+          <div class="surface-subsection">
+            <div class="subsection-header compact"><h4>What this means</h4></div>
+            <div id="inbox-guidance" class="inbox-guidance"></div>
+          </div>
+        </aside>
+      </section>
 
       <section id="insights" class="section-grid analytics-grid">
         <article class="surface-card chart-card">
@@ -469,6 +505,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script type="module" src="/static/js/dashboard-revamp.js?v=5"></script>
+  <script type="module" src="/static/js/dashboard-revamp.js?v=6"></script>
 </body>
 </html>

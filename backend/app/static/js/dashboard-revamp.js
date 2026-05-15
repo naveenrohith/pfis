@@ -65,6 +65,7 @@ function cacheElements() {
     'review-merchant', 'review-category', 'review-amount', 'review-type', 'review-category-shortcuts', 'btn-save-review', 'btn-save-next', 'btn-mark-reviewed',
     'explorer-count', 'btn-clear-explorer-filters', 'explorer-search', 'active-filter-chips', 'explorer-tbody', 'budget-modal', 'budget-modal-title',
     'btn-close-budget-modal', 'budget-form', 'budget-category', 'budget-limit', 'btn-cancel-budget', 'btn-save-budget', 'toast-stack', 'live-region',
+    'inbox-status-chip', 'inbox-summary', 'inbox-email-list', 'inbox-stats-grid', 'inbox-guidance', 'btn-open-transactions',
   ];
 
   ids.forEach((id) => {
@@ -99,6 +100,7 @@ function bindStaticEvents() {
   el['btn-report'].addEventListener('click', openMonthlyReport);
   el['btn-budget-modal'].addEventListener('click', () => openBudgetModal('create'));
   el['btn-new-budget'].addEventListener('click', () => openBudgetModal('create'));
+  el['btn-open-transactions'].addEventListener('click', () => scrollToSection('transactions'));
   el['btn-clear-log'].addEventListener('click', clearActivityLog);
   el['btn-clear-category-drilldown'].addEventListener('click', clearCategoryDrilldown);
   el.reviewSegments.forEach((button) => button.addEventListener('click', () => setReviewFilter(button.dataset.reviewFilter)));
@@ -541,6 +543,7 @@ function renderAll() {
   renderHero();
   renderMetrics();
   renderCommandCenter();
+  renderInboxPanel();
   renderCategoryAnalytics();
   renderInsights();
   renderMerchantStack();
@@ -698,6 +701,97 @@ function renderCommandCenter() {
   const fetched = latestSync.emails_fetched || 0;
   const processedTotal = state.emails?.processed_total ?? 0;
   el['command-summary'].textContent = `${processedTotal} financial email${processedTotal === 1 ? '' : 's'} are processed. Latest sync checked ${fetched} message${fetched === 1 ? '' : 's'} and stored ${stored} new. ${pending ? `${pending} transaction${pending === 1 ? '' : 's'} need confirmation.` : 'No transaction needs confirmation.'}`;
+}
+
+function renderInboxPanel() {
+  const emailsPayload = state.emails;
+  const emails = Array.isArray(emailsPayload?.emails) ? emailsPayload.emails : [];
+  const totalEmails = emailsPayload?.all_total ?? 0;
+  const processed = emailsPayload?.processed_total ?? 0;
+  const unprocessed = emailsPayload?.unprocessed_total ?? 0;
+  const latestSync = state.syncStatus?.runs?.[0] || null;
+  const latestStatus = latestSync?.status || state.syncStatus?.latest_status || 'idle';
+
+  el['inbox-status-chip'].className = `status-badge ${latestStatus === 'completed' ? 'success' : latestStatus === 'failed' ? 'error' : latestStatus === 'running' ? 'progress' : 'neutral'}`;
+  el['inbox-status-chip'].textContent = latestStatus === 'idle'
+    ? 'No sync yet'
+    : `Latest sync ${labelize(latestStatus)}`;
+
+  const latestTime = latestSync?.end_time || latestSync?.start_time || emails[0]?.received_at || null;
+  el['inbox-summary'].textContent = totalEmails > 0
+    ? `${totalEmails} synced financial email${totalEmails === 1 ? '' : 's'} in PFIS. Showing the ${emails.length} most recent items${latestTime ? `, last updated ${formatDateTime(latestTime)}.` : '.'}`
+    : 'No synced Gmail emails are visible yet. Run inbox sync to populate this panel.';
+
+  const statCards = [
+    { label: 'Synced emails', value: totalEmails, detail: 'Financial emails PFIS kept for traceability.' },
+    { label: 'Processed', value: processed, detail: 'Emails already turned into transaction candidates.' },
+    { label: 'Waiting', value: unprocessed, detail: 'Emails still queued for downstream parsing.' },
+    { label: 'Latest run', value: latestSync ? labelize(latestStatus) : 'Idle', detail: latestSync ? `${latestSync.emails_fetched || 0} checked • ${latestSync.emails_processed || 0} stored` : 'No sync run recorded yet.' },
+  ];
+
+  el['inbox-stats-grid'].innerHTML = statCards.map((card) => `
+    <article class="inbox-stat-card">
+      <span>${card.label}</span>
+      <strong>${card.value}</strong>
+      <p>${card.detail}</p>
+    </article>
+  `).join('');
+
+  el['inbox-guidance'].innerHTML = buildInboxGuidance({ totalEmails, processed, unprocessed, latestStatus });
+
+  if (!emails.length) {
+    el['inbox-email-list'].innerHTML = buildEmptyBlock(
+      'No Gmail emails to show yet',
+      'Once the inbox sync pulls data, this panel will show sender, subject, preview text, and whether each email has already been processed.',
+      '📬',
+    );
+    return;
+  }
+
+  el['inbox-email-list'].innerHTML = emails.map((email) => {
+    const statusTone = email.processed ? 'success' : 'warning';
+    const statusLabel = email.processed ? 'Processed' : 'Waiting';
+    return `
+      <article class="email-card ${email.processed ? 'processed' : 'pending'}">
+        <div class="email-card-head">
+          <div>
+            <strong>${escapeHtml(email.subject || 'No subject')}</strong>
+            <div class="email-meta-row">
+              <span>${escapeHtml(compactSender(email.sender))}</span>
+              <span>•</span>
+              <span>${formatDateTime(email.received_at)}</span>
+            </div>
+          </div>
+          <span class="status-badge ${statusTone}">${statusLabel}</span>
+        </div>
+        <p class="email-preview">${escapeHtml(email.body_preview || 'No preview available for this email yet.')}</p>
+      </article>
+    `;
+  }).join('');
+}
+
+function buildInboxGuidance({ totalEmails, processed, unprocessed, latestStatus }) {
+  const guidance = [];
+
+  if (!totalEmails) {
+    guidance.push('Use <strong>Sync inbox</strong> to fetch Gmail activity and populate this panel.');
+  } else if (unprocessed > 0) {
+    guidance.push(`<strong>${unprocessed}</strong> email${unprocessed === 1 ? ' is' : 's are'} still waiting for parsing, so the list may grow before all transactions appear.`);
+  } else {
+    guidance.push('All currently synced financial emails have already passed through PFIS processing.');
+  }
+
+  if (processed > 0) {
+    guidance.push(`${processed} processed email${processed === 1 ? '' : 's'} can already contribute to transactions, insights, and review items.`);
+  }
+
+  if (latestStatus === 'failed') {
+    guidance.push('The most recent sync run failed, so run <strong>Retry sync</strong> or refresh after fixing the issue.');
+  } else if (latestStatus === 'completed') {
+    guidance.push('The latest sync completed successfully, so this panel reflects the current saved inbox snapshot.');
+  }
+
+  return guidance.map((item) => `<p>${item}</p>`).join('');
 }
 
 function renderCategoryAnalytics() {
@@ -1882,6 +1976,16 @@ function formatDate(value) {
   return parseDateValue(value).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 }
 
+function formatDateTime(value) {
+  if (!value) return '—';
+  return new Date(value).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function formatSignedAmount(txn) {
   const sign = txn.transaction_type === 'credit' ? '+' : txn.transaction_type === 'refund' ? '+' : '-';
   return `${sign}${formatCurrency(txn.amount)}`;
@@ -1914,6 +2018,13 @@ function labelize(value) {
   return String(value || '')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function compactSender(value) {
+  if (!value) return 'Unknown sender';
+  const match = String(value).match(/^(.*?)\s*<([^>]+)>$/);
+  if (!match) return value;
+  return `${match[1].trim() || match[2]} (${match[2]})`;
 }
 
 function triggerDownload(blob, filename) {
