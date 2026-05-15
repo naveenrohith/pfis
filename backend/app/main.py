@@ -15,7 +15,13 @@ Phases 0-6:
 
 import logging
 import pathlib
+import sys
 from contextlib import asynccontextmanager
+
+if __name__ == "__main__" and (__package__ is None or __package__ == ""):
+    backend_dir = pathlib.Path(__file__).resolve().parents[1]
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -133,3 +139,9 @@ async def serve_dashboard():
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     return response
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=False)

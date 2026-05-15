@@ -452,7 +452,7 @@ function destroyCharts() {
 async function refreshDashboardData(options = {}) {
   if (!state.session.user?.id) return;
 
-  const { announceLabel = '' } = options;
+  const { announceLabel = '', forceLatestActivityMonth = false } = options;
   setLoading(true);
   setGlobalBanner('');
   syncMonthControls();
@@ -482,7 +482,7 @@ async function refreshDashboardData(options = {}) {
     state.budgets = Array.isArray(budgets) ? budgets : [];
     state.syncStatus = syncStatus;
 
-    if (await maybeSwitchToLatestActivityMonth(userId, summary)) {
+    if (await maybeSwitchToLatestActivityMonth(userId, summary, { force: forceLatestActivityMonth })) {
       return;
     }
 
@@ -499,8 +499,10 @@ async function refreshDashboardData(options = {}) {
   }
 }
 
-async function maybeSwitchToLatestActivityMonth(userId, summary) {
-  if (state.userSelectedMonth || state.monthAutoSelected || (summary?.transaction_count ?? 0) > 0) {
+async function maybeSwitchToLatestActivityMonth(userId, summary, options = {}) {
+  const { force = false } = options;
+
+  if (((state.userSelectedMonth && !force) || state.monthAutoSelected) || (summary?.transaction_count ?? 0) > 0) {
     return false;
   }
 
@@ -1561,7 +1563,7 @@ async function monitorJob(jobId, label) {
       writeActivity(`✅ ${label} completed. ${summarizeJob(snapshot)}`);
       state.activeJob = null;
       renderCommandCenter();
-      await refreshDashboardData({ announceLabel: `${label} completed` });
+      await refreshDashboardData({ announceLabel: `${label} completed`, forceLatestActivityMonth: true });
       showToast(`${label} completed`, 'success');
       return;
     }

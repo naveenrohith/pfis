@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.email import RawEmail
 from app.models.sync import ParseFailure
+from app.services.gmail.email_filter import EmailType, classify_email
+from app.services.parser.base_parser import BaseParser
 from app.services.parser.registry import get_parser_registry
 from app.services.parser.normalizer import (
     normalize_merchant,
@@ -25,6 +27,13 @@ from app.services.transaction_service import TransactionService
 from app.schemas.transaction import TransactionCreate
 
 logger = logging.getLogger(__name__)
+_TEXT_NORMALIZER = BaseParser()
+SKIPPABLE_EMAIL_TYPES = {EmailType.IGNORE, EmailType.OTP, EmailType.PROMOTION}
+
+
+def _normalize_email_body(body: str) -> str:
+    """Normalize stored email bodies before parser rules are applied."""
+    return _TEXT_NORMALIZER._clean_text(body or "")
 
 
 async def _record_parse_failure(
@@ -74,6 +83,7 @@ async def _process_email_batch(
         "stored": 0,
         "duplicates": 0,
         "low_confidence": 0,
+        "skipped_non_transaction": 0,
         "results": [],
     }
 
@@ -93,10 +103,32 @@ async def _process_email_batch(
         }
 
         try:
+            raw_body = email.body or ""
+            cleaned_body = _normalize_email_body(raw_body)
+            parser_body = cleaned_body or raw_body
+            if cleaned_body and cleaned_body != raw_body:
+                email.body = cleaned_body
+
+            email_type, _, _ = classify_email(
+                email.sender or "",
+                email.subject or "",
+                parser_body,
+            )
+            email_result["classification"] = email_type.value
+
+            if email_type in SKIPPABLE_EMAIL_TYPES:
+                stats["skipped_non_transaction"] += 1
+                email_result["status"] = "skipped_non_transaction"
+                await _resolve_parse_failure(db, email.id)
+                email.processed_flag = True
+                await db.commit()
+                stats["results"].append(email_result)
+                continue
+
             parse_result = registry.parse_email(
                 sender=email.sender or "",
                 subject=email.subject or "",
-                body=email.body or "",
+                body=parser_body,
             )
 
             email_result["amount"] = parse_result.amount
@@ -125,7 +157,7 @@ async def _process_email_batch(
             if not parse_result.merchant_raw or parse_result.merchant_source != "exact":
                 inferred_merchant, inferred_category_id = await infer_merchant_from_text(
                     db,
-                    f"{email.subject or ''} {email.body or ''}",
+                    f"{email.subject or ''} {parser_body}",
                 )
                 if inferred_merchant:
                     parse_result.merchant_raw = inferred_merchant
@@ -194,6 +226,7 @@ async def _process_email_batch(
     logger.info(
         f"Pipeline complete: {stats['parsed_success']} parsed, "
         f"{stats['stored']} stored, {stats['duplicates']} dupes, "
+        f"{stats['skipped_non_transaction']} skipped, "
         f"{stats['parsed_failed']} failed"
     )
     return stats

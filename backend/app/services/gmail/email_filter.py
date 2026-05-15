@@ -94,18 +94,36 @@ PROMO_KEYWORDS = [
 ]
 
 NON_TRANSACTION_KEYWORDS = [
+    r"account\s+update",
     r"available\s+balance",
     r"balance\s+in\s+your\s+account",
+    r"available\s+balance.*\bas\s+of\b",
     r"credit\s+card\s+application",
     r"application\s+reference",
+    r"credit\s+card\s+application.*\bapproved\b",
+    r"credit\s+card\s+application.*successfully\s+submitted",
     r"successfully\s+set[-\s]?up",
     r"device\s+for\s+mobilebanking",
     r"biometric\s+login",
     r"login\s+pin",
     r"sms\s+banking\s+registration",
+    r"chatbanking\s+registration",
+    r"netbanking\s+password",
+    r"reset\s+your\s+netbanking\s+password",
+    r"modified\s+card\s+usage",
+    r"via\s+online\s+banking",
+    r"mobile\s+number.*email\s+id.*successfully\s+updated",
+    r"aadhaar\s+has\s+been\s+updated",
+    r"secure\s+usage\s+tips",
+    r"accepted\s+the\s+terms\s+and\s+conditions",
+    r"third\s+party\s+funds\s+transfer\s+facility",
+    r"registered\s+your\s+device",
+    r"set\s+your\s+4\s+digit\s+pin",
     r"validate\s+your\s+email\s+id",
     r"email\s+address\s+confirmation",
     r"card\s+usage\s+settings",
+    r"real[-\s]?time\s+balance\s+updates?",
+    r"thank\s+you\s+for\s+banking\s+with\s+us",
 ]
 
 AMOUNT_PATTERN = re.compile(

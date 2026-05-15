@@ -4,10 +4,17 @@ Loads settings from .env file with Pydantic validation.
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+APP_DIR = Path(__file__).resolve().parent
+BACKEND_DIR = APP_DIR.parent
+ROOT_DIR = BACKEND_DIR.parent
+DEFAULT_SQLITE_DB = BACKEND_DIR / "pfis.db"
 
 
 class Settings(BaseSettings):
@@ -33,6 +40,30 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/google/callback"
     GMAIL_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/auth/gmail/callback"
     GOOGLE_ALLOWED_EMAILS: Annotated[list[str], NoDecode] = []
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def resolve_database_url(cls, value: Any) -> str:
+        """Resolve relative SQLite paths against the backend directory."""
+        if value is None or value == "":
+            return f"sqlite+aiosqlite:///{DEFAULT_SQLITE_DB.as_posix()}"
+        if not isinstance(value, str):
+            raise ValueError("Invalid DATABASE_URL value")
+
+        prefix = "sqlite+aiosqlite:///"
+        if not value.startswith(prefix):
+            return value
+
+        raw_path = value[len(prefix):]
+        if raw_path in {":memory:", "/:memory:"}:
+            return value
+
+        candidate = Path(raw_path)
+        if candidate.is_absolute() or (len(raw_path) >= 3 and raw_path[1:3] in {":\\", ":/"}):
+            return f"{prefix}{candidate.as_posix()}"
+
+        resolved = (BACKEND_DIR / candidate).resolve()
+        return f"{prefix}{resolved.as_posix()}"
 
     @field_validator("DEBUG", mode="before")
     @classmethod
@@ -66,7 +97,10 @@ class Settings(BaseSettings):
             return [item.strip().lower() for item in value.split(",") if item.strip()]
         raise ValueError("Invalid GOOGLE_ALLOWED_EMAILS value")
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=(str(BACKEND_DIR / ".env"), str(ROOT_DIR / ".env")),
+        env_file_encoding="utf-8",
+    )
 
 
 @lru_cache()

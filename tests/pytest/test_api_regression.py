@@ -4,11 +4,16 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 
 from app.models.category import Category, Merchant
-from app.models.sync import UserCorrection
+from app.models.email import RawEmail
+from app.models.sync import ParseFailure, UserCorrection
+from app.models.transaction import Transaction
 from app.services.parser.normalizer import normalize_merchant
+from app.services.parser.pipeline import retry_parse_failures
 from tests.pytest.helpers import create_user
 
 
@@ -174,3 +179,50 @@ async def test_bulk_review_updates_apply_shared_changes(client):
     assert all(txn["category_id"] == transport["id"] for txn in transactions)
     assert all(txn["reviewed_flag"] is True for txn in transactions)
     assert all(txn["reviewed_at"] is not None for txn in transactions)
+
+
+async def test_retry_parse_failures_reclassifies_balance_alerts_as_non_transaction(client, test_session_factory):
+    user = await create_user(client, "retryignore")
+
+    async with test_session_factory() as db:
+        raw_email = RawEmail(
+            user_id=user["id"],
+            gmail_message_id=f"{user['id']}:balance-alert-1",
+            subject="View: Account update for your HDFC Bank A/c",
+            body=(
+                "Dear Customer, the available balance in your account ending XX1441 is Rs. INR 8,795.88 "
+                "as of 23-MAR-26. For real-time balance updates, call us at 1800 270 3333. "
+                "Thank you for banking with us!"
+            ),
+            sender="HDFC Bank InstaAlerts <alerts@hdfcbank.net>",
+            received_at=datetime.now(timezone.utc),
+            processed_flag=True,
+        )
+        db.add(raw_email)
+        await db.flush()
+
+        db.add(
+            ParseFailure(
+                email_id=raw_email.id,
+                error_message="Invalid parse: amount=8795.88, type=None",
+                parser_version=1,
+                resolved=False,
+            )
+        )
+        await db.commit()
+
+        stats = await retry_parse_failures(db, user["id"], limit=5)
+        assert stats["retried_failures"] == 1
+        assert stats["skipped_non_transaction"] == 1
+        assert stats["stored"] == 0
+
+        failure_result = await db.execute(
+            select(ParseFailure).where(ParseFailure.email_id == raw_email.id)
+        )
+        failure = failure_result.scalar_one()
+        assert failure.resolved is True
+
+        transaction_result = await db.execute(
+            select(Transaction).where(Transaction.user_id == user["id"])
+        )
+        assert transaction_result.scalars().all() == []
