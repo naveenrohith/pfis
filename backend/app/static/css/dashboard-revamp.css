@@ -22,7 +22,7 @@
   --radius-md: 14px;
   --radius-sm: 10px;
   --shadow: 0 18px 50px rgba(2, 6, 23, 0.28);
-  --content: 1280px;
+  --content: 100%;
   --transition: 160ms ease;
 }
 
@@ -196,9 +196,10 @@ canvas {
 .app-shell {
   position: relative;
   z-index: 1;
-  max-width: var(--content);
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
-  padding: 18px 18px 64px;
+  padding: 0 8px 64px;
 }
 
 .surface-card,

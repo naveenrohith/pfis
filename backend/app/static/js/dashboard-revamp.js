@@ -1480,7 +1480,12 @@ async function deleteBudget(budgetId) {
 }
 
 async function startDemoSyncPipeline() {
-  await runBackgroundJob(`/jobs/demo-sync-pipeline?user_id=${encodeURIComponent(state.session.user.id)}&limit=80`, 'Inbox sync', 'Sync inbox', el['btn-sync']);
+  if (state.session.mode === 'demo') {
+    await runBackgroundJob(`/jobs/demo-sync-pipeline?user_id=${encodeURIComponent(state.session.user.id)}&limit=80`, 'Demo inbox sync', 'Sync inbox', el['btn-sync']);
+    return;
+  }
+
+  await runBackgroundJob(`/jobs/gmail-sync-pipeline?user_id=${encodeURIComponent(state.session.user.id)}&max_results=200&limit=200`, 'Gmail sync', 'Sync inbox', el['btn-sync']);
 }
 
 async function retryParseFailures() {

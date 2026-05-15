@@ -139,13 +139,19 @@ def _build_gmail_service(access_token: str, refresh_token: str):
 
 def _build_sender_query() -> str:
     """
-    Build a Gmail search query to filter by known bank senders.
-    Example: from:(alerts@hdfcbank.com OR alerts@sbi.co.in OR ...)
+    Build a Gmail search query for likely transaction emails.
+
+    The first implementation only searched a fixed sender allowlist. Real inboxes
+    often receive alerts from vendor-specific sender aliases, UPI apps, and
+    notification gateways, so use a broader recent-email query and let the local
+    classifier decide what is actually financial.
     """
-    senders = list(KNOWN_BANK_SENDERS.keys())
-    # Gmail query syntax: from:(addr1 OR addr2 OR ...)
-    sender_list = " OR ".join(senders)
-    return f"from:({sender_list})"
+    sender_list = " OR ".join(KNOWN_BANK_SENDERS.keys())
+    keyword_query = (
+        '"debited" OR "credited" OR "spent" OR "transaction" OR "payment" OR '
+        '"UPI" OR "card" OR "account" OR "bank" OR "refund"'
+    )
+    return f'newer_than:365d (from:({sender_list}) OR {keyword_query})'
 
 
 def _extract_email_body(payload: dict) -> str:
