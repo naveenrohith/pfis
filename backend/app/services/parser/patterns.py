@@ -12,8 +12,8 @@ from typing import Optional
 # ─── Amount Extraction ───
 
 AMOUNT_PATTERNS = [
-    # Rs. 450.00 / Rs.1,200.00 / Rs 450
-    re.compile(r"Rs\.?\s?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
+    # Rs. 450.00 / Rs.INR 1,200.00 / Rs 450
+    re.compile(r"Rs\.?\s?(?:INR\s?)?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
     # INR 450.00 / INR 1,200
     re.compile(r"INR\s?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
     # ₹450.00 / ₹ 1,200
@@ -21,8 +21,24 @@ AMOUNT_PATTERNS = [
 ]
 
 
+TRANSACTION_AMOUNT_PATTERNS = [
+    re.compile(r"Rs\.?\s?(?:INR\s?)?([\d,]+(?:\.\d{1,2})?)\s+(?:has\s+been\s+)?(?:is\s+)?(?:debited|credited|charged)", re.IGNORECASE),
+    re.compile(r"(?:debited|credited|charged|spent|withdrawal\s+for)\s+(?:for\s+)?Rs\.?\s?(?:INR\s?)?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
+    re.compile(r"(?:payment\s+of|paid)\s+Rs\.?\s?(?:INR\s?)?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
+]
+
+
 def extract_amount(text: str) -> Optional[float]:
-    """Extract monetary amount from text. Returns the first match."""
+    """Extract the transaction amount, preferring transaction context."""
+    for pattern in TRANSACTION_AMOUNT_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            amount_str = match.group(1).replace(",", "")
+            try:
+                return float(amount_str)
+            except ValueError:
+                continue
+
     for pattern in AMOUNT_PATTERNS:
         match = pattern.search(text)
         if match:
@@ -41,10 +57,13 @@ DEBIT_KEYWORDS = [
     r"\bpurchase\b", r"\bpaid\b", r"\bwithdrawn\b",
     r"\bdebit\b", r"\btransferred\b",
     r"\bpayment\s+of\b", r"\bpayment\s+successful\b",
+    r"\bis\s+debited\s+from\b", r"\bhas\s+been\s+debited\b",
 ]
 
 CREDIT_KEYWORDS = [
     r"\bcredited\b", r"\breceived\b", r"\bdeposited\b",
+    r"\bsuccessfully\s+added\s+to\s+your\s+account\b",
+    r"\badded\s+to\s+your\s+account\b",
 ]
 
 REFUND_KEYWORDS = [
@@ -79,6 +98,8 @@ def detect_transaction_type(text: str) -> Optional[str]:
 DATE_PATTERNS = [
     # 05-05-2026, 05/05/2026
     (re.compile(r"(\d{2})[-/](\d{2})[-/](\d{4})"), "dmy4"),
+    # 01 Feb, 2026 / 01 February 2026
+    (re.compile(r"(\d{1,2})\s+([A-Za-z]{3,9}),?\s+(\d{4})"), "dMonth"),
     # 05-May-2026, 05-May-26
     (re.compile(r"(\d{1,2})[-/](\w{3})[-/](\d{2,4})"), "dMy"),
     # 2026-05-05
@@ -93,6 +114,10 @@ MONTH_MAP = {
 }
 
 
+def _valid_year(year: int) -> bool:
+    return 2000 <= year <= date.today().year + 1
+
+
 def extract_date(text: str) -> Optional[date]:
     """Extract transaction date from text."""
     for pattern, fmt in DATE_PATTERNS:
@@ -101,7 +126,15 @@ def extract_date(text: str) -> Optional[date]:
             try:
                 if fmt == "dmy4":
                     d, m, y = int(match.group(1)), int(match.group(2)), int(match.group(3))
-                    return date(y, m, d)
+                    if _valid_year(y):
+                        return date(y, m, d)
+                elif fmt == "dMonth":
+                    d = int(match.group(1))
+                    m_str = match.group(2).lower()[:3]
+                    m = MONTH_MAP.get(m_str)
+                    y = int(match.group(3))
+                    if m and _valid_year(y):
+                        return date(y, m, d)
                 elif fmt == "dMy":
                     d = int(match.group(1))
                     m_str = match.group(2).lower()[:3]
@@ -111,14 +144,17 @@ def extract_date(text: str) -> Optional[date]:
                     y = int(match.group(3))
                     if y < 100:
                         y += 2000
-                    return date(y, m, d)
+                    if _valid_year(y):
+                        return date(y, m, d)
                 elif fmt == "ymd":
                     y, m, d = int(match.group(1)), int(match.group(2)), int(match.group(3))
-                    return date(y, m, d)
+                    if _valid_year(y):
+                        return date(y, m, d)
                 elif fmt == "dmy2":
                     d, m, y = int(match.group(1)), int(match.group(2)), int(match.group(3))
                     y += 2000
-                    return date(y, m, d)
+                    if _valid_year(y):
+                        return date(y, m, d)
             except (ValueError, OverflowError):
                 continue
     return None
@@ -150,6 +186,8 @@ def extract_account(text: str) -> Optional[str]:
 REF_PATTERNS = [
     # UPI Ref No 412345678901 / Ref No. 123456
     re.compile(r"(?:UPI\s+)?Ref\.?\s*(?:No\.?\s*)?:?\s*(\d{6,20})", re.IGNORECASE),
+    # "UPI transaction reference number is 609704956003"
+    re.compile(r"UPI\s+transaction\s+reference\s+number\s+is\s+(\d{6,20})", re.IGNORECASE),
     # Transaction ID: PHO412345678906
     re.compile(r"Transaction\s+ID:?\s*(\w{6,25})", re.IGNORECASE),
     # NEFT Ref No SBIN123456789012
@@ -169,6 +207,10 @@ def extract_reference_id(text: str) -> Optional[str]:
 # ─── Merchant Extraction ───
 
 MERCHANT_PATTERNS = [
+    # HDFC NEFT credit: "from NEFT Cr-BARC0INBBIR-RANDSTAD INDIA PRIVATE LIMITED-..."
+    re.compile(r"\bfrom\s+NEFT\s+Cr-[^-]+-([A-Z][A-Z0-9\s.&]+?)-", re.IGNORECASE),
+    # HDFC UPI: "to VPA payzomato@hdfcbank ZOMATO on ..."
+    re.compile(r"\bto\s+VPA\s+\S+\s+([A-Z][A-Z0-9\s.&-]+?)\s+on\s+\d", re.IGNORECASE),
     # "at SWIGGY" / "at AMAZON PAY INDIA PV"
     re.compile(r"\bat\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:via|on|for|UPI|Ref|If|Available|Avl))", re.IGNORECASE),
     # "to BIGBASKET" / "to SPOTIFY INDIA"
@@ -191,6 +233,7 @@ MERCHANT_NOISE = {
     "UPI", "POS", "NEFT", "IMPS", "RTGS", "TXN", "TRANSACTION",
     "PAYMENT", "PURCHASE", "CARD", "DEBIT", "CREDIT", "BANK", "ACCOUNT",
     "CUSTOMER", "AVAILABLE", "BALANCE", "LIMIT", "ALERT",
+    "MORE DETAILS", "DETAILS", "SERVICE CHARGES", "FEES",
 }
 
 

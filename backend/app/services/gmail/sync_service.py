@@ -11,8 +11,10 @@ Pipeline:
 """
 
 import base64
+import html
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 import uuid
@@ -195,6 +197,17 @@ def _extract_email_body(payload: dict) -> str:
     return body_text
 
 
+def _clean_email_body(body: str) -> str:
+    """Normalize Gmail HTML/plain body before storage and parsing."""
+    body = html.unescape(body or "")
+    body = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", body)
+    body = re.sub(r"(?s)<!--.*?-->", " ", body)
+    body = re.sub(r"(?i)<br\s*/?>", " ", body)
+    body = re.sub(r"(?i)</(?:p|div|tr|td|table|li|h\d)>", " ", body)
+    body = re.sub(r"<[^>]+>", " ", body)
+    return re.sub(r"\s+", " ", body).strip()
+
+
 def _extract_headers(headers: list[dict]) -> dict:
     """Extract useful headers (From, Subject, Date) from Gmail message."""
     result = {}
@@ -296,7 +309,7 @@ async def sync_gmail_emails(
                 # Extract headers and body
                 payload = msg.get("payload", {})
                 headers = _extract_headers(payload.get("headers", []))
-                body = _extract_email_body(payload)
+                body = _clean_email_body(_extract_email_body(payload))
                 sender = headers.get("from", "")
                 subject = headers.get("subject", "")
 

@@ -82,7 +82,15 @@ class BaseParser:
         raise NotImplementedError
 
     def _clean_text(self, text: str) -> str:
-        """Remove extra whitespace, newlines, etc."""
+        """Convert email HTML/plain text into parser-friendly text."""
+        import html
         import re
+
+        text = html.unescape(text or "")
+        text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", text)
+        text = re.sub(r"(?s)<!--.*?-->", " ", text)
+        text = re.sub(r"(?i)<br\s*/?>", " ", text)
+        text = re.sub(r"(?i)</(?:p|div|tr|td|table|li|h\d)>", " ", text)
+        text = re.sub(r"<[^>]+>", " ", text)
         text = re.sub(r"\s+", " ", text)
         return text.strip()
