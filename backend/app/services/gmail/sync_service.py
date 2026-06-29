@@ -11,28 +11,25 @@ Pipeline:
 """
 
 import base64
-import html
 import json
 import logging
-import re
-from datetime import datetime, timezone
-from typing import Optional
 import uuid
+from datetime import UTC, datetime
 
-from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.email import RawEmail, GmailAccount
+from app.models.email import GmailAccount, RawEmail
 from app.models.sync import SyncRun, SyncStatus
 from app.security import decrypt_secret, encrypt_secret
-from app.services.gmail.oauth_service import build_credentials, refresh_access_token
 from app.services.gmail.email_filter import (
-    classify_email,
-    EmailType,
     KNOWN_BANK_SENDERS,
+    EmailType,
+    classify_email,
 )
+from app.services.gmail.oauth_service import build_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +65,12 @@ async def demo_sync_gmail_emails(
             )
             if existing.scalar_one_or_none():
                 stats["emails_skipped_duplicate"] += 1
-                stats["classifications"].append({
-                    "subject": email_data["subject"][:60],
-                    "type": "DUPLICATE",
-                })
+                stats["classifications"].append(
+                    {
+                        "subject": email_data["subject"][:60],
+                        "type": "DUPLICATE",
+                    }
+                )
                 continue
 
             email_type, bank_name, confidence = classify_email(
@@ -80,13 +79,15 @@ async def demo_sync_gmail_emails(
                 email_data["body"],
             )
 
-            stats["classifications"].append({
-                "subject": email_data["subject"][:60],
-                "sender": email_data["sender"],
-                "type": email_type.value,
-                "bank": bank_name,
-                "confidence": confidence,
-            })
+            stats["classifications"].append(
+                {
+                    "subject": email_data["subject"][:60],
+                    "sender": email_data["sender"],
+                    "type": email_type.value,
+                    "bank": bank_name,
+                    "confidence": confidence,
+                }
+            )
 
             if email_type == EmailType.OTP:
                 stats["emails_skipped_otp"] += 1
@@ -104,14 +105,14 @@ async def demo_sync_gmail_emails(
                     subject=email_data["subject"],
                     body=email_data["body"],
                     sender=email_data["sender"],
-                    received_at=datetime.now(timezone.utc),
+                    received_at=datetime.now(UTC),
                     processed_flag=False,
                 )
             )
             stats["emails_stored"] += 1
 
         sync_run.status = SyncStatus.COMPLETED
-        sync_run.end_time = datetime.now(timezone.utc)
+        sync_run.end_time = datetime.now(UTC)
         sync_run.emails_fetched = stats["emails_fetched"]
         sync_run.emails_processed = stats["emails_stored"]
         await db.commit()
@@ -119,14 +120,14 @@ async def demo_sync_gmail_emails(
         return stats
     except Exception as e:
         sync_run.status = SyncStatus.FAILED
-        sync_run.end_time = datetime.now(timezone.utc)
+        sync_run.end_time = datetime.now(UTC)
         sync_run.errors = json.dumps([{"error": str(e)}])
         await db.commit()
         raise
 
 
-def _build_gmail_service(access_token: str, refresh_token: str):
-    """Build an authenticated Gmail API service instance."""
+def _build_gmail_service_sync(access_token: str, refresh_token: str):
+    """Build an authenticated Gmail API service instance (sync helper)."""
     credentials = build_credentials(access_token, refresh_token)
     refreshed = False
 
@@ -137,6 +138,13 @@ def _build_gmail_service(access_token: str, refresh_token: str):
         refreshed = True
 
     return build("gmail", "v1", credentials=credentials), credentials, refreshed
+
+
+async def _build_gmail_service(access_token: str, refresh_token: str):
+    """Build Gmail service without blocking the event loop."""
+    import asyncio
+
+    return await asyncio.to_thread(_build_gmail_service_sync, access_token, refresh_token)
 
 
 def _build_sender_query() -> str:
@@ -153,7 +161,7 @@ def _build_sender_query() -> str:
         '"debited" OR "credited" OR "spent" OR "transaction" OR "payment" OR '
         '"UPI" OR "card" OR "account" OR "bank" OR "refund"'
     )
-    return f'newer_than:365d (from:({sender_list}) OR {keyword_query})'
+    return f"(from:({sender_list}) OR {keyword_query})"
 
 
 def _extract_email_body(payload: dict) -> str:
@@ -164,9 +172,9 @@ def _extract_email_body(payload: dict) -> str:
     body_text = ""
 
     if "body" in payload and payload["body"].get("data"):
-        body_text = base64.urlsafe_b64decode(
-            payload["body"]["data"]
-        ).decode("utf-8", errors="replace")
+        body_text = base64.urlsafe_b64decode(payload["body"]["data"]).decode(
+            "utf-8", errors="replace"
+        )
         return body_text
 
     # Handle multipart messages
@@ -175,9 +183,9 @@ def _extract_email_body(payload: dict) -> str:
         mime_type = part.get("mimeType", "")
 
         if mime_type == "text/plain" and part.get("body", {}).get("data"):
-            body_text = base64.urlsafe_b64decode(
-                part["body"]["data"]
-            ).decode("utf-8", errors="replace")
+            body_text = base64.urlsafe_b64decode(part["body"]["data"]).decode(
+                "utf-8", errors="replace"
+            )
             return body_text
 
         # Nested multipart
@@ -189,9 +197,9 @@ def _extract_email_body(payload: dict) -> str:
     # Fallback: try text/html if no plain text
     for part in parts:
         if part.get("mimeType") == "text/html" and part.get("body", {}).get("data"):
-            body_text = base64.urlsafe_b64decode(
-                part["body"]["data"]
-            ).decode("utf-8", errors="replace")
+            body_text = base64.urlsafe_b64decode(part["body"]["data"]).decode(
+                "utf-8", errors="replace"
+            )
             return body_text
 
     return body_text
@@ -199,13 +207,9 @@ def _extract_email_body(payload: dict) -> str:
 
 def _clean_email_body(body: str) -> str:
     """Normalize Gmail HTML/plain body before storage and parsing."""
-    body = html.unescape(body or "")
-    body = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", body)
-    body = re.sub(r"(?s)<!--.*?-->", " ", body)
-    body = re.sub(r"(?i)<br\s*/?>", " ", body)
-    body = re.sub(r"(?i)</(?:p|div|tr|td|table|li|h\d)>", " ", body)
-    body = re.sub(r"<[^>]+>", " ", body)
-    return re.sub(r"\s+", " ", body).strip()
+    from app.utils.text import clean_html_to_text
+
+    return clean_html_to_text(body)
 
 
 def _extract_headers(headers: list[dict]) -> dict:
@@ -222,11 +226,11 @@ async def sync_gmail_emails(
     db: AsyncSession,
     user_id: str,
     gmail_account_id: str,
-    max_results: int = 50,
+    max_results: int | None = 50,
 ) -> dict:
     """
     Main sync function. Fetches emails from Gmail and stores them.
-    
+
     Returns sync summary dict.
     """
     # Create sync run record
@@ -248,16 +252,14 @@ async def sync_gmail_emails(
 
     try:
         # Get Gmail account credentials
-        result = await db.execute(
-            select(GmailAccount).where(GmailAccount.id == gmail_account_id)
-        )
+        result = await db.execute(select(GmailAccount).where(GmailAccount.id == gmail_account_id))
         gmail_account = result.scalar_one_or_none()
 
         if not gmail_account:
             raise ValueError(f"Gmail account {gmail_account_id} not found")
 
-        # Build Gmail service
-        service, credentials, refreshed = _build_gmail_service(
+        # Build Gmail service (non-blocking)
+        service, credentials, refreshed = await _build_gmail_service(
             decrypt_secret(gmail_account.access_token_ref) or "",
             decrypt_secret(gmail_account.refresh_token_ref) or "",
         )
@@ -267,20 +269,37 @@ async def sync_gmail_emails(
             gmail_account.refresh_token_ref = encrypt_secret(
                 credentials.refresh_token or decrypt_secret(gmail_account.refresh_token_ref) or ""
             )
-            await db.commit()
 
         # Build search query for bank emails
         query = _build_sender_query()
         logger.info(f"Syncing Gmail for user {user_id[:8]}... query={query[:80]}...")
 
-        # Fetch message IDs
-        messages_response = service.users().messages().list(
-            userId="me",
-            q=query,
-            maxResults=max_results,
-        ).execute()
+        # Fetch message IDs with pagination
+        messages = []
+        next_page_token = None
+        while True:
+            page_size = 500 if max_results is None else min(max_results - len(messages), 500)
+            if page_size <= 0:
+                break
 
-        messages = messages_response.get("messages", [])
+            list_kwargs = {"userId": "me", "q": query, "maxResults": page_size}
+            if next_page_token:
+                list_kwargs["pageToken"] = next_page_token
+
+            import asyncio
+
+            messages_response = await asyncio.to_thread(
+                lambda lk=list_kwargs: service.users().messages().list(**lk).execute()
+            )
+
+            messages.extend(messages_response.get("messages", []))
+            next_page_token = messages_response.get("nextPageToken")
+
+            if not next_page_token or (max_results is not None and len(messages) >= max_results):
+                break
+
+        if max_results is not None:
+            messages = messages[:max_results]
         stats["emails_fetched"] = len(messages)
         logger.info(f"Found {len(messages)} emails matching bank senders")
 
@@ -292,20 +311,25 @@ async def sync_gmail_emails(
             try:
                 # Check if already stored (dedup by gmail_message_id)
                 existing = await db.execute(
-                    select(RawEmail).where(
-                        RawEmail.gmail_message_id == scoped_gmail_msg_id
-                    )
+                    select(RawEmail).where(RawEmail.gmail_message_id == scoped_gmail_msg_id)
                 )
                 if existing.scalar_one_or_none():
                     stats["emails_skipped_duplicate"] += 1
                     continue
 
-                # Fetch full message
-                msg = service.users().messages().get(
-                    userId="me",
-                    id=gmail_msg_id,
-                    format="full",
-                ).execute()
+                # Fetch full message (non-blocking)
+                import asyncio
+
+                msg = await asyncio.to_thread(
+                    lambda mid=gmail_msg_id: service.users()
+                    .messages()
+                    .get(
+                        userId="me",
+                        id=mid,
+                        format="full",
+                    )
+                    .execute()
+                )
 
                 # Extract headers and body
                 payload = msg.get("payload", {})
@@ -316,14 +340,10 @@ async def sync_gmail_emails(
 
                 # Parse received date from internal timestamp
                 internal_date_ms = int(msg.get("internalDate", 0))
-                received_at = datetime.fromtimestamp(
-                    internal_date_ms / 1000, tz=timezone.utc
-                )
+                received_at = datetime.fromtimestamp(internal_date_ms / 1000, tz=UTC)
 
                 # Classify the email
-                email_type, bank_name, confidence = classify_email(
-                    sender, subject, body
-                )
+                email_type, bank_name, confidence = classify_email(sender, subject, body)
 
                 # Only store transaction-relevant emails
                 if email_type == EmailType.OTP:
@@ -356,22 +376,19 @@ async def sync_gmail_emails(
 
             except Exception as e:
                 stats["emails_failed"] += 1
-                stats["errors"].append({
-                    "gmail_message_id": gmail_msg_id,
-                    "error": str(e),
-                })
+                stats["errors"].append(
+                    {
+                        "gmail_message_id": gmail_msg_id,
+                        "error": str(e),
+                    }
+                )
                 logger.error(f"Failed to process email {gmail_msg_id}: {e}")
                 continue
 
-        await db.commit()
-
-        # Update Gmail account last_synced_at
-        gmail_account.last_synced_at = datetime.now(timezone.utc)
-        await db.commit()
-
-        # Update sync run
+        # Single atomic commit for all changes
+        gmail_account.last_synced_at = datetime.now(UTC)
         sync_run.status = SyncStatus.COMPLETED
-        sync_run.end_time = datetime.now(timezone.utc)
+        sync_run.end_time = datetime.now(UTC)
         sync_run.emails_fetched = stats["emails_fetched"]
         sync_run.emails_processed = stats["emails_processed"]
         sync_run.emails_failed = stats["emails_failed"]
@@ -391,7 +408,7 @@ async def sync_gmail_emails(
     except Exception as e:
         # Mark sync as failed
         sync_run.status = SyncStatus.FAILED
-        sync_run.end_time = datetime.now(timezone.utc)
+        sync_run.end_time = datetime.now(UTC)
         sync_run.errors = json.dumps([{"error": str(e)}])
         await db.commit()
 

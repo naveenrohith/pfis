@@ -4,6 +4,7 @@ Basic health and system info endpoint.
 """
 
 from fastapi import APIRouter
+
 from app.config import get_settings
 
 router = APIRouter(tags=["Health"])

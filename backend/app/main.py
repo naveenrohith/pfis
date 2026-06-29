@@ -16,6 +16,7 @@ Phases 0-6:
 import logging
 import pathlib
 import sys
+import uuid
 from contextlib import asynccontextmanager
 
 if __name__ == "__main__" and (__package__ is None or __package__ == ""):
@@ -24,30 +25,41 @@ if __name__ == "__main__" and (__package__ is None or __package__ == ""):
         sys.path.insert(0, str(backend_dir))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-
-from app.config import get_settings
-from app.database import init_db, close_db, AsyncSessionLocal
-from app.api.routes import health, users, transactions, categories
-from app.api.routes import auth
-from app.api.routes import jobs
-from app.api.routes.gmail import auth_router as gmail_auth_router, gmail_router
-from app.api.routes import pipeline
-from app.api.routes import insights
-from app.api.routes import budgets
-from app.api.routes import reports
-from app.services.seed_service import run_seeds
+from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 # Import all models so SQLAlchemy Base.metadata registers them before create_all()
 import app.models  # noqa: F401
+from app.api.routes import (
+    auth,
+    budgets,
+    categories,
+    health,
+    insights,
+    jobs,
+    pipeline,
+    reports,
+    transactions,
+    users,
+)
+from app.api.routes.gmail import auth_router as gmail_auth_router
+from app.api.routes.gmail import gmail_router
+from app.config import get_settings
+from app.database import AsyncSessionLocal, close_db, init_db
+from app.observability import install_request_id_logging, request_id_ctx
+from app.rate_limit import limiter
+from app.services.seed_service import run_seeds
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+    format="%(asctime)s | %(levelname)-7s | %(request_id)s | %(name)s | %(message)s",
     datefmt="%H:%M:%S",
 )
+install_request_id_logging()
 logger = logging.getLogger("pfis")
 
 settings = get_settings()
@@ -85,15 +97,33 @@ app = FastAPI(
     version=settings.APP_VERSION,
     lifespan=lifespan,
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    expose_headers=["X-Total-Count", "X-Request-ID"],
 )
+
+
+@app.middleware("http")
+async def request_id_middleware(request, call_next):
+    """Attach a correlation id to each request for traceable logging."""
+    rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    token = request_id_ctx.set(rid)
+    try:
+        response = await call_next(request)
+    finally:
+        request_id_ctx.reset(token)
+    response.headers["X-Request-ID"] = rid
+    return response
+
 
 # Static files (CSS, JS, assets)
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
@@ -126,6 +156,7 @@ app.include_router(reports.router, prefix="/api")
 async def root():
     """Root endpoint — redirect to dashboard."""
     from fastapi.responses import RedirectResponse
+
     return RedirectResponse(url="/dashboard")
 
 

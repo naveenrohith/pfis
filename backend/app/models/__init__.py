@@ -4,11 +4,11 @@ Import all models here so SQLAlchemy's Base.metadata knows about them
 when create_all() is called. Order matters for foreign key resolution.
 """
 
-from app.models.user import User
 from app.models.category import Category, Merchant
-from app.models.email import RawEmail, GmailAccount
+from app.models.email import GmailAccount, RawEmail
+from app.models.sync import BackgroundJob, Budget, ParseFailure, SyncRun, UserCorrection
 from app.models.transaction import Transaction
-from app.models.sync import SyncRun, Budget, UserCorrection, ParseFailure, BackgroundJob
+from app.models.user import User
 
 __all__ = [
     "User",

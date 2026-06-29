@@ -3,10 +3,19 @@ Base Parser & Parser Result
 Defines the contract for all bank-specific parsers and the structured output.
 """
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date
-from typing import Optional
 from enum import Enum
+
+# Confidence weights (0–100 scale). Centralized so scoring stays tunable.
+CONFIDENCE_WEIGHT_AMOUNT = 40
+CONFIDENCE_WEIGHT_MERCHANT = {"exact": 30, "inferred": 20, "generic": 10}
+CONFIDENCE_WEIGHT_DATE = 20
+CONFIDENCE_WEIGHT_TYPE = 10
 
 
 class TransactionTypeEnum(str, Enum):
@@ -19,13 +28,13 @@ class TransactionTypeEnum(str, Enum):
 class ParseResult:
     """Structured output from a parser. Every field is optional — confidence depends on how many were extracted."""
 
-    amount: Optional[float] = None
+    amount: float | None = None
     currency: str = "INR"
-    transaction_type: Optional[TransactionTypeEnum] = None
-    merchant_raw: Optional[str] = None
-    date: Optional[date] = None
-    account_last4: Optional[str] = None
-    reference_id: Optional[str] = None
+    transaction_type: TransactionTypeEnum | None = None
+    merchant_raw: str | None = None
+    date: date | None = None
+    account_last4: str | None = None
+    reference_id: str | None = None
     bank: str = ""
     parser_version: int = 1
     merchant_source: str = "missing"  # exact | inferred | generic | missing
@@ -43,18 +52,16 @@ class ParseResult:
         """
         score = 0
         if self.amount is not None and self.amount > 0:
-            score += 40
+            score += CONFIDENCE_WEIGHT_AMOUNT
         if self.merchant_raw:
-            merchant_score = {
-                "exact": 30,
-                "inferred": 20,
-                "generic": 10,
-            }.get(self.merchant_source, 30)
+            merchant_score = CONFIDENCE_WEIGHT_MERCHANT.get(
+                self.merchant_source, CONFIDENCE_WEIGHT_MERCHANT["exact"]
+            )
             score += merchant_score
         if self.date is not None:
-            score += 20
+            score += CONFIDENCE_WEIGHT_DATE
         if self.transaction_type is not None:
-            score += 10
+            score += CONFIDENCE_WEIGHT_TYPE
 
         self.confidence_score = score / 100.0
         return self.confidence_score
@@ -83,14 +90,29 @@ class BaseParser:
 
     def _clean_text(self, text: str) -> str:
         """Convert email HTML/plain text into parser-friendly text."""
-        import html
-        import re
+        from app.utils.text import clean_html_to_text
 
-        text = html.unescape(text or "")
-        text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", text)
-        text = re.sub(r"(?s)<!--.*?-->", " ", text)
-        text = re.sub(r"(?i)<br\s*/?>", " ", text)
-        text = re.sub(r"(?i)</(?:p|div|tr|td|table|li|h\d)>", " ", text)
-        text = re.sub(r"<[^>]+>", " ", text)
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
+        return clean_html_to_text(text)
+
+    @staticmethod
+    def _match_amount(amount_patterns: Iterable[re.Pattern[str]], text: str) -> float | None:
+        """Return the first amount matched by any of the given patterns."""
+        for pattern in amount_patterns:
+            match = pattern.search(text)
+            if match:
+                try:
+                    return float(match.group(1).replace(",", ""))
+                except ValueError:
+                    continue
+        return None
+
+    @staticmethod
+    def _match_merchant(merchant_patterns: Iterable[re.Pattern[str]], text: str) -> str | None:
+        """Return the first merchant (>=3 chars) matched by any of the given patterns."""
+        for pattern in merchant_patterns:
+            match = pattern.search(text)
+            if match:
+                merchant = match.group(1).strip(" .-")
+                if merchant and len(merchant) >= 3:
+                    return merchant
+        return None

@@ -3,18 +3,19 @@ PFIS Configuration Module
 Loads settings from .env file with Pydantic validation.
 """
 
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
-
 
 APP_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = APP_DIR.parent
 ROOT_DIR = BACKEND_DIR.parent
 DEFAULT_SQLITE_DB = BACKEND_DIR / "pfis.db"
+DEFAULT_SECRET_KEY = "pfis-dev-secret-change-me-please-32bytes"
 
 
 class Settings(BaseSettings):
@@ -24,7 +25,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
     DATABASE_URL: str = "sqlite+aiosqlite:///./pfis.db"
-    SECRET_KEY: str = "pfis-dev-secret-change-me-please-32bytes"
+    SECRET_KEY: str = DEFAULT_SECRET_KEY
     TOKEN_ENCRYPTION_KEY: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     AUTH_REQUIRED: bool = False
@@ -54,7 +55,7 @@ class Settings(BaseSettings):
         if not value.startswith(prefix):
             return value
 
-        raw_path = value[len(prefix):]
+        raw_path = value[len(prefix) :]
         if raw_path in {":memory:", "/:memory:"}:
             return value
 
@@ -97,13 +98,36 @@ class Settings(BaseSettings):
             return [item.strip().lower() for item in value.split(",") if item.strip()]
         raise ValueError("Invalid GOOGLE_ALLOWED_EMAILS value")
 
+    @model_validator(mode="after")
+    def warn_on_insecure_secret(self) -> "Settings":
+        """Surface a security warning when the built-in development secret is used.
+
+        Intentionally non-fatal so local/demo runs keep working, but the warning
+        is escalated when real authentication is enabled with the default key.
+        """
+        if self.SECRET_KEY == DEFAULT_SECRET_KEY:
+            if self.AUTH_REQUIRED:
+                warnings.warn(
+                    "AUTH_REQUIRED is enabled but SECRET_KEY is the built-in "
+                    "development default. Set a unique SECRET_KEY in your .env "
+                    "before exposing PFIS beyond local use.",
+                    stacklevel=2,
+                )
+            else:
+                warnings.warn(
+                    "SECRET_KEY is the built-in development default. This is fine "
+                    "for local/demo use but must be changed before deployment.",
+                    stacklevel=2,
+                )
+        return self
+
     model_config = SettingsConfigDict(
         env_file=(str(BACKEND_DIR / ".env"), str(ROOT_DIR / ".env")),
         env_file_encoding="utf-8",
     )
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Cached settings singleton."""
     return Settings()

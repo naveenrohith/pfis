@@ -3,8 +3,6 @@ Transaction Routes
 CRUD + aggregation endpoints for transactions.
 """
 
-from datetime import date
-from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +12,9 @@ from app.schemas.transaction import (
     BulkTransactionUpdate,
     BulkTransactionUpdateResponse,
     TransactionCreate,
-    TransactionUpdate,
     TransactionResponse,
     TransactionSummary,
+    TransactionUpdate,
 )
 from app.security import ensure_user_owns_resource, get_current_user_optional, resolve_user_scope
 from app.services.transaction_service import TransactionService
@@ -38,23 +36,26 @@ async def create_transaction(
         txn = await service.create_transaction(user_id, data)
         return txn
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
 
 @router.get("/", response_model=list[TransactionResponse])
 async def list_transactions(
     user_id: str,
-    month: Optional[int] = Query(None, ge=1, le=12),
-    year: Optional[int] = Query(None, ge=2020, le=2030),
-    category_id: Optional[str] = None,
+    month: int | None = Query(None, ge=1, le=12),
+    year: int | None = Query(None, ge=2020, le=2030),
+    category_id: str | None = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
-    """List transactions with optional filters."""
+    """List transactions with optional filters. Returns X-Total-Count header for pagination."""
     service = TransactionService(db)
     user_id = resolve_user_scope(user_id, current_user)
+
+    from fastapi.responses import JSONResponse
+
     txns = await service.get_transactions(
         user_id=user_id,
         month=month,
@@ -63,7 +64,17 @@ async def list_transactions(
         limit=limit,
         offset=offset,
     )
-    return txns
+    total_count = await service.get_transaction_count(
+        user_id=user_id, month=month, year=year, category_id=category_id
+    )
+
+    from app.schemas.transaction import TransactionResponse as TR
+
+    data = [TR.model_validate(t).model_dump(mode="json") for t in txns]
+    response = JSONResponse(content=data)
+    response.headers["X-Total-Count"] = str(total_count)
+    response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    return response
 
 
 @router.get("/summary", response_model=TransactionSummary)
@@ -126,5 +137,21 @@ async def update_transaction(
     try:
         txn = await service.update_transaction(txn_id, data)
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
     return txn
+
+
+@router.delete("/{txn_id}", status_code=204)
+async def delete_transaction(
+    txn_id: str,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a transaction."""
+    service = TransactionService(db)
+    existing = await service.get_transaction_by_id(txn_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    ensure_user_owns_resource(existing.user_id, current_user)
+    await service.delete_transaction(txn_id)
+    return None

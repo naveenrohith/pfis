@@ -6,8 +6,6 @@ Centralizing these avoids duplication and makes improvement easier.
 
 import re
 from datetime import date
-from typing import Optional
-
 
 # ─── Amount Extraction ───
 
@@ -22,13 +20,19 @@ AMOUNT_PATTERNS = [
 
 
 TRANSACTION_AMOUNT_PATTERNS = [
-    re.compile(r"Rs\.?\s?(?:INR\s?)?([\d,]+(?:\.\d{1,2})?)\s+(?:has\s+been\s+)?(?:is\s+)?(?:debited|credited|charged)", re.IGNORECASE),
-    re.compile(r"(?:debited|credited|charged|spent|withdrawal\s+for)\s+(?:for\s+)?Rs\.?\s?(?:INR\s?)?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
+    re.compile(
+        r"Rs\.?\s?(?:INR\s?)?([\d,]+(?:\.\d{1,2})?)\s+(?:has\s+been\s+)?(?:is\s+)?(?:debited|credited|charged)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:debited|credited|charged|spent|withdrawal\s+for)\s+(?:for\s+)?Rs\.?\s?(?:INR\s?)?([\d,]+(?:\.\d{1,2})?)",
+        re.IGNORECASE,
+    ),
     re.compile(r"(?:payment\s+of|paid)\s+Rs\.?\s?(?:INR\s?)?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
 ]
 
 
-def extract_amount(text: str) -> Optional[float]:
+def extract_amount(text: str) -> float | None:
     """Extract the transaction amount, preferring transaction context."""
     for pattern in TRANSACTION_AMOUNT_PATTERNS:
         match = pattern.search(text)
@@ -53,25 +57,36 @@ def extract_amount(text: str) -> Optional[float]:
 # ─── Transaction Type Detection ───
 
 DEBIT_KEYWORDS = [
-    r"\bdebited\b", r"\bspent\b", r"\bcharged\b",
-    r"\bpurchase\b", r"\bpaid\b", r"\bwithdrawn\b",
-    r"\bdebit\b", r"\btransferred\b",
-    r"\bpayment\s+of\b", r"\bpayment\s+successful\b",
-    r"\bis\s+debited\s+from\b", r"\bhas\s+been\s+debited\b",
+    r"\bdebited\b",
+    r"\bspent\b",
+    r"\bcharged\b",
+    r"\bpurchase\b",
+    r"\bpaid\b",
+    r"\bwithdrawn\b",
+    r"\bdebit\b",
+    r"\btransferred\b",
+    r"\bpayment\s+of\b",
+    r"\bpayment\s+successful\b",
+    r"\bis\s+debited\s+from\b",
+    r"\bhas\s+been\s+debited\b",
 ]
 
 CREDIT_KEYWORDS = [
-    r"\bcredited\b", r"\breceived\b", r"\bdeposited\b",
+    r"\bcredited\b",
+    r"\breceived\b",
+    r"\bdeposited\b",
     r"\bsuccessfully\s+added\s+to\s+your\s+account\b",
     r"\badded\s+to\s+your\s+account\b",
 ]
 
 REFUND_KEYWORDS = [
-    r"\brefund\b", r"\breversal\b", r"\breversed\b",
+    r"\brefund\b",
+    r"\breversal\b",
+    r"\breversed\b",
 ]
 
 
-def detect_transaction_type(text: str) -> Optional[str]:
+def detect_transaction_type(text: str) -> str | None:
     """Detect if transaction is debit, credit, or refund."""
     text_lower = text.lower()
 
@@ -109,8 +124,18 @@ DATE_PATTERNS = [
 ]
 
 MONTH_MAP = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
 }
 
 
@@ -118,7 +143,7 @@ def _valid_year(year: int) -> bool:
     return 2000 <= year <= date.today().year + 1
 
 
-def extract_date(text: str) -> Optional[date]:
+def extract_date(text: str) -> date | None:
     """Extract transaction date from text."""
     for pattern, fmt in DATE_PATTERNS:
         match = pattern.search(text)
@@ -164,7 +189,9 @@ def extract_date(text: str) -> Optional[date]:
 
 ACCOUNT_PATTERNS = [
     # XX1234, XXXX1234, X1234
-    re.compile(r"(?:A/?c|Acct?|Account|Card)[\s.:]*(?:No\.?\s*)?(?:XX?X*)?(\d{4})\b", re.IGNORECASE),
+    re.compile(
+        r"(?:A/?c|Acct?|Account|Card)[\s.:]*(?:No\.?\s*)?(?:XX?X*)?(\d{4})\b", re.IGNORECASE
+    ),
     # ending 1234
     re.compile(r"ending\s+(\d{4})\b", re.IGNORECASE),
     # XXXXXXXX1234
@@ -172,7 +199,7 @@ ACCOUNT_PATTERNS = [
 ]
 
 
-def extract_account(text: str) -> Optional[str]:
+def extract_account(text: str) -> str | None:
     """Extract last 4 digits of account/card number."""
     for pattern in ACCOUNT_PATTERNS:
         match = pattern.search(text)
@@ -195,7 +222,7 @@ REF_PATTERNS = [
 ]
 
 
-def extract_reference_id(text: str) -> Optional[str]:
+def extract_reference_id(text: str) -> str | None:
     """Extract transaction reference ID."""
     for pattern in REF_PATTERNS:
         match = pattern.search(text)
@@ -212,32 +239,61 @@ MERCHANT_PATTERNS = [
     # HDFC UPI: "to VPA payzomato@hdfcbank ZOMATO on ..."
     re.compile(r"\bto\s+VPA\s+\S+\s+([A-Z][A-Z0-9\s.&-]+?)\s+on\s+\d", re.IGNORECASE),
     # "at SWIGGY" / "at AMAZON PAY INDIA PV"
-    re.compile(r"\bat\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:via|on|for|UPI|Ref|If|Available|Avl))", re.IGNORECASE),
+    re.compile(
+        r"\bat\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:via|on|for|UPI|Ref|If|Available|Avl))", re.IGNORECASE
+    ),
     # "to BIGBASKET" / "to SPOTIFY INDIA"
     re.compile(r"\bto\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:via|on|was|UPI|Ref|If))", re.IGNORECASE),
     # "towards NETFLIX.COM" / "towards UPI-SWIGGY"
-    re.compile(r"towards\s+(?:UPI-)?([A-Z][A-Z0-9\s./-]+?)(?:\s*(?:on|UPI|-\w+@|\.|If))", re.IGNORECASE),
+    re.compile(
+        r"towards\s+(?:UPI-)?([A-Z][A-Z0-9\s./-]+?)(?:\s*(?:on|UPI|-\w+@|\.|If))", re.IGNORECASE
+    ),
     # "for FLIPKART INTERNET"
     re.compile(r"\bfor\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:on|via|UPI|Ref|If))", re.IGNORECASE),
     # "from AMAZON PAY" (refund context)
-    re.compile(r"(?:refund|reversal)\s+from\s+([A-Z][A-Z0-9\s.]+?)(?:\s*[.\-]|\s+Avl)", re.IGNORECASE),
+    re.compile(
+        r"(?:refund|reversal)\s+from\s+([A-Z][A-Z0-9\s.]+?)(?:\s*[.\-]|\s+Avl)", re.IGNORECASE
+    ),
     # "paid Rs. 350.00 to BIGBASKET via"
-    re.compile(r"paid\s+(?:Rs\.?\s?[\d,.]+\s+)?to\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:via|on))", re.IGNORECASE),
+    re.compile(
+        r"paid\s+(?:Rs\.?\s?[\d,.]+\s+)?to\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:via|on))", re.IGNORECASE
+    ),
     # "charged for FLIPKART INTERNET on"
-    re.compile(r"charged\s+for\s+([A-Z][A-Z0-9\s./-]+?)(?:\s+on|\s*\.|\s+Available)", re.IGNORECASE),
+    re.compile(
+        r"charged\s+for\s+([A-Z][A-Z0-9\s./-]+?)(?:\s+on|\s*\.|\s+Available)", re.IGNORECASE
+    ),
     # "credited to ... as refund from AMAZON PAY"
     re.compile(r"as\s+refund\s+from\s+([A-Z][A-Z0-9\s./-]+?)(?:\s*[.\-]|\s+Avl)", re.IGNORECASE),
 ]
 
 MERCHANT_NOISE = {
-    "UPI", "POS", "NEFT", "IMPS", "RTGS", "TXN", "TRANSACTION",
-    "PAYMENT", "PURCHASE", "CARD", "DEBIT", "CREDIT", "BANK", "ACCOUNT",
-    "CUSTOMER", "AVAILABLE", "BALANCE", "LIMIT", "ALERT",
-    "MORE DETAILS", "DETAILS", "SERVICE CHARGES", "FEES",
+    "UPI",
+    "POS",
+    "NEFT",
+    "IMPS",
+    "RTGS",
+    "TXN",
+    "TRANSACTION",
+    "PAYMENT",
+    "PURCHASE",
+    "CARD",
+    "DEBIT",
+    "CREDIT",
+    "BANK",
+    "ACCOUNT",
+    "CUSTOMER",
+    "AVAILABLE",
+    "BALANCE",
+    "LIMIT",
+    "ALERT",
+    "MORE DETAILS",
+    "DETAILS",
+    "SERVICE CHARGES",
+    "FEES",
 }
 
 
-def _sanitize_merchant(merchant: str) -> Optional[str]:
+def _sanitize_merchant(merchant: str) -> str | None:
     merchant = re.sub(r"[-_]+", " ", merchant.upper())
     merchant = re.sub(r"\s+", " ", merchant).strip(" .:-")
     merchant = re.sub(r"\b(?:VPA|UTIB|HDFC|ICIC|SBIN)\b", "", merchant).strip()
@@ -251,7 +307,7 @@ def _sanitize_merchant(merchant: str) -> Optional[str]:
     return merchant
 
 
-def extract_merchant(text: str) -> Optional[str]:
+def extract_merchant(text: str) -> str | None:
     """Extract merchant name from text."""
     for pattern in MERCHANT_PATTERNS:
         match = pattern.search(text)
@@ -260,7 +316,7 @@ def extract_merchant(text: str) -> Optional[str]:
             # Skip if it's just numbers, too short, or looks like an amount
             if len(merchant) >= 2 and not merchant.isdigit():
                 # Skip if it starts with Rs/INR/amount pattern
-                if re.match(r'^(?:Rs|INR|\d)', merchant, re.IGNORECASE):
+                if re.match(r"^(?:Rs|INR|\d)", merchant, re.IGNORECASE):
                     continue
                 sanitized = _sanitize_merchant(merchant)
                 if sanitized:
@@ -268,7 +324,7 @@ def extract_merchant(text: str) -> Optional[str]:
     return None
 
 
-def infer_generic_merchant(text: str, txn_type: Optional[str]) -> Optional[str]:
+def infer_generic_merchant(text: str, txn_type: str | None) -> str | None:
     """Infer a best-effort generic counterparty when the email omits merchant details."""
     text_upper = text.upper()
 
@@ -288,7 +344,9 @@ def infer_generic_merchant(text: str, txn_type: Optional[str]) -> Optional[str]:
     if "RTGS" in text_upper:
         return "RTGS CREDIT" if txn_type == "credit" else "RTGS TRANSFER"
 
-    if any(token in text_upper for token in ["POS", "DEBIT CARD", "CREDIT CARD", "CHARGED", "SPENT"]):
+    if any(
+        token in text_upper for token in ["POS", "DEBIT CARD", "CREDIT CARD", "CHARGED", "SPENT"]
+    ):
         return "CARD PURCHASE"
 
     if txn_type == "credit":

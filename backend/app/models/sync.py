@@ -7,11 +7,13 @@ Operational models added from architect review:
 - ParseFailure: Dead Letter Queue for failed parses
 """
 
-import uuid
 import enum
-from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Float, DateTime, Boolean, Text, Enum, ForeignKey
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
 
 
@@ -30,16 +32,15 @@ class JobStatus(str, enum.Enum):
 
 class SyncRun(Base):
     """Tracks each Gmail sync operation for observability and debugging."""
+
     __tablename__ = "sync_runs"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
     start_time: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     emails_fetched: Mapped[int] = mapped_column(Integer, default=0)
@@ -57,11 +58,10 @@ class SyncRun(Base):
 
 class Budget(Base):
     """Monthly spending limits per category."""
+
     __tablename__ = "budgets"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
@@ -80,11 +80,10 @@ class Budget(Base):
 
 class UserCorrection(Base):
     """Feedback loop — user corrections feed back into parsing rules."""
+
     __tablename__ = "user_corrections"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     transaction_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("transactions.id"), nullable=False, index=True
     )
@@ -92,7 +91,7 @@ class UserCorrection(Base):
     old_value: Mapped[str] = mapped_column(Text, nullable=True)
     new_value: Mapped[str] = mapped_column(Text, nullable=False)
     corrected_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
     # Relationships
@@ -104,11 +103,10 @@ class UserCorrection(Base):
 
 class ParseFailure(Base):
     """Dead Letter Queue — stores failed parse attempts for retry."""
+
     __tablename__ = "parse_failures"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("raw_emails.id"), nullable=False, index=True
     )
@@ -127,11 +125,10 @@ class ParseFailure(Base):
 
 class BackgroundJob(Base):
     """Persistent background orchestration record for async job execution."""
+
     __tablename__ = "background_jobs"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True, index=True
     )
@@ -141,7 +138,7 @@ class BackgroundJob(Base):
     result_json: Mapped[str] = mapped_column(Text, default="{}")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -150,3 +147,22 @@ class BackgroundJob(Base):
 
     def __repr__(self) -> str:
         return f"<BackgroundJob {self.job_type} status={self.status.value}>"
+
+
+class OAuthState(Base):
+    """Persistent OAuth state storage (replaces in-memory sets/dicts)."""
+
+    __tablename__ = "oauth_states"
+
+    state: Mapped[str] = mapped_column(String(128), primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    flow_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # "google_login" or "gmail_connect"
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<OAuthState {self.flow_type} expires={self.expires_at}>"

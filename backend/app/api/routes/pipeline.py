@@ -4,6 +4,7 @@ Trigger and monitor the processing pipeline.
 """
 
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,4 +35,4 @@ async def trigger_processing(
         return {"status": "completed", "stats": stats}
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

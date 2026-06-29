@@ -21,6 +21,8 @@ const state = {
   syncStatus: null,
   activeJob: null,
   lastJob: null,
+  pendingAutoSync: false,
+  autoSyncStarted: false,
   monthAutoSelected: false,
   userSelectedMonth: false,
   categoryDrilldown: null,
@@ -211,7 +213,14 @@ function consumeOAuthStatus() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('google_auth') === 'success') {
     window.history.replaceState({}, document.title, window.location.pathname);
+    state.pendingAutoSync = true;
     showToast('Signed in with Google', 'success');
+    return;
+  }
+  const oauthError = params.get('oauth_error');
+  if (oauthError) {
+    window.history.replaceState({}, document.title, window.location.pathname);
+    setAuthError(oauthError);
   }
 }
 
@@ -223,6 +232,7 @@ async function bootstrapApp() {
     state.categories = await apiRequest('/categories/');
   }
   await refreshDashboardData({ announceLabel: 'Workspace ready' });
+  maybeStartAutoGmailSync();
 }
 
 function emptySession() {
@@ -875,8 +885,8 @@ function renderInsights() {
     <article class="insight-item ${item.severity || 'info'}">
       <div class="icon">${item.icon || '💡'}</div>
       <div>
-        <strong>${item.title}</strong>
-        <p>${item.description}</p>
+        <strong>${escapeHtml(item.title)}</strong>
+        <p>${escapeHtml(item.description)}</p>
       </div>
     </article>
   `).join('');
@@ -892,7 +902,7 @@ function renderMerchantStack() {
   el['merchant-stack'].innerHTML = merchants.map((merchant, index) => `
     <button type="button" class="stack-item" data-merchant-name="${escapeHtml(merchant.name)}">
       <div class="stack-main">
-        <strong>#${index + 1} ${merchant.name}</strong>
+        <strong>#${index + 1} ${escapeHtml(merchant.name)}</strong>
         <span>${merchant.count} transaction${merchant.count === 1 ? '' : 's'}</span>
       </div>
       <strong>${formatCurrency(merchant.total)}</strong>
@@ -910,7 +920,7 @@ function renderRecurringStack() {
   el['recurring-stack'].innerHTML = recurring.map((item) => `
     <article class="stack-item">
       <div class="stack-main">
-        <strong>${item.merchant}</strong>
+        <strong>${escapeHtml(item.merchant)}</strong>
         <span>${item.occurrences} consistent charge${item.occurrences === 1 ? '' : 's'}</span>
       </div>
       <strong>${formatCurrency(item.avg_amount)}</strong>
@@ -935,7 +945,7 @@ function renderBudgetBoard() {
       <article class="budget-card">
         <div class="budget-head">
           <div class="budget-title">
-            <strong>${budget.category_icon || '📦'} ${budget.category_name}</strong>
+            <strong>${budget.category_icon || '📦'} ${escapeHtml(budget.category_name)}</strong>
             <span>${budget.status === 'over' ? 'Over budget' : budget.status === 'warning' ? 'Approaching limit' : 'On track'}</span>
           </div>
           <div class="budget-actions">
@@ -1074,7 +1084,7 @@ function renderReviewQueue() {
         <div class="review-item-main">
           <strong>${escapeHtml(txn.merchant_normalized || txn.merchant_raw || 'Unknown merchant')}</strong>
           <div class="review-item-meta">
-            <span>${txn.category_name || 'Uncategorized'}</span>
+            <span>${escapeHtml(txn.category_name || 'Uncategorized')}</span>
             <span>•</span>
             <span>${formatDate(txn.transaction_date)}</span>
             <span>•</span>
@@ -1614,7 +1624,32 @@ async function startDemoSyncPipeline() {
     return;
   }
 
-  await runBackgroundJob(`/jobs/gmail-sync-pipeline?user_id=${encodeURIComponent(state.session.user.id)}&max_results=200&limit=200`, 'Gmail sync', 'Sync inbox', el['btn-sync']);
+  await runBackgroundJob(buildGmailSyncPath(true), 'Gmail full sync', 'Sync inbox', el['btn-sync']);
+}
+
+function buildGmailSyncPath(syncAll = false) {
+  const params = new URLSearchParams({
+    user_id: state.session.user.id,
+  });
+  if (syncAll) {
+    params.set('sync_all', 'true');
+  } else {
+    params.set('max_results', '500');
+    params.set('limit', '500');
+  }
+  return `/jobs/gmail-sync-pipeline?${params.toString()}`;
+}
+
+function maybeStartAutoGmailSync() {
+  if (!state.pendingAutoSync || state.autoSyncStarted || state.session.mode !== 'auth' || !state.session.user?.id) return;
+  state.pendingAutoSync = false;
+  state.autoSyncStarted = true;
+  window.setTimeout(() => {
+    runBackgroundJob(buildGmailSyncPath(true), 'Automatic Gmail full sync', 'Sync inbox', el['btn-sync'])
+      .catch((error) => {
+        console.error(error);
+      });
+  }, 500);
 }
 
 async function retryParseFailures() {
@@ -1989,12 +2024,6 @@ function formatDateTime(value) {
 function formatSignedAmount(txn) {
   const sign = txn.transaction_type === 'credit' ? '+' : txn.transaction_type === 'refund' ? '+' : '-';
   return `${sign}${formatCurrency(txn.amount)}`;
-}
-
-function renderConfidencePill(score) {
-  const value = Math.round((score || 0) * 100);
-  const tone = value >= 85 ? 'high' : value >= 65 ? 'medium' : 'low';
-  return `<span class="confidence-pill ${tone}"><i></i>${value}%</span>`;
 }
 
 function compareDates(left, right) {

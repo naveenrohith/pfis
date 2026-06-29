@@ -5,7 +5,6 @@ Classifies emails as financial (TRANSACTION) or non-financial (OTP, PROMO, IGNOR
 This is the gatekeeper: only financial emails proceed to the parsing engine.
 """
 
-import html
 import logging
 import re
 from enum import Enum
@@ -134,11 +133,9 @@ AMOUNT_PATTERN = re.compile(
 
 def _clean_text(text: str) -> str:
     """Strip email markup before signal detection."""
-    text = html.unescape(text or "")
-    text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", text)
-    text = re.sub(r"(?s)<!--.*?-->", " ", text)
-    text = re.sub(r"<[^>]+>", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
+    from app.utils.text import clean_html_to_text
+
+    return clean_html_to_text(text)
 
 
 def is_known_sender(sender_email: str) -> tuple[bool, str]:
@@ -170,15 +167,14 @@ def classify_email(sender: str, subject: str, body: str) -> tuple[EmailType, str
             return EmailType.OTP, bank_name, 0.95
 
     promo_count = sum(
-        1 for pattern in PROMO_KEYWORDS
-        if re.search(pattern, combined_text, re.IGNORECASE)
+        1 for pattern in PROMO_KEYWORDS if re.search(pattern, combined_text, re.IGNORECASE)
     )
     txn_keyword_count = sum(
-        1 for pattern in TRANSACTION_KEYWORDS
-        if re.search(pattern, combined_text, re.IGNORECASE)
+        1 for pattern in TRANSACTION_KEYWORDS if re.search(pattern, combined_text, re.IGNORECASE)
     )
     non_transaction_count = sum(
-        1 for pattern in NON_TRANSACTION_KEYWORDS
+        1
+        for pattern in NON_TRANSACTION_KEYWORDS
         if re.search(pattern, combined_text, re.IGNORECASE)
     )
     has_amount = bool(AMOUNT_PATTERN.search(combined_text))

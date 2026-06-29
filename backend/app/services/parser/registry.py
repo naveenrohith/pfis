@@ -5,14 +5,15 @@ Fallback to GenericParser when no specific parser matches.
 """
 
 import logging
-from app.services.parser.base_parser import BaseParser, ParseResult
+
+from app.services.gmail.email_filter import is_known_sender
 from app.services.parser.bank_parsers import (
     GenericParser,
     HDFCParser,
-    SBIParser,
     ICICIParser,
+    SBIParser,
 )
-from app.services.gmail.email_filter import is_known_sender
+from app.services.parser.base_parser import BaseParser, ParseResult
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +43,19 @@ class ParserRegistry:
         self._parsers["ICICI_CC"] = icici
 
         # All others use generic
-        for bank in ["AXIS", "KOTAK", "YES", "PNB", "RBL",
-                      "INDUSIND", "FEDERAL", "PAYTM", "PHONEPE",
-                      "GPAY", "AMAZONPAY"]:
+        for bank in [
+            "AXIS",
+            "KOTAK",
+            "YES",
+            "PNB",
+            "RBL",
+            "INDUSIND",
+            "FEDERAL",
+            "PAYTM",
+            "PHONEPE",
+            "GPAY",
+            "AMAZONPAY",
+        ]:
             self._parsers[bank] = self._fallback
 
         logger.info(f"Parser registry initialized: {len(self._parsers)} bank mappings")
@@ -70,11 +81,12 @@ class ParserRegistry:
         if is_known:
             result.bank = bank_name
 
+        # Avoid logging merchant names at INFO (spending data is PII-adjacent).
         logger.info(
             f"Parsed [{result.bank}]: amount={result.amount}, "
-            f"merchant={result.merchant_raw}, type={result.transaction_type}, "
-            f"conf={result.confidence_score:.2f}"
+            f"type={result.transaction_type}, conf={result.confidence_score:.2f}"
         )
+        logger.debug("Parsed merchant detail [%s]: %s", result.bank, result.merchant_raw)
 
         return result
 

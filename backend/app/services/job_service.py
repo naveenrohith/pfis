@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -16,7 +16,6 @@ from app.models.email import GmailAccount
 from app.models.sync import BackgroundJob, JobStatus
 from app.services.gmail.sync_service import demo_sync_gmail_emails, sync_gmail_emails
 from app.services.parser.pipeline import process_raw_emails, retry_parse_failures
-
 
 logger = logging.getLogger(__name__)
 _active_tasks: set[asyncio.Task] = set()
@@ -67,13 +66,17 @@ def schedule_job(job_id: str) -> None:
     task.add_done_callback(_active_tasks.discard)
 
 
-async def _handle_demo_sync_pipeline(db: AsyncSession, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def _handle_demo_sync_pipeline(
+    db: AsyncSession, user_id: str, payload: dict[str, Any]
+) -> dict[str, Any]:
     sync_stats = await demo_sync_gmail_emails(db, user_id)
     pipeline_stats = await process_raw_emails(db, user_id, limit=payload.get("limit", 50))
     return {"sync": sync_stats, "pipeline": pipeline_stats}
 
 
-async def _handle_gmail_sync_pipeline(db: AsyncSession, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def _handle_gmail_sync_pipeline(
+    db: AsyncSession, user_id: str, payload: dict[str, Any]
+) -> dict[str, Any]:
     result = await db.execute(select(GmailAccount).where(GmailAccount.user_id == user_id))
     gmail_account = result.scalar_one_or_none()
     if gmail_account is None:
@@ -89,7 +92,9 @@ async def _handle_gmail_sync_pipeline(db: AsyncSession, user_id: str, payload: d
     return {"sync": sync_stats, "pipeline": pipeline_stats}
 
 
-async def _handle_retry_parse_failures(db: AsyncSession, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def _handle_retry_parse_failures(
+    db: AsyncSession, user_id: str, payload: dict[str, Any]
+) -> dict[str, Any]:
     return await retry_parse_failures(db, user_id, limit=payload.get("limit", 20))
 
 
@@ -111,24 +116,24 @@ async def run_job(job_id: str) -> None:
         if handler is None:
             job.status = JobStatus.FAILED
             job.error_message = f"Unsupported job type: {job.job_type}"
-            job.finished_at = datetime.now(timezone.utc)
+            job.finished_at = datetime.now(UTC)
             await db.commit()
             return
 
         try:
             job.status = JobStatus.RUNNING
-            job.started_at = datetime.now(timezone.utc)
+            job.started_at = datetime.now(UTC)
             await db.commit()
 
             result = await handler(db, job.user_id or "", payload)
             job.status = JobStatus.COMPLETED
             job.result_json = json.dumps(result)
-            job.finished_at = datetime.now(timezone.utc)
+            job.finished_at = datetime.now(UTC)
             job.error_message = None
             await db.commit()
         except Exception as exc:
             logger.exception("Background job %s failed", job_id)
             job.status = JobStatus.FAILED
             job.error_message = str(exc)
-            job.finished_at = datetime.now(timezone.utc)
+            job.finished_at = datetime.now(UTC)
             await db.commit()

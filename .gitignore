@@ -17,6 +17,7 @@ env/
 
 # Database
 *.db
+*.db-journal
 *.sqlite3
 
 # Environment variables
@@ -34,6 +35,18 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Local test scratch
+.pytest_cache/
+.test-tmp/
+
+# Tooling caches & coverage
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 
 # Node (for frontend later)
 node_modules/

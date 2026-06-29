@@ -3,19 +3,18 @@ Reports & Export Routes — Phase 6
 CSV export and monthly report generation.
 """
 
-import io
 import csv
+import io
 import logging
-from datetime import date
-from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse, HTMLResponse
-from sqlalchemy import select, func, extract
+from fastapi.responses import HTMLResponse, StreamingResponse
+from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.transaction import Transaction, TransactionType
 from app.models.category import Category
+from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
 from app.security import get_current_user_optional, resolve_user_scope
 from app.services.insights_service import InsightsService
@@ -53,22 +52,32 @@ async def export_csv(
     # Build CSV in memory
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "Date", "Merchant", "Amount (₹)", "Type", "Category",
-        "Account", "Confidence", "Reference ID",
-    ])
+    writer.writerow(
+        [
+            "Date",
+            "Merchant",
+            "Amount (₹)",
+            "Type",
+            "Category",
+            "Account",
+            "Confidence",
+            "Reference ID",
+        ]
+    )
 
     for txn, cat_name in rows:
-        writer.writerow([
-            txn.transaction_date.strftime("%Y-%m-%d"),
-            txn.merchant_normalized or txn.merchant_raw or "Unknown",
-            f"{txn.amount:.2f}",
-            txn.transaction_type.value,
-            cat_name or "Uncategorized",
-            f"••{txn.account_last4}" if txn.account_last4 else "",
-            f"{txn.confidence_score:.0%}",
-            txn.reference_id or "",
-        ])
+        writer.writerow(
+            [
+                txn.transaction_date.strftime("%Y-%m-%d"),
+                txn.merchant_normalized or txn.merchant_raw or "Unknown",
+                f"{txn.amount:.2f}",
+                txn.transaction_type.value,
+                cat_name or "Uncategorized",
+                f"••{txn.account_last4}" if txn.account_last4 else "",
+                f"{txn.confidence_score:.0%}",
+                txn.reference_id or "",
+            ]
+        )
 
     output.seek(0)
     filename = f"pfis_transactions_{year}-{month:02d}.csv"
@@ -105,8 +114,6 @@ async def monthly_report(
 
     meta = data["meta"]
     insights = data["insights"]
-    daily_trend = data["daily_trend"]
-    recurring = data["recurring_payments"]
 
     # Get transactions
     result = await db.execute(
@@ -124,7 +131,8 @@ async def monthly_report(
     # Category breakdown
     cat_result = await db.execute(
         select(
-            Category.name, Category.icon,
+            Category.name,
+            Category.icon,
             func.sum(Transaction.amount).label("total"),
             func.count(Transaction.id).label("count"),
         )
@@ -175,7 +183,12 @@ async def monthly_report(
     # Build insights list
     insights_html = ""
     for ins in insights:
-        severity_color = {"info": "#3b82f6", "success": "#22c55e", "warning": "#f59e0b", "danger": "#ef4444"}.get(ins["severity"], "#64748b")
+        severity_color = {
+            "info": "#3b82f6",
+            "success": "#22c55e",
+            "warning": "#f59e0b",
+            "danger": "#ef4444",
+        }.get(ins["severity"], "#64748b")
         insights_html += f"""
         <div style="display:flex; gap:10px; padding:10px 12px; border-left:3px solid {severity_color}; background:#f8fafc; border-radius:6px; margin-bottom:8px;">
             <span style="font-size:1.2rem;">{ins['icon']}</span>

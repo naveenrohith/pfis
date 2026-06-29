@@ -63,9 +63,7 @@ async def test_google_callback_creates_session_and_user(client, monkeypatch):
     assert login_response.status_code == 307
     assert login_response.headers["location"] == "https://accounts.google.test/oauth"
 
-    callback_response = await client.get(
-        f"/api/auth/google/callback?code=oauth-code&state={state}"
-    )
+    callback_response = await client.get(f"/api/auth/google/callback?code=oauth-code&state={state}")
     callback_response.raise_for_status()
     assert "localStorage.setItem('pfis.session.v3'" in callback_response.text
     assert "naveenrohith2056@gmail.com" in callback_response.text

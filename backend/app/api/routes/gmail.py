@@ -11,25 +11,24 @@ Endpoints:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models.email import RawEmail, GmailAccount
-from app.models.sync import SyncRun
+from app.models.email import GmailAccount, RawEmail
+from app.models.sync import OAuthState, SyncRun
 from app.models.user import User
-from app.security import encrypt_secret
-from app.security import get_current_user_optional, resolve_user_scope
+from app.security import encrypt_secret, get_current_user_optional, resolve_user_scope
 from app.services.gmail.oauth_service import (
-    get_authorization_url,
     exchange_code_for_tokens,
+    get_authorization_url,
 )
-from app.services.gmail.sync_service import sync_gmail_emails, demo_sync_gmail_emails
+from app.services.gmail.sync_service import demo_sync_gmail_emails, sync_gmail_emails
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -38,16 +37,18 @@ settings = get_settings()
 auth_router = APIRouter(prefix="/auth/gmail", tags=["Gmail Auth"])
 gmail_router = APIRouter(prefix="/gmail", tags=["Gmail"])
 
-# In-memory state store (use Redis in production)
-_oauth_states: dict[str, str] = {}
+# OAuth state TTL
+_OAUTH_STATE_TTL_MINUTES = 10
 
 
 # ─── OAuth Flow ───
+
 
 @auth_router.get("/connect")
 async def gmail_connect(
     user_id: str = Query(..., description="User ID to connect Gmail for"),
     current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Step 1: Redirect user to Google OAuth consent screen.
@@ -56,12 +57,20 @@ async def gmail_connect(
     user_id = resolve_user_scope(user_id, current_user)
     try:
         auth_url, state = get_authorization_url(redirect_uri=settings.GMAIL_OAUTH_REDIRECT_URI)
-        _oauth_states[state] = user_id
+        # Persist state in DB
+        oauth_state = OAuthState(
+            state=state,
+            user_id=user_id,
+            flow_type="gmail_connect",
+            expires_at=datetime.now(UTC) + timedelta(minutes=_OAUTH_STATE_TTL_MINUTES),
+        )
+        db.add(oauth_state)
+        await db.commit()
         logger.info(f"OAuth flow started for user {user_id[:8]}...")
         return RedirectResponse(url=auth_url)
     except Exception as e:
         logger.error(f"Failed to start OAuth: {e}")
-        raise HTTPException(status_code=500, detail=f"OAuth initialization failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"OAuth initialization failed: {str(e)}") from e
 
 
 @auth_router.get("/callback")
@@ -74,19 +83,32 @@ async def gmail_callback(
     Step 2: Handle OAuth callback from Google.
     Exchange auth code for tokens and store them.
     """
-    # Verify state
-    user_id = _oauth_states.pop(state, None)
+    # Verify state from DB
+    result = await db.execute(select(OAuthState).where(OAuthState.state == state))
+    oauth_state = result.scalar_one_or_none()
+    now_utc = datetime.now(UTC)
+    expires = oauth_state.expires_at if oauth_state else None
+    if expires and expires.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=None)
+    if not oauth_state or expires < now_utc:
+        if oauth_state:
+            await db.delete(oauth_state)
+            await db.commit()
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+
+    user_id = oauth_state.user_id
+    await db.delete(oauth_state)
+    await db.flush()
+
     if not user_id:
-        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+        raise HTTPException(status_code=400, detail="Invalid OAuth state — missing user")
 
     try:
         # Exchange code for tokens
         token_data = exchange_code_for_tokens(code, redirect_uri=settings.GMAIL_OAUTH_REDIRECT_URI)
 
         # Check if Gmail account already exists for this user
-        result = await db.execute(
-            select(GmailAccount).where(GmailAccount.user_id == user_id)
-        )
+        result = await db.execute(select(GmailAccount).where(GmailAccount.user_id == user_id))
         existing = result.scalar_one_or_none()
 
         if existing:
@@ -119,15 +141,16 @@ async def gmail_callback(
 
     except Exception as e:
         logger.error(f"OAuth callback failed: {e}")
-        raise HTTPException(status_code=500, detail=f"OAuth callback failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"OAuth callback failed: {str(e)}") from e
 
 
 # ─── Gmail Operations ───
 
+
 @gmail_router.post("/sync")
 async def trigger_sync(
     user_id: str = Query(...),
-    max_results: int = Query(50, ge=1, le=200),
+    max_results: int = Query(500, ge=1, le=5000),
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
@@ -137,15 +160,12 @@ async def trigger_sync(
     """
     user_id = resolve_user_scope(user_id, current_user)
     # Find Gmail account for user
-    result = await db.execute(
-        select(GmailAccount).where(GmailAccount.user_id == user_id)
-    )
+    result = await db.execute(select(GmailAccount).where(GmailAccount.user_id == user_id))
     gmail_account = result.scalar_one_or_none()
 
     if not gmail_account:
         raise HTTPException(
-            status_code=404,
-            detail="No Gmail account connected. Use /api/auth/gmail/connect first."
+            status_code=404, detail="No Gmail account connected. Use /api/auth/gmail/connect first."
         )
 
     try:
@@ -161,7 +181,7 @@ async def trigger_sync(
         }
     except Exception as e:
         logger.error(f"Sync failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}") from e
 
 
 @gmail_router.get("/status")
@@ -271,6 +291,7 @@ async def list_raw_emails(
 
 
 # ─── Demo Mode (No OAuth Required) ───
+
 
 @gmail_router.post("/demo-sync")
 async def demo_sync(

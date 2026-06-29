@@ -12,7 +12,6 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
@@ -69,10 +68,16 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(main_module, "AsyncSessionLocal", session_factory, raising=False)
     monkeypatch.setattr(job_service_module, "AsyncSessionLocal", session_factory, raising=False)
 
+    # Invalidate normalizer merchant cache for test isolation
+    from app.services.parser.normalizer import invalidate_merchant_cache
+
+    invalidate_merchant_cache()
+
     try:
         yield session_factory
     finally:
         app.dependency_overrides.clear()
+        invalidate_merchant_cache()
         await engine.dispose()
 
 

@@ -5,11 +5,10 @@
 from __future__ import annotations
 
 import pytest
-
 from app.services.gmail.demo_data import SAMPLE_EMAILS
 from app.services.gmail.email_filter import EmailType, classify_email
-from app.services.parser.registry import get_parser_registry
 from app.services.parser.normalizer import infer_merchant_from_text
+from app.services.parser.registry import get_parser_registry
 
 
 @pytest.mark.parametrize(
@@ -22,7 +21,9 @@ from app.services.parser.normalizer import infer_merchant_from_text
         (14, "refund", "AMAZON PAY", 1.0),
     ],
 )
-def test_parser_regression_on_known_formats(email_index, expected_type, expected_merchant, min_confidence):
+def test_parser_regression_on_known_formats(
+    email_index, expected_type, expected_merchant, min_confidence
+):
     registry = get_parser_registry()
     email = SAMPLE_EMAILS[email_index]
 

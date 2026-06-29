@@ -6,29 +6,35 @@ Processes unprocessed raw emails end-to-end.
 """
 
 import logging
-from datetime import date as date_type, datetime, timezone
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from datetime import date as date_type
 
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.email import RawEmail
 from app.models.sync import ParseFailure
+from app.schemas.transaction import TransactionCreate
 from app.services.gmail.email_filter import EmailType, classify_email
 from app.services.parser.base_parser import BaseParser
-from app.services.parser.registry import get_parser_registry
 from app.services.parser.normalizer import (
-    normalize_merchant,
     get_default_category_id,
     infer_merchant_from_text,
+    normalize_merchant,
 )
+from app.services.parser.registry import get_parser_registry
 from app.services.transaction_service import TransactionService
-from app.schemas.transaction import TransactionCreate
 
 logger = logging.getLogger(__name__)
 _TEXT_NORMALIZER = BaseParser()
-SKIPPABLE_EMAIL_TYPES = {EmailType.IGNORE, EmailType.OTP, EmailType.PROMOTION}
+SKIPPABLE_EMAIL_TYPES = {
+    EmailType.IGNORE,
+    EmailType.OTP,
+    EmailType.PROMOTION,
+    EmailType.STATEMENT,
+}
 
 
 def _normalize_email_body(body: str) -> str:
@@ -42,9 +48,7 @@ async def _record_parse_failure(
     error_message: str,
     parser_version: int,
 ) -> None:
-    result = await db.execute(
-        select(ParseFailure).where(ParseFailure.email_id == email.id)
-    )
+    result = await db.execute(select(ParseFailure).where(ParseFailure.email_id == email.id))
     failure = result.scalar_one_or_none()
     if failure is None:
         failure = ParseFailure(
@@ -61,9 +65,7 @@ async def _record_parse_failure(
 
 
 async def _resolve_parse_failure(db: AsyncSession, email_id: str) -> None:
-    result = await db.execute(
-        select(ParseFailure).where(ParseFailure.email_id == email_id)
-    )
+    result = await db.execute(select(ParseFailure).where(ParseFailure.email_id == email_id))
     failure = result.scalar_one_or_none()
     if failure:
         failure.resolved = True
@@ -132,7 +134,9 @@ async def _process_email_batch(
             )
 
             email_result["amount"] = parse_result.amount
-            email_result["type"] = parse_result.transaction_type.value if parse_result.transaction_type else None
+            email_result["type"] = (
+                parse_result.transaction_type.value if parse_result.transaction_type else None
+            )
             email_result["merchant_raw"] = parse_result.merchant_raw
             email_result["merchant_source"] = parse_result.merchant_source
             email_result["date"] = str(parse_result.date) if parse_result.date else None
@@ -235,19 +239,22 @@ async def _process_email_batch(
 async def process_raw_emails(
     db: AsyncSession,
     user_id: str,
-    limit: int = 50,
+    limit: int | None = 50,
 ) -> dict:
     """
     Process all unprocessed raw emails for a user.
     Pipeline: Parse → Normalize → Categorize → Dedup → Store
     """
     # Fetch unprocessed emails
-    result = await db.execute(
+    query = (
         select(RawEmail)
         .where(RawEmail.user_id == user_id, RawEmail.processed_flag.is_(False))
         .order_by(RawEmail.received_at.asc())
-        .limit(limit)
     )
+    if limit is not None:
+        query = query.limit(limit)
+
+    result = await db.execute(query)
     emails = list(result.scalars().all())
     return await _process_email_batch(db, user_id, emails)
 
@@ -273,7 +280,7 @@ async def retry_parse_failures(
 
     for failure in failures:
         failure.retry_count += 1
-        failure.last_retry_at = datetime.now(timezone.utc)
+        failure.last_retry_at = datetime.now(UTC)
         if failure.email:
             failure.email.processed_flag = False
     await db.commit()
