@@ -11,9 +11,11 @@ This directory is the source of truth for PFIS agent and Copilot work.
 - [api-reference.md](api-reference.md) - route groups and API contracts
 - [security.md](security.md) - auth, ownership, secrets, OAuth, frontend safety
 - [testing.md](testing.md) - pytest strategy and validation commands
+- [modernization-plan.md](modernization-plan.md) - phased modernization implementation tracker
 
 ## Domain Docs
 
+- [audit/README.md](audit/README.md) - enterprise modernization audit reports
 - [parser.md](parser.md) - parser registry and extraction rules
 - [normalizer.md](normalizer.md) - merchant/category normalization
 - [integrations.md](integrations.md) - Gmail, OAuth, database, dashboard dependencies
