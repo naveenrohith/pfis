@@ -5,8 +5,9 @@ deduplicates and categorizes them, and surfaces insights, budgets, and reports
 through a dashboard.
 
 - **Backend:** FastAPI (Python 3.13), async SQLAlchemy, SQLite locally.
-- **Frontend (served):** static dashboard under `backend/app/static`.
-- **Frontend (in migration):** Svelte + Vite under `frontend/` (see its README).
+- **Frontend:** React + TypeScript + Vite under `frontend/` (see its README). Built
+  output is served by FastAPI at `/dashboard`; the legacy static dashboard under
+  `backend/app/static` remains a fallback until a build is present.
 - **Docs:** `docs/` is the source of truth (architecture, data model, API, parser, security).
 
 ## Quick start
@@ -31,6 +32,15 @@ cd backend && alembic upgrade head && cd ..
 # 5. Run the API + dashboard
 cd backend
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+### Build the frontend (React SPA)
+
+```bash
+cd frontend
+npm install
+npm run build      # emits frontend/dist, served by FastAPI at /dashboard
+# npm run dev       # or run the Vite dev server on :5173 (proxies /api)
 ```
 
 Then open:
@@ -66,7 +76,7 @@ backend/app/
   services/          Gmail sync, parser pipeline, transactions, insights, jobs
   static/            Served dashboard (HTML/CSS/JS)
   config.py          Settings   security.py  Auth/ownership   observability.py  Request-id logging
-frontend/            Svelte + Vite dashboard migration (additive, in progress)
+frontend/            React + TypeScript + Vite dashboard (built output served at /dashboard)
 docs/                Source-of-truth documentation
 tests/pytest/        Test suite
 ```

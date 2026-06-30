@@ -23,7 +23,7 @@ if __name__ == "__main__" and (__package__ is None or __package__ == ""):
     backend_dir = pathlib.Path(__file__).resolve().parents[1]
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -129,6 +129,18 @@ async def request_id_middleware(request, call_next):
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Built React SPA (frontend/dist). Served at /dashboard when present; the legacy
+# static dashboard remains a fallback so the app still works before a build.
+FRONTEND_DIST = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "dist"
+SPA_INDEX = FRONTEND_DIST / "index.html"
+SPA_AVAILABLE = SPA_INDEX.exists()
+if SPA_AVAILABLE and (FRONTEND_DIST / "assets").exists():
+    app.mount(
+        "/dashboard/assets",
+        StaticFiles(directory=str(FRONTEND_DIST / "assets")),
+        name="spa-assets",
+    )
+
 # Register routes
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
@@ -162,14 +174,33 @@ async def root():
 
 @app.get("/dashboard")
 async def serve_dashboard():
-    """Serve the PFIS dashboard HTML."""
-    response = FileResponse(
-        str(STATIC_DIR / "dashboard.html"),
-        media_type="text/html",
-    )
+    """Serve the PFIS dashboard.
+
+    Prefers the built React SPA (frontend/dist); falls back to the legacy static
+    dashboard when the SPA has not been built yet.
+    """
+    target = SPA_INDEX if SPA_AVAILABLE else STATIC_DIR / "dashboard.html"
+    response = FileResponse(str(target), media_type="text/html")
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     return response
+
+
+@app.get("/dashboard/{path:path}")
+async def serve_dashboard_spa(path: str):
+    """SPA fallback: serve a built asset if it exists, else the SPA index.
+
+    Enables client-side routing under /dashboard without 404s. Only active when
+    the React build is present.
+    """
+    if SPA_AVAILABLE:
+        candidate = FRONTEND_DIST / path
+        if path and candidate.is_file():
+            return FileResponse(str(candidate))
+        response = FileResponse(str(SPA_INDEX), media_type="text/html")
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return response
+    raise HTTPException(status_code=404, detail="Not found")
 
 
 if __name__ == "__main__":

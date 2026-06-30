@@ -1,31 +1,37 @@
 # PFIS Frontend Ownership
 
-PFIS currently has two frontend code paths:
+PFIS has two frontend code paths during the migration window:
 
-- Active UI: FastAPI-served static dashboard under `backend/app/static`.
-- Migration UI: Svelte/Vite scaffold under `frontend/`.
+- Canonical UI: React + TypeScript + Vite app under `frontend/`. Its production
+  build (`frontend/dist`) is served by FastAPI at `/dashboard`.
+- Fallback UI: the legacy static dashboard under `backend/app/static`, served at
+  `/dashboard` only when no React build is present.
 
-The static dashboard is the canonical product UI until a later migration phase explicitly promotes the Svelte app. Backend API changes must keep the static dashboard working.
+The React app is the canonical product UI. The legacy static dashboard remains a
+safety fallback so the app keeps working before the first `npm run build`.
+Backend API changes must keep both paths working until the legacy dashboard is
+removed.
 
-## Static Dashboard Rules
+## React App Rules
 
-- Keep `/dashboard` served by FastAPI until cutover.
-- Keep dashboard API contracts aligned with `docs/api-reference.md`.
-- Do not redesign dashboard workflows as part of backend modernization phases.
-- Validate report, job, sync, transaction, budget, and auth flows through existing endpoint tests before changing dashboard calls.
+- Source lives in `frontend/src` (feature-based folders under `features/`).
+- Reuse the typed API client in `src/lib/api.ts`; do not add frontend-only data
+  paths or duplicate aggregation that belongs in backend services.
+- Keep API calls aligned with `docs/api-reference.md`.
+- Preserve accessibility: live regions for toasts, keyboard-dismissible dialogs,
+  labelled controls, and visible focus states.
+- `npm run build`, `npm run test`, and `npm run lint` must pass; CI enforces all
+  three (`.github/workflows/ci.yml`, `frontend` job).
 
-## Svelte Migration Rules
+## Serving & Cutover
 
-- Treat `frontend/` as migration work, not the active runtime.
-- Port views incrementally with parity against the static dashboard.
-- Reuse backend contracts rather than adding frontend-only data paths.
-- Promote Svelte only after auth, sync, reports, budgets, review queue, accessibility, and build/deployment behavior reach parity.
+- `frontend/dist` is gitignored; CI builds it and FastAPI serves it at
+  `/dashboard` (Vite `base` is `/dashboard/`).
+- When the React app is verified in production use, the legacy static dashboard
+  under `backend/app/static` can be removed; document the removal in the same
+  change and drop the FastAPI fallback branch in `main.py`.
 
-## Cutover Criteria
+## Legacy Static Dashboard
 
-Svelte can become canonical only when:
-
-- `npm run build` succeeds in `frontend/`.
-- The built app can be served or deployed with the same API base.
-- Core dashboard workflows have test or manual validation evidence.
-- Static dashboard retirement is documented in the same change.
+- Retained only as the no-build fallback.
+- Do not invest in new features here; new UI work goes in the React app.

@@ -1,70 +1,80 @@
-# PFIS Frontend (Svelte + Vite) — Migration Foundation
+# PFIS Frontend (React + TypeScript + Vite)
 
-This directory is the in-progress migration of the dashboard from the single
-~2,000-line vanilla-JS file (`backend/app/static/js/dashboard-revamp.js`) to a
-component-based Svelte app built with Vite.
+A professional, component-based rewrite of the PFIS dashboard. Replaces the
+legacy ~2,000-line vanilla-JS dashboard with a structured React application.
 
-> **Status:** scaffold + API client + one ported view (`Overview`). The legacy
-> static dashboard at `/dashboard` remains the served default and is fully
-> functional. Nothing here changes the running app until the cutover step.
+## Stack
 
-## Why Svelte
+- **React 18 + TypeScript** — typed, component-driven UI.
+- **Vite** — fast dev server and production build.
+- **Tailwind CSS** — utility styling with a token-based design system.
+- **shadcn-style UI primitives** — local, owned components (`src/components/ui`).
+- **TanStack Query** — server state, caching, and invalidation.
+- **Recharts** — category and trend charts.
+- **lucide-react** — icons.
+- **Light / dark theme** — toggle with system-preference default.
 
-- Smallest runtime footprint of the mainstream options; compiles to plain JS.
-- Auto-escapes interpolated values, preserving the XSS safety the legacy
-  dashboard achieved manually via `escapeHtml()`.
-- No virtual-DOM overhead — a good fit for a chart-heavy single-user dashboard.
-
-(React or Vue are viable alternatives; the API client in `src/lib/api.js` is
-framework-agnostic and can be reused if the framework choice changes.)
-
-## Prerequisites
-
-Node.js 18+ and npm. Node is **not** installed in the current environment, so
-the scaffold has not yet been `npm install`ed or built here — do that locally:
+## Commands
 
 ```bash
 cd frontend
 npm install
-npm run dev      # http://localhost:5173 (proxies /api to http://127.0.0.1:8000)
-npm run build    # outputs to frontend/dist/
+npm run dev      # http://localhost:5173 (proxies /api -> http://127.0.0.1:8000)
+npm run build    # type-check + bundle into dist/
+npm run preview  # preview the production build
+npm run test     # Vitest + Testing Library
+npm run lint     # ESLint
+npm run format   # Prettier
 ```
 
-Run the backend separately (see the root `README.md`).
+Run the FastAPI backend separately (see the root `README.md`).
+
+## How it is served
+
+`npm run build` emits to `frontend/dist`. FastAPI serves that build at
+`/dashboard` (with SPA fallback). If the build is absent, FastAPI falls back to
+the legacy static dashboard, so the app keeps working before the first build.
+
+The Vite `base` is `/dashboard/`, so built assets resolve under
+`/dashboard/assets/*` when served by the backend.
 
 ## Structure
 
 ```
-frontend/
-  index.html              Vite entry HTML
-  vite.config.js          Dev server + /api proxy + build config
-  src/
-    main.js               Mounts the App
-    App.svelte            Shell (header + view)
-    views/
-      Overview.svelte     Ported metrics view (calls /transactions/summary)
-    lib/
-      api.js              Typed-ish API client (mirrors docs/api-reference.md)
-      session.js          Versioned localStorage session (pfis.session.v3)
+src/
+  main.tsx                 Entry point
+  app/                     App shell: providers, layout, header, nav, theme toggle
+  components/
+    ui/                    Design-system primitives (Button, Card, Input, Dialog, …)
+    theme/                 ThemeProvider (light/dark)
+    SectionTitle.tsx
+  features/
+    auth/                  AuthContext + AuthScreen (login/register/Google/demo)
+    workspace/             Month/year context, query hooks, sync pipeline
+    overview/              Hero metrics + command center + activity log
+    inbox/                 Email list + sync status
+    insights/             Category + trend charts, merchants, recurring
+    budgets/               Budget board + create/edit modal
+    review/                Review queue + detail + bulk actions
+    transactions/          Explorer with filters, grouping, drill-down, exports
+  lib/                     api client, session, types, formatters, colors, utils
+  styles/                  Tailwind entry + design tokens (light/dark)
+  test/                    Vitest setup
 ```
 
-## Migration plan (remaining work)
+## Design system
 
-1. Port views incrementally, reusing `src/lib/api.js`:
-   hero/metrics → category analytics → review queue → budgets → reports.
-2. Re-create accessibility features from the legacy dashboard
-   (`aria-live` regions, `.sr-only` text, Escape-to-close, focus management).
-3. Port auth/session flows (login, Google OAuth callback handling).
-4. Keep Chart.js (or swap for a Svelte-friendly chart lib) for trend charts.
+Colors are HSL CSS variables in `src/styles/index.css`, exposed to Tailwind via
+`tailwind.config.js`. Light and dark palettes are defined under `:root` and
+`.dark`. Components consume semantic tokens (`bg-card`, `text-muted-foreground`,
+`border-border`, `bg-primary`, `text-success`, …) so theming is consistent.
 
-## Cutover
+## Feature parity
 
-Once views reach parity:
-
-1. `npm run build` to produce `frontend/dist/`.
-2. Serve the built assets from FastAPI (e.g. mount `frontend/dist` and point the
-   `/dashboard` route at the new `index.html`), or serve the SPA separately.
-3. Remove the legacy `static/js/dashboard-revamp.js` and related files.
-
-Each ported view should be validated against the legacy dashboard for visual and
-behavioral parity before the cutover.
+This app reaches parity with the legacy dashboard: authentication
+(login/register/Google/demo), month navigation, the sync pipeline with live job
+polling and an activity log, overview metrics, inbox, insights with charts,
+budgets CRUD, the review queue with bulk actions, and the transactions explorer
+with filters, drill-down, and CSV/HTML report export — plus a new light/dark
+theme and accessibility (live regions, keyboard-dismissible dialogs, labelled
+controls).
