@@ -16,6 +16,8 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 - Never log Google OAuth codes, access tokens, refresh tokens, passwords, encryption keys, or full raw emails.
 - Store OAuth tokens encrypted through `encrypt_secret`.
 - Rotate any credentials that were committed or shared.
+- Set `ENVIRONMENT=production` for deployed environments so startup validates production-safe settings.
+- Production requires a unique `SECRET_KEY`, `AUTH_REQUIRED=true`, a non-SQLite `DATABASE_URL`, and non-local `CORS_ORIGINS`.
 
 ## OAuth
 
@@ -36,3 +38,8 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 - Keep CORS scoped to configured origins and required methods/headers.
 - Return generic errors for credential failures.
 
+## Local Versus Production Mode
+
+Local/demo mode keeps SQLite and optional auth available for fast development.
+Production mode is explicit and fail-closed. Do not disable production validation
+to work around deployment misconfiguration; fix the environment values instead.

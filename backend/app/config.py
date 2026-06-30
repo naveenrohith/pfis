@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "PFIS"
     APP_VERSION: str = "0.1.0"
+    ENVIRONMENT: str = "local"
     DEBUG: bool = False
     DATABASE_URL: str = "sqlite+aiosqlite:///./pfis.db"
     SECRET_KEY: str = DEFAULT_SECRET_KEY
@@ -41,6 +42,11 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/google/callback"
     GMAIL_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/auth/gmail/callback"
     GOOGLE_ALLOWED_EMAILS: Annotated[list[str], NoDecode] = []
+
+    @property
+    def is_production(self) -> bool:
+        """Return whether strict production safety validation applies."""
+        return self.ENVIRONMENT.strip().lower() in {"production", "prod"}
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
@@ -74,6 +80,16 @@ class Settings(BaseSettings):
             return False
         return value
 
+    @field_validator("ENVIRONMENT", mode="before")
+    @classmethod
+    def parse_environment(cls, value: Any) -> str:
+        """Normalize environment labels while keeping local mode as default."""
+        if value is None or value == "":
+            return "local"
+        if not isinstance(value, str):
+            raise ValueError("Invalid ENVIRONMENT value")
+        return value.strip().lower()
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: Any) -> list[str]:
@@ -105,6 +121,17 @@ class Settings(BaseSettings):
         Intentionally non-fatal so local/demo runs keep working, but the warning
         is escalated when real authentication is enabled with the default key.
         """
+        if self.is_production:
+            if self.SECRET_KEY == DEFAULT_SECRET_KEY:
+                raise ValueError("Production requires a unique SECRET_KEY")
+            if not self.AUTH_REQUIRED:
+                raise ValueError("Production requires AUTH_REQUIRED=true")
+            if self.DATABASE_URL.startswith("sqlite"):
+                raise ValueError("Production requires a non-SQLite DATABASE_URL")
+            local_origins = {"http://localhost:8000", "http://127.0.0.1:8000"}
+            if set(self.CORS_ORIGINS) <= local_origins:
+                raise ValueError("Production requires explicit non-local CORS_ORIGINS")
+
         if self.SECRET_KEY == DEFAULT_SECRET_KEY:
             if self.AUTH_REQUIRED:
                 warnings.warn(
