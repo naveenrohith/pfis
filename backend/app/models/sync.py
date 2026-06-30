@@ -110,7 +110,7 @@ class ParseFailure(Base):
     email_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("raw_emails.id"), nullable=False, index=True
     )
-    error_message: Mapped[str] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     parser_version: Mapped[int] = mapped_column(Integer, default=1)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     last_retry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -27,9 +27,8 @@ Transaction creation is represented by `backend/app/schemas/transaction.py`. Req
 
 ## Pipeline Stats
 
-Pipeline endpoints return stats with counts for total unprocessed, parsed success, parsed failed, stored, duplicates, low confidence, skipped non-transaction, and per-email results.
+Pipeline endpoints return stats with counts for total unprocessed, parsed success, parsed failed, stored, duplicates, low confidence, skipped non-transaction, and per-email results. Per-email parser results include parser-facing metadata such as bank, parser version, confidence, merchant source, and whether the generic parser fallback handled the email.
 
 ## Report Data
 
 Reports and dashboard workflows depend on monthly summary, category breakdown, top merchants, daily trend, recurring payments, and insight cards.
-
