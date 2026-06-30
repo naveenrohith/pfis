@@ -29,4 +29,15 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 - Transaction `fingerprint` protects deduplication.
 - Parser changes must preserve `parser_version` traceability.
 - Model changes require tests and migration review.
+- Local/demo startup may create tables automatically for convenience, but shared or production environments must use Alembic migrations as the schema control path.
 
+## Migration Discipline
+
+PFIS keeps `Base.metadata.create_all` as a local/demo startup convenience only. It is not the production schema authority.
+
+For shared or production-like databases:
+
+- Apply schema changes through Alembic migrations under `backend/alembic/versions`.
+- Keep Alembic migrations aligned with SQLAlchemy models in `backend/app/models`.
+- Add or update tests before changing deduplication, ownership, or nullable field behavior.
+- Run `tests/pytest/test_migration_discipline.py` when a model or migration changes.

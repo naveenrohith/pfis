@@ -35,7 +35,8 @@ def upgrade() -> None:
         "categories",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("name", sa.String(100), unique=True, nullable=False),
-        sa.Column("icon", sa.String(10), nullable=True),
+        sa.Column("parent_category_id", sa.String(36), sa.ForeignKey("categories.id"), nullable=True),
+        sa.Column("icon", sa.String(50), nullable=True),
     )
 
     # --- merchants ---
@@ -52,15 +53,13 @@ def upgrade() -> None:
         "raw_emails",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=False, index=True),
-        sa.Column("gmail_message_id", sa.String(100), unique=True, nullable=True, index=True),
-        sa.Column("gmail_account_id", sa.String(36), nullable=True),
-        sa.Column("sender", sa.String(255), nullable=True),
+        sa.Column("gmail_message_id", sa.String(255), unique=True, nullable=True, index=True),
         sa.Column("subject", sa.String(500), nullable=True),
         sa.Column("body", sa.Text(), nullable=True),
+        sa.Column("sender", sa.String(255), nullable=True, index=True),
         sa.Column("received_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("synced_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("processed", sa.Boolean(), server_default=sa.text("0")),
-        sa.Column("email_type", sa.String(20), nullable=True),
+        sa.Column("processed_flag", sa.Boolean(), server_default=sa.text("0")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
     )
 
     # --- gmail_accounts ---
@@ -68,12 +67,10 @@ def upgrade() -> None:
         "gmail_accounts",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=False, index=True),
-        sa.Column("gmail_email", sa.String(255), nullable=False),
+        sa.Column("google_account_id", sa.String(255), nullable=False),
         sa.Column("access_token_ref", sa.Text(), nullable=True),
         sa.Column("refresh_token_ref", sa.Text(), nullable=True),
-        sa.Column("google_account_id", sa.String(255), nullable=True),
         sa.Column("last_synced_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("connected_at", sa.DateTime(timezone=True), nullable=True),
     )
 
     # --- transactions ---
