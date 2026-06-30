@@ -10,7 +10,8 @@ PFIS is a FastAPI personal-finance backend with a static dashboard. It turns fin
 4. ORM models in `backend/app/models`
 5. Pydantic schemas in `backend/app/schemas`
 6. Static dashboard in `backend/app/static`
-7. Tests in `tests/pytest`
+7. Svelte migration scaffold in `frontend/`
+8. Tests in `tests/pytest`
 
 ## Core Pipeline
 
@@ -41,3 +42,6 @@ Gmail/demo raw email
 - New dashboard feature: add backend contract first, then frontend rendering.
 - New data source: produce raw records compatible with the parser pipeline.
 
+## Frontend Direction
+
+The FastAPI-served static dashboard is the canonical UI today. The Svelte/Vite app under `frontend/` is migration work until it reaches workflow parity and is explicitly promoted. See `docs/frontend.md`.
