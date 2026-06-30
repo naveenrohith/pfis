@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
 AUTO_REVIEW_THRESHOLD = 0.85
 
 
+class DuplicateTransactionError(ValueError):
+    """Raised when a transaction (or correction) collides with an existing row.
+
+    Subclasses ``ValueError`` so existing callers that map ``ValueError`` to an
+    HTTP 409 keep working, while letting the pipeline distinguish a genuine
+    duplicate from an unrelated value error.
+    """
+
+
 class TransactionService:
     """Service layer for transaction operations."""
 
@@ -153,7 +162,7 @@ class TransactionService:
         )
         if existing.scalar_one_or_none():
             logger.info(f"Duplicate transaction detected: fingerprint={fingerprint[:16]}...")
-            raise ValueError("Duplicate transaction detected")
+            raise DuplicateTransactionError("Duplicate transaction detected")
 
         txn = Transaction(
             user_id=user_id,
@@ -277,7 +286,9 @@ class TransactionService:
                     )
                 )
                 if existing.scalar_one_or_none():
-                    raise ValueError("Correction would create a duplicate transaction")
+                    raise DuplicateTransactionError(
+                        "Correction would create a duplicate transaction"
+                    )
                 txn.fingerprint = new_fingerprint
 
         await self._record_corrections(txn.id, changed_fields)

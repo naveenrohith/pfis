@@ -4,6 +4,12 @@
 
 PFIS should modernize through phased stabilization, not a rewrite. The current architecture is strong enough to evolve. The roadmap should protect parser correctness, clarify frontend direction, improve production posture, and add operational reliability in sequence.
 
+> Progress (verified 2026-06-30): Phase 0 (baseline) and Phase 1 (pipeline
+> stabilization) are complete. Phase 2 report extraction and most of Phase 3
+> (migration discipline) and Phase 5 (production config) are complete. Remaining
+> focus: Phase 2 frontend canonicalization, Phase 4 durable jobs/metrics, and
+> Phase 6 connector integration.
+
 ## Evidence Base
 
 - `backend/app/main.py` shows the current API, middleware, static dashboard, and route registration boundaries.

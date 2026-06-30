@@ -27,7 +27,7 @@ from app.services.parser.normalizer import (
     normalize_merchant,
 )
 from app.services.parser.registry import get_parser_registry
-from app.services.transaction_service import TransactionService
+from app.services.transaction_service import DuplicateTransactionError, TransactionService
 
 logger = logging.getLogger(__name__)
 _TEXT_NORMALIZER = BaseParser()
@@ -76,7 +76,7 @@ def _attach_parse_result(email_result: dict[str, Any], parse_result: ParseResult
     email_result["confidence"] = parse_result.confidence_score
     email_result["bank"] = parse_result.bank
     email_result["parser_version"] = parse_result.parser_version
-    email_result["parser_fallback"] = parse_result.bank == "GENERIC"
+    email_result["parser_fallback"] = parse_result.used_fallback
 
 
 async def _infer_missing_merchant(
@@ -189,6 +189,7 @@ async def _process_email_batch(
         "stored": 0,
         "duplicates": 0,
         "low_confidence": 0,
+        "fallback_parsed": 0,
         "skipped_non_transaction": 0,
         "results": [],
     }
@@ -255,6 +256,8 @@ async def _process_email_batch(
             stats["parsed_success"] += 1
             if parse_result.confidence_score < 0.7:
                 stats["low_confidence"] += 1
+            if email_result.get("parser_fallback"):
+                stats["fallback_parsed"] += 1
 
             merchant_normalized, category_id = await _resolve_transaction_category(
                 db,
@@ -279,7 +282,7 @@ async def _process_email_batch(
                 stats["stored"] += 1
                 email_result["status"] = "stored"
                 email_result["transaction_id"] = txn.id
-            except ValueError:
+            except DuplicateTransactionError:
                 stats["duplicates"] += 1
                 email_result["status"] = "duplicate"
 
@@ -302,6 +305,7 @@ async def _process_email_batch(
     logger.info(
         f"Pipeline complete: {stats['parsed_success']} parsed, "
         f"{stats['stored']} stored, {stats['duplicates']} dupes, "
+        f"{stats['fallback_parsed']} fallback, "
         f"{stats['skipped_non_transaction']} skipped, "
         f"{stats['parsed_failed']} failed"
     )

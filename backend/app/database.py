@@ -4,11 +4,14 @@ Async SQLAlchemy engine, session factory, and base model.
 Swappable between SQLite (prototype) and PostgreSQL (production).
 """
 
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Create async engine — works with both SQLite and PostgreSQL
@@ -43,7 +46,15 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """Create all tables. Used on startup."""
+    """Create tables for local/demo runs.
+
+    In the production profile the schema is owned by Alembic migrations
+    (`alembic upgrade head`), so ``create_all`` is skipped to avoid divergence
+    between the live schema and the migration history.
+    """
+    if get_settings().is_production:
+        logger.info("Production profile: skipping create_all; run 'alembic upgrade head'.")
+        return
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

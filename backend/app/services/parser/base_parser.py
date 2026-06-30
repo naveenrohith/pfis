@@ -38,6 +38,7 @@ class ParseResult:
     bank: str = ""
     parser_version: int = 1
     merchant_source: str = "missing"  # exact | inferred | generic | missing
+    used_fallback: bool = False  # True when the generic fallback parser handled this email
 
     # Computed
     confidence_score: float = 0.0

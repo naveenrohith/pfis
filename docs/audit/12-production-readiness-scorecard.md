@@ -34,14 +34,18 @@ PFIS is not production-ready yet, and the repository is honest about that. It is
 
 ## Critical Production Gaps
 
-| Gap | Severity | Recommendation |
-| --- | --- | --- |
-| Production configuration validation | High | Require non-default secrets, explicit CORS, production database, and auth mode |
-| Durable background processing | High | Replace or supplement in-process jobs for hosted use |
-| Database operations | High | Use Alembic migrations, production database, backups, and restore tests |
-| Observability metrics | Medium | Add sync, parse, job, failure, fallback, and report metrics |
-| Parser quality controls | Medium | Expand fixtures, fallback tracking, and review queues |
-| Frontend migration decision | Medium | Choose static dashboard or Svelte as canonical |
+> Status verified 2026-06-30. Resolved gaps are marked; remaining gaps keep their
+> original recommendation.
+
+| Gap | Severity | Status | Recommendation |
+| --- | --- | --- | --- |
+| Production configuration validation | High | Resolved | Fails closed on default secret, SQLite, non-local CORS, and auth mode |
+| Durable background processing | High | Open | Replace or supplement in-process jobs for hosted use |
+| Database operations | High | Partial | Alembic + parity test + prod skips `create_all`; backups/restore still needed |
+| Observability metrics | Medium | Partial | Request ids, `/health/ops`, and fallback metric exist; full metrics dashboard pending |
+| Parser quality controls | Medium | Partial | Fallback tracking added; expand fixtures and review queue |
+| Frontend migration decision | Medium | Open | Choose static dashboard or Svelte as canonical |
+
 
 ## Production Readiness Criteria
 

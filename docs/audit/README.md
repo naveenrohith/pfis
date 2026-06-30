@@ -4,6 +4,31 @@ This audit is a repository-grounded modernization blueprint for PFIS. It is base
 
 PFIS is currently best described as a structured MVP: the product has clear module boundaries and a useful test base, but production hardening, deeper domain boundaries, and operational maturity are still incomplete.
 
+## Verification & Progress (verified 2026-06-30)
+
+This audit has been re-verified against the current code. Most of the roadmap is
+already implemented; the table below is the live status. Items not listed remain
+as described in the individual reports.
+
+| Audit item | Status | Evidence |
+| --- | --- | --- |
+| Pipeline decomposed into stages | Done | `services/parser/pipeline.py` stage functions |
+| Report HTML extracted from route (XSS-safe) | Done | `services/report_service.py`, `report_renderer.py` (`html.escape`) |
+| Production config fails closed | Done | `config.py` `is_production` + `model_validator` |
+| Background job error classification | Done | `job_service.classify_job_error` |
+| Operational health counters | Done | `/api/health/ops` |
+| Connector source-record contract | Done (scaffold) | `services/connectors/source_record.py` |
+| Migration/model parity test | Done | `tests/pytest/test_migration_discipline.py` |
+| Duplicate vs generic `ValueError` masking | Done | `DuplicateTransactionError` typed + caught in pipeline |
+| Alembic-only schema in production | Done | `database.init_db()` skips `create_all` when production |
+| Track fallback parser usage | Done | `ParseResult.used_fallback` + pipeline `fallback_parsed` stat |
+| Per-email commit in pipeline loop | Intentional (won't change) | per-email durability is the correct resilience choice for ingestion |
+| Normalizer global cache correctness | Deferred | benign for single-user local; revisit before multi-user |
+| Durable job queue / worker | Out of scope | local/single-user profile |
+| Frontend cutover (retire static dashboard) | Out of scope (now) | needs Node + Svelte parity work |
+
+Current test status: full `pytest` suite green.
+
 ## Reports
 
 1. [Executive Summary and Architecture Assessment](01-executive-summary-architecture-assessment.md)

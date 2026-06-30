@@ -6,15 +6,20 @@ PFIS does not show the usual signs of a chaotic MVP. The technical debt is conce
 
 ## Debt Register
 
-| Item | Severity | Impact | Evidence | Recommendation |
-| --- | --- | --- | --- | --- |
-| Monolithic pipeline orchestration | High | Parser evolution, bug risk | `backend/app/services/parser/pipeline.py` owns multiple stages | Extract stage functions and test them independently |
-| Inline HTML report rendering | Medium | Maintainability, escaping risk | `backend/app/api/routes/reports.py` builds a full HTML page in Python strings | Move to templates or report renderer service |
-| In-process background jobs | Medium | Reliability | `job_service.py` uses `asyncio.create_task` and `_active_tasks` | Use durable queue/worker for hosted or multi-user deployments |
-| Local-first config | High for production | Security, operations | Default SQLite and dev secret are allowed for local use | Add production config validation |
-| Static dashboard plus Svelte migration | Medium | UI duplication | `backend/app/static/` and `frontend/` coexist | Define migration outcome and retire duplicate UI paths |
-| Broad generic parser fallback | Medium | Data quality | Registry maps many banks to fallback parser | Track fallback usage and require confidence review |
-| Mixed schema paths | Medium | Schema drift | Alembic exists while startup create-all runs | Clarify migration policy |
+> Status verified 2026-06-30. Several items below are now resolved; the Status
+> column reflects current code.
+
+| Item | Severity | Status | Impact | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| Monolithic pipeline orchestration | High | Resolved | Parser evolution, bug risk | `pipeline.py` now uses discrete stage functions | Keep stages independently tested |
+| Inline HTML report rendering | Medium | Resolved | Maintainability, escaping risk | Extracted to `report_service.py` / `report_renderer.py` with `html.escape` | Keep rendering out of routes |
+| In-process background jobs | Medium | Open (local-acceptable) | Reliability | `job_service.py` uses `asyncio.create_task` and `_active_tasks` | Use durable queue/worker for hosted/multi-user only |
+| Local-first config | High for production | Resolved | Security, operations | `config.py` fails closed in the production profile | Keep production profile explicit |
+| Static dashboard plus Svelte migration | Medium | Open | UI duplication | `backend/app/static/` and `frontend/` coexist | Retire static dashboard after Svelte parity |
+| Broad generic parser fallback | Medium | Resolved (tracking) | Data quality | `ParseResult.used_fallback` + pipeline `fallback_parsed` metric | Add review queue if fallback rate is high |
+| Mixed schema paths | Medium | Resolved | Schema drift | `init_db()` skips `create_all` in production; parity test enforces ORM↔migration | Production uses `alembic upgrade head` |
+| Duplicate `ValueError` masking | Low | Resolved | Data correctness | Typed `DuplicateTransactionError`; pipeline catches it specifically | — |
+
 
 ## Strengths Reducing Debt Risk
 
