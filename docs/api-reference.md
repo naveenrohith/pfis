@@ -100,7 +100,9 @@ Operations router (`/api/gmail`):
 ## Jobs
 
 Async job submissions return `202 Accepted` with a `JobResponse`; poll the job
-by id for status. Submissions are rate-limited to 5/min.
+by id for status. Submissions are rate-limited to 5/min. Failed jobs keep
+`error_message` populated and include `result.error_type` for stable operational
+classification.
 
 | Method | Path | Query | Success | Errors | Returns |
 | --- | --- | --- | --- | --- | --- |
@@ -113,4 +115,3 @@ by id for status. Submissions are rate-limited to 5/min.
 
 Keep this file updated whenever paths, query parameters, response headers, or
 response shapes change. Route source lives in `backend/app/api/routes`.
-

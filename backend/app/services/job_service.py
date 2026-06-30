@@ -105,6 +105,22 @@ JOB_HANDLERS = {
 }
 
 
+def classify_job_error(exc: Exception) -> str:
+    """Map job exceptions to stable operational categories."""
+    message = str(exc).lower()
+    if isinstance(exc, ValueError) and "no gmail account connected" in message:
+        return "missing_gmail_account"
+    if isinstance(exc, ValueError):
+        return "validation_error"
+    if "credential" in message or "token" in message or "oauth" in message:
+        return "credential_error"
+    return "unexpected_error"
+
+
+def _job_error_result(error_type: str, message: str) -> str:
+    return json.dumps({"error_type": error_type, "error_message": message})
+
+
 async def run_job(job_id: str) -> None:
     async with AsyncSessionLocal() as db:
         job = await get_job(db, job_id)
@@ -116,6 +132,7 @@ async def run_job(job_id: str) -> None:
         if handler is None:
             job.status = JobStatus.FAILED
             job.error_message = f"Unsupported job type: {job.job_type}"
+            job.result_json = _job_error_result("unsupported_job_type", job.error_message)
             job.finished_at = datetime.now(UTC)
             await db.commit()
             return
@@ -135,5 +152,6 @@ async def run_job(job_id: str) -> None:
             logger.exception("Background job %s failed", job_id)
             job.status = JobStatus.FAILED
             job.error_message = str(exc)
+            job.result_json = _job_error_result(classify_job_error(exc), str(exc))
             job.finished_at = datetime.now(UTC)
             await db.commit()

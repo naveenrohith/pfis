@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 
 from app.models.email import RawEmail
+from app.services.job_service import create_job, run_job
 from app.services.parser.pipeline import process_raw_emails
 
 from tests.pytest.helpers import create_user
@@ -83,3 +84,43 @@ async def test_statement_email_does_not_create_balance_transaction(client, test_
     response = await client.get(f"/api/transactions/?user_id={user['id']}&limit=10")
     response.raise_for_status()
     assert response.json() == []
+
+
+async def test_gmail_pipeline_job_failure_includes_error_type(client):
+    user = await create_user(client, "nogmail")
+
+    enqueue_response = await client.post(f"/api/jobs/gmail-sync-pipeline?user_id={user['id']}")
+    enqueue_response.raise_for_status()
+    job = enqueue_response.json()
+
+    final_payload = None
+    for _ in range(20):
+        status_response = await client.get(f"/api/jobs/{job['id']}")
+        status_response.raise_for_status()
+        final_payload = status_response.json()
+        if final_payload["status"] in {"completed", "failed"}:
+            break
+        await asyncio.sleep(0.05)
+
+    assert final_payload is not None
+    assert final_payload["status"] == "failed"
+    assert final_payload["error_message"] == "No Gmail account connected for this user"
+    assert final_payload["result"]["error_type"] == "missing_gmail_account"
+
+
+async def test_unsupported_job_type_failure_includes_error_type(test_session_factory):
+    async with test_session_factory() as db:
+        job = await create_job(db, "not_supported", user_id=None)
+        job_id = job.id
+
+    await run_job(job_id)
+
+    async with test_session_factory() as db:
+        from app.services.job_service import get_job, serialize_job
+
+        failed_job = await get_job(db, job_id)
+        payload = serialize_job(failed_job)
+
+    assert payload["status"] == "failed"
+    assert payload["error_message"] == "Unsupported job type: not_supported"
+    assert payload["result"]["error_type"] == "unsupported_job_type"
