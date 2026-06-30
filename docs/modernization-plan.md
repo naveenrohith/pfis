@@ -10,11 +10,11 @@ PLANNER -> CODE -> TEST -> QUALITY -> REVIEW -> FIX
 
 ## Current Phase
 
-Phase 3: Data Integrity and Migration Discipline.
+Phase 6: Connector Platform Expansion.
 
-Status: in progress. Phase 0, Phase 1, and Phase 2 implementation gates are complete.
+Status: implementation pass complete through Phase 6. Remaining production decisions require a hosted deployment target.
 
-Goal: keep local SQLite convenient while making Alembic the protected schema path for shared and production environments.
+Goal: keep modernization work phased, tested, and reversible while preserving the local/demo developer path.
 
 ## Phase 0 Acceptance Criteria
 
@@ -30,10 +30,10 @@ Goal: keep local SQLite convenient while making Alembic the protected schema pat
 | --- | --- | --- |
 | 0 | Baseline protection | Complete |
 | 1 | Parser pipeline stabilization | Conservative helper extraction complete |
-| 2 | Report and dashboard boundary cleanup | Report renderer extraction complete |
+| 2 | Report and dashboard boundary cleanup | Report renderer extraction and frontend ownership docs complete |
 | 3 | Data integrity and migration discipline | Alembic baseline parity test added |
-| 4 | Reliability and operations | Job error classification complete |
-| 5 | Production hardening | Production config validation complete |
+| 4 | Reliability and operations | Job error classification and operational health counters complete |
+| 5 | Production hardening | Production config validation and deployment runbook complete |
 | 6 | Connector platform expansion | SourceRecord contract complete |
 
 ## Phase 0 Scope
@@ -94,3 +94,29 @@ Remaining Phase 1 follow-up:
 - ORM model changes must update Alembic migrations in the same change set.
 - Deduplication and ownership behavior must remain covered before schema edits.
 - Migration parity is guarded by `tests/pytest/test_migration_discipline.py`.
+
+## Phase 4 Acceptance Criteria
+
+- Job failure categories are persisted in job results.
+- Operational health exposes non-secret runtime posture and job status counters.
+- Real Gmail calls remain excluded from tests.
+- Durable queue/worker selection remains deferred until a deployment target is chosen.
+
+## Phase 5 Acceptance Criteria
+
+- Production mode fails closed for unsafe secret, auth, database, or CORS settings.
+- Local/demo mode remains simple and keeps SQLite available.
+- Deployment, backup, restore, and monitoring expectations are documented.
+
+## Phase 6 Acceptance Criteria
+
+- Future connectors use `SourceRecord` rather than duplicating transaction creation.
+- Gmail remains the first connector and current behavior remains unchanged.
+- Connector fixture tests protect the source-record contract.
+
+## Deferred Production Decisions
+
+- Durable background worker or queue implementation.
+- Production database provider and backup tooling.
+- Svelte dashboard promotion and static dashboard retirement.
+- Hosted observability stack and alert routing.

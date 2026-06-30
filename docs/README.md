@@ -12,6 +12,8 @@ This directory is the source of truth for PFIS agent and Copilot work.
 - [security.md](security.md) - auth, ownership, secrets, OAuth, frontend safety
 - [testing.md](testing.md) - pytest strategy and validation commands
 - [modernization-plan.md](modernization-plan.md) - phased modernization implementation tracker
+- [deployment.md](deployment.md) - production-candidate deployment, backup, and health runbook
+- [frontend.md](frontend.md) - static dashboard and Svelte migration ownership
 
 ## Domain Docs
 
