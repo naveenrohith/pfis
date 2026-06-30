@@ -8,7 +8,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
@@ -34,6 +34,20 @@ def serialize_job(job: BackgroundJob) -> dict[str, Any]:
         "started_at": job.started_at,
         "finished_at": job.finished_at,
     }
+
+
+def get_active_task_count() -> int:
+    """Return the number of in-process job tasks currently tracked."""
+    return len(_active_tasks)
+
+
+async def get_job_status_counts(db: AsyncSession) -> dict[str, int]:
+    """Return persisted background job counts by status."""
+    result = await db.execute(
+        select(BackgroundJob.status, func.count(BackgroundJob.id)).group_by(BackgroundJob.status)
+    )
+    counts = {status.value: int(count) for status, count in result.all()}
+    return {status.value: counts.get(status.value, 0) for status in JobStatus}
 
 
 async def create_job(

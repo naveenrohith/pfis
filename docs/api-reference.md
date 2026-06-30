@@ -115,3 +115,10 @@ classification.
 
 Keep this file updated whenever paths, query parameters, response headers, or
 response shapes change. Route source lives in `backend/app/api/routes`.
+
+## Health
+
+| Method | Path | Query | Success | Returns |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/health` | — | `200` | Basic liveness: status, app, version |
+| `GET` | `/api/health/ops` | — | `200` | Non-secret operational posture and job counters |

@@ -9,6 +9,22 @@ async def test_health_endpoint_ok(client):
     assert "status" in response.json()
 
 
+async def test_operational_health_exposes_safe_runtime_state(client):
+    response = await client.get("/api/health/ops")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "healthy"
+    assert body["environment"] == "local"
+    assert body["database_profile"] == "sqlite"
+    assert body["jobs"]["active_in_process"] >= 0
+    assert set(body["jobs"]["persisted_by_status"]) == {
+        "queued",
+        "running",
+        "completed",
+        "failed",
+    }
+
+
 async def test_request_id_header_is_added(client):
     response = await client.get("/api/health")
     assert response.headers.get("X-Request-ID")
