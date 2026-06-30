@@ -23,3 +23,10 @@
 3. Update seed/test fixtures.
 4. Update `docs/data_model.md`.
 
+## Add A Source Connector
+
+1. Convert the source payload into `SourceRecord`.
+2. Preserve raw source data needed for reprocessing.
+3. Feed sender, subject, and body into the existing parser pipeline.
+4. Do not create a parallel transaction persistence path.
+5. Add connector fixtures and parser/pipeline regression tests.
