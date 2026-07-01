@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -242,6 +243,45 @@ def run_migrations(python_path: Path, skip_migrations: bool) -> None:
     run([str(python_path), "-m", "alembic", "upgrade", "head"], cwd=BACKEND_DIR)
 
 
+def _is_port_free(host: str, port: int) -> bool:
+    """Return True when the TCP port is available to bind.
+
+    Note: SO_REUSEADDR is intentionally omitted because on Windows it allows
+    concurrent binds, which would produce false positives.
+    """
+    bind_host = "127.0.0.1" if host in {"0.0.0.0", ""} else host
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind((bind_host, port))
+            return True
+        except OSError:
+            return False
+
+
+def _find_free_port(host: str, start: int, attempts: int = 20) -> int | None:
+    """Return the first free port at or above *start*, or None if none found."""
+    for port in range(start, start + attempts):
+        if _is_port_free(host, port):
+            return port
+    return None
+
+
+def check_port(host: str, port: int) -> int:
+    """Verify the port is available and return it, auto-advancing if blocked."""
+    if _is_port_free(host, port):
+        return port
+
+    print(f"[PFIS] Port {port} is already in use.")
+    free = _find_free_port(host, port + 1)
+    if free is None:
+        raise SystemExit(
+            f"[PFIS] Could not find a free port near {port}. "
+            "Stop other services or pass --port <number>."
+        )
+    print(f"[PFIS] Switching to port {free} automatically.")
+    return free
+
+
 def start_backend(python_path: Path, host: str, port: str, reload: bool) -> int:
     dashboard_url = f"http://{host}:{port}/dashboard"
     docs_url = f"http://{host}:{port}/docs"
@@ -277,10 +317,11 @@ def main() -> int:
     ensure_frontend_dependencies(args.skip_install)
     build_frontend_if_needed(args.force_build)
     run_migrations(python_path, args.skip_migrations)
+    port = check_port(args.host, int(args.port))
     return start_backend(
         python_path=python_path,
         host=args.host,
-        port=str(args.port),
+        port=str(port),
         reload=not args.no_reload,
     )
 

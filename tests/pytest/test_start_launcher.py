@@ -84,3 +84,34 @@ def test_rotate_placeholder_secret_handles_default_development_secret(monkeypatc
     module.ensure_env_file()
 
     assert module.ENV_FILE.read_text(encoding="utf-8") == "SECRET_KEY=rotated-default-secret\n"
+
+
+def test_check_port_returns_requested_port_when_free():
+    import socket
+
+    module = load_start_module()
+    # Grab any free ephemeral port from the OS, then release it and ask check_port for it
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        free_port = s.getsockname()[1]
+    assert module.check_port("127.0.0.1", free_port) == free_port
+
+
+def test_check_port_advances_when_occupied():
+    import socket
+
+    module = load_start_module()
+    # Hold a port without SO_REUSEADDR to ensure _is_port_free sees it as occupied
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        occupied_port = s.getsockname()[1]
+        result = module.check_port("127.0.0.1", occupied_port)
+    assert result != occupied_port
+    assert isinstance(result, int)
+
+
+def test_find_free_port_returns_none_when_all_taken(monkeypatch):
+    module = load_start_module()
+    monkeypatch.setattr(module, "_is_port_free", lambda host, port: False)
+    result = module._find_free_port("127.0.0.1", 9000, attempts=5)
+    assert result is None
