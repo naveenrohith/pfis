@@ -8,7 +8,6 @@ Processes unprocessed raw emails end-to-end.
 import logging
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from datetime import date as date_type
 from typing import Any
 
 from sqlalchemy import select
@@ -129,8 +128,9 @@ def _build_transaction_create(
     """Build the transaction create schema from a valid parse result."""
     if parse_result.amount is None or parse_result.transaction_type is None:
         raise ValueError("Cannot build transaction from invalid parse result")
+    if parse_result.date is None:
+        raise ValueError("Cannot build transaction without a transaction date")
 
-    txn_date = parse_result.date or date_type.today()
     return TransactionCreate(
         amount=parse_result.amount,
         currency=parse_result.currency,
@@ -138,7 +138,7 @@ def _build_transaction_create(
         merchant_raw=parse_result.merchant_raw,
         merchant_normalized=merchant_normalized,
         category_id=category_id,
-        transaction_date=txn_date,
+        transaction_date=parse_result.date,
         account_last4=parse_result.account_last4,
         reference_id=parse_result.reference_id,
         confidence_score=parse_result.confidence_score,
@@ -238,6 +238,25 @@ async def _process_email_batch(
                     db,
                     email,
                     f"Invalid parse: amount={parse_result.amount}, type={parse_result.transaction_type}",
+                    parse_result.parser_version,
+                )
+                email.processed_flag = True
+                await db.commit()
+                stats["results"].append(email_result)
+                continue
+
+            if parse_result.date is None:
+                # Genuine bank/wallet alerts always carry a transaction date. An
+                # amount without a date is almost always a promo/marketing email
+                # misclassified as a transaction. Route it to the parse-failure
+                # queue instead of fabricating today() (which surfaces junk as
+                # "today's spending").
+                stats["parsed_failed"] += 1
+                email_result["status"] = "parse_failed"
+                await _record_parse_failure(
+                    db,
+                    email,
+                    "Invalid parse: missing transaction date",
                     parse_result.parser_version,
                 )
                 email.processed_flag = True

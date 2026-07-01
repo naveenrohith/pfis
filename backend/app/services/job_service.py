@@ -50,6 +50,33 @@ async def get_job_status_counts(db: AsyncSession) -> dict[str, int]:
     return {status.value: counts.get(status.value, 0) for status in JobStatus}
 
 
+async def recover_interrupted_jobs(db: AsyncSession) -> int:
+    """Mark jobs left active by a process restart as failed.
+
+    PFIS uses in-process asyncio tasks for local background jobs. If uvicorn's
+    reloader restarts the worker (or the terminal is interrupted), persisted jobs
+    can otherwise remain stuck as RUNNING/QUEUED forever even though their task no
+    longer exists.
+    """
+    result = await db.execute(
+        select(BackgroundJob).where(BackgroundJob.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]))
+    )
+    jobs = result.scalars().all()
+    if not jobs:
+        return 0
+
+    now = datetime.now(UTC)
+    message = "Job interrupted by server restart; please start sync again"
+    for job in jobs:
+        job.status = JobStatus.FAILED
+        job.error_message = message
+        job.result_json = _job_error_result("interrupted", message)
+        job.finished_at = now
+
+    await db.commit()
+    return len(jobs)
+
+
 async def create_job(
     db: AsyncSession,
     job_type: str,

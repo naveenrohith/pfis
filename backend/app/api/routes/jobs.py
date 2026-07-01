@@ -72,7 +72,9 @@ async def enqueue_retry_parse_failures(
 
 
 @router.get("/{job_id}", response_model=JobResponse)
+@limiter.limit("120/minute")
 async def get_job_status(
+    request: Request,
     job_id: str,
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),

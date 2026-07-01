@@ -11,6 +11,8 @@ export interface ActivityEntry {
 }
 
 const MAX_LOG = 30;
+const JOB_POLL_INTERVAL_MS = 2_000;
+const JOB_MAX_ATTEMPTS = 900; // 30 minutes for large Gmail accounts.
 
 export function useSyncPipeline() {
   const { user, session } = useAuth();
@@ -54,17 +56,19 @@ export function useSyncPipeline() {
             invalidateAll();
             return;
           }
-        } catch {
-          // transient; keep polling until attempt budget exhausts
+        } catch (err) {
+          const message = (err as Error).message || 'Unable to fetch job status';
+          append(`⚠️ Job status check delayed: ${message}`);
         }
-        if (attempts >= 120) {
+        if (attempts >= JOB_MAX_ATTEMPTS) {
           append('❌ Sync timed out');
           notify('Sync timed out', 'error');
           setRunning(false);
           return;
         }
-        pollRef.current = window.setTimeout(tick, 500);
+        pollRef.current = window.setTimeout(tick, JOB_POLL_INTERVAL_MS);
       };
+      if (pollRef.current) window.clearTimeout(pollRef.current);
       tick();
     },
     [append, notify, invalidateAll],

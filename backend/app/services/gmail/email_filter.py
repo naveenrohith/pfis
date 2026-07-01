@@ -90,6 +90,25 @@ PROMO_KEYWORDS = [
     r"congratulations.*selected",
     r"pre.?approved",
     r"apply\s+now",
+    r"voucher",
+    r"redeem",
+    r"reward\s+points",
+    r"gift\s+card",
+    r"free\s+(?:gift|cup|coupon|voucher|trial|delivery)",
+    r"limited\s+edition",
+    r"claim\s+your",
+    r"don.?t\s+miss",
+    r"last\s+chance",
+    r"giveaway",
+    r"coupon\s+code",
+    r"promo\s+code",
+    r"shop\s+now",
+    r"buy\s+now",
+    r"sale\s+is\s+live",
+    r"flat\s+\d+%\s+off",
+    r"\d+%\s+off",
+    r"holiday\s+(?:magic|delights|offer|sale)",
+    r"festive\s+(?:offer|sale)",
 ]
 
 NON_TRANSACTION_KEYWORDS = [
@@ -183,6 +202,14 @@ def classify_email(sender: str, subject: str, body: str) -> tuple[EmailType, str
         logger.debug("Email classified as PROMOTION: %s", subject[:50])
         return EmailType.PROMOTION, bank_name, 0.85
 
+    # Marketing from a non-bank sender: even if it mentions a "purchase" or an
+    # amount (voucher/reward blasts do), a promo signal from an unknown sender is
+    # almost never a real transaction. Reject before the generic transaction path
+    # so these never become fabricated spends.
+    if not is_known and promo_count >= 1:
+        logger.debug("Email classified as PROMOTION(non-bank marketing): %s", subject[:50])
+        return EmailType.PROMOTION, bank_name, 0.80
+
     if non_transaction_count and (txn_keyword_count == 0 or not has_amount):
         logger.debug("Email classified as IGNORE(non-transaction): %s", subject[:50])
         return EmailType.IGNORE, bank_name, 0.90
@@ -190,7 +217,7 @@ def classify_email(sender: str, subject: str, body: str) -> tuple[EmailType, str
     if is_known and txn_keyword_count >= 1 and has_amount:
         return EmailType.TRANSACTION, bank_name, 0.95
 
-    if txn_keyword_count >= 2 and has_amount:
+    if txn_keyword_count >= 2 and has_amount and promo_count == 0:
         return EmailType.TRANSACTION, "UNKNOWN", 0.70
 
     if is_known:

@@ -113,3 +113,39 @@ async def test_pipeline_duplicate_result_preserves_parse_metadata(
     assert duplicate_result["bank"] == "GENERIC"
     assert duplicate_result["parser_version"] == 1
     assert duplicate_result["parser_fallback"] is True
+
+
+async def test_pipeline_rejects_financial_email_without_transaction_date(
+    client,
+    test_session_factory,
+):
+    """A transaction-shaped email with an amount but no date must not become a
+    transaction stamped with today's date; it goes to the parse-failure queue."""
+    user = await create_user(client, "pipelinenodate")
+
+    async with test_session_factory() as db:
+        db.add(
+            RawEmail(
+                user_id=user["id"],
+                gmail_message_id=f"{user['id']}:txn-no-date",
+                sender="alerts@hdfcbank.net",
+                subject="HDFC transaction alert",
+                body=(
+                    "Rs.1000.00 has been debited from your A/c XX1234 via UPI. "
+                    "UPI Ref No 412399999999."
+                ),
+            )
+        )
+        await db.commit()
+
+        stats = await process_raw_emails(db, user["id"])
+
+        failure_result = await db.execute(select(ParseFailure))
+        failure = failure_result.scalar_one()
+
+    result = stats["results"][0]
+    assert stats["stored"] == 0
+    assert stats["parsed_failed"] == 1
+    assert result["status"] == "parse_failed"
+    assert failure.error_message == "Invalid parse: missing transaction date"
+    assert failure.resolved is False

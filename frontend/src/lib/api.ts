@@ -175,10 +175,10 @@ export const api = {
       method: 'POST',
       query: { user_id: userId, limit },
     }),
-  gmailSyncPipeline: (userId: string) =>
+  gmailSyncPipeline: (userId: string, syncAll = false) =>
     request<Job>('/jobs/gmail-sync-pipeline', {
       method: 'POST',
-      query: { user_id: userId, sync_all: true },
+      query: { user_id: userId, sync_all: syncAll },
     }),
   retryParseFailures: (userId: string, limit = 40) =>
     request<Job>('/jobs/retry-parse-failures', {

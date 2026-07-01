@@ -52,6 +52,7 @@ from app.config import get_settings
 from app.database import AsyncSessionLocal, close_db, init_db
 from app.observability import install_request_id_logging, request_id_ctx
 from app.rate_limit import limiter
+from app.services.job_service import recover_interrupted_jobs
 from app.services.seed_service import run_seeds
 
 # Configure logging
@@ -85,6 +86,9 @@ async def lifespan(app: FastAPI):
     # Seed default data
     async with AsyncSessionLocal() as db:
         await run_seeds(db)
+        recovered_jobs = await recover_interrupted_jobs(db)
+        if recovered_jobs:
+            logger.warning("Marked %s interrupted background job(s) as failed", recovered_jobs)
 
     base_url = _startup_base_url()
     logger.info(f"✅ PFIS v{settings.APP_VERSION} ready at {base_url}")
@@ -187,9 +191,10 @@ async def serve_dashboard():
     """Serve the PFIS dashboard.
 
     Prefers the built React SPA (frontend/dist); falls back to the legacy static
-    dashboard when the SPA has not been built yet.
+    dashboard when the SPA has not been built yet. Presence is checked per request
+    so a server started before a build still serves the SPA once it appears.
     """
-    target = SPA_INDEX if SPA_AVAILABLE else STATIC_DIR / "dashboard.html"
+    target = SPA_INDEX if SPA_INDEX.exists() else STATIC_DIR / "dashboard.html"
     response = FileResponse(str(target), media_type="text/html")
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -201,9 +206,9 @@ async def serve_dashboard_spa(path: str):
     """SPA fallback: serve a built asset if it exists, else the SPA index.
 
     Enables client-side routing under /dashboard without 404s. Only active when
-    the React build is present.
+    the React build is present (checked per request).
     """
-    if SPA_AVAILABLE:
+    if SPA_INDEX.exists():
         candidate = FRONTEND_DIST / path
         if path and candidate.is_file():
             return FileResponse(str(candidate))

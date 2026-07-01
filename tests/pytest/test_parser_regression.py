@@ -264,6 +264,31 @@ def test_email_filter_ignores_balance_snapshots_and_application_updates():
     assert account_update_type == EmailType.IGNORE
 
 
+@pytest.mark.parametrize(
+    "sender, subject, body",
+    [
+        (
+            "Tata Starbucks <news@members.sbuxin.com>",
+            "Don't Miss out on Our Holiday Magic.",
+            "Tata Starbucks Holiday delights! Grab a free reusable cup with your next purchase.",
+        ),
+        (
+            "HDFC Bank Offers <offers@mailers.hdfcbank.bank.in>",
+            "Rs.1000 voucher is waiting on Credit Card xx4349",
+            "Tap for more details. Your Rs.1000 voucher is waiting. Redeem your reward now.",
+        ),
+        (
+            "pdfFiller <mail@marketing.pdffiller.example>",
+            "Send docs via USPS directly from pdfFiller",
+            "Get all your document tasks done. Buy now and claim your free trial today.",
+        ),
+    ],
+)
+def test_email_filter_rejects_marketing_from_non_bank_senders(sender, subject, body):
+    email_type, _, _ = classify_email(sender, subject, body)
+    assert email_type == EmailType.PROMOTION
+
+
 @pytest.mark.asyncio
 async def test_full_text_alias_inference_finds_known_merchant(test_session_factory):
     async with test_session_factory() as db:

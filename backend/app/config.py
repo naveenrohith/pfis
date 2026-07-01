@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./pfis.db"
     SECRET_KEY: str = DEFAULT_SECRET_KEY
     TOKEN_ENCRYPTION_KEY: str = ""
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    # 30 days: the session persists until the user explicitly logs out.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200
     AUTH_REQUIRED: bool = False
     CORS_ORIGINS: Annotated[list[str], NoDecode] = [
         "http://localhost:8000",

@@ -7,7 +7,8 @@ from __future__ import annotations
 import asyncio
 
 from app.models.email import RawEmail
-from app.services.job_service import create_job, run_job
+from app.models.sync import JobStatus
+from app.services.job_service import create_job, recover_interrupted_jobs, run_job
 from app.services.parser.pipeline import process_raw_emails
 
 from tests.pytest.helpers import create_user
@@ -124,3 +125,27 @@ async def test_unsupported_job_type_failure_includes_error_type(test_session_fac
     assert payload["status"] == "failed"
     assert payload["error_message"] == "Unsupported job type: not_supported"
     assert payload["result"]["error_type"] == "unsupported_job_type"
+
+
+async def test_recover_interrupted_jobs_marks_active_jobs_failed(test_session_factory):
+    async with test_session_factory() as db:
+        queued = await create_job(db, "demo_sync_pipeline", user_id=None)
+        running = await create_job(db, "gmail_sync_pipeline", user_id=None)
+        completed = await create_job(db, "retry_parse_failures", user_id=None)
+
+        running.status = JobStatus.RUNNING
+        completed.status = JobStatus.COMPLETED
+        await db.commit()
+
+        recovered = await recover_interrupted_jobs(db)
+        assert recovered == 2
+
+        await db.refresh(queued)
+        await db.refresh(running)
+        await db.refresh(completed)
+
+    assert queued.status == JobStatus.FAILED
+    assert running.status == JobStatus.FAILED
+    assert queued.error_message == "Job interrupted by server restart; please start sync again"
+    assert running.error_message == "Job interrupted by server restart; please start sync again"
+    assert completed.status == JobStatus.COMPLETED
