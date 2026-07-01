@@ -4,7 +4,10 @@
 
 PY ?= python
 
-.PHONY: install lint format format-check typecheck test cov check precommit
+.PHONY: start install lint format format-check typecheck test cov check precommit
+
+start:          ## Prepare frontend/backend and start PFIS locally
+	$(PY) scripts/start.py
 
 install:        ## Install dev + runtime dependencies
 	$(PY) -m pip install -r backend/requirements-dev.txt

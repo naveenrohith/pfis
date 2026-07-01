@@ -16,6 +16,20 @@ legacy ~2,000-line vanilla-JS dashboard with a structured React application.
 
 ## Commands
 
+For the normal full application workflow, use the repository-root launcher
+instead of starting frontend and backend separately:
+
+Prerequisites: Python 3.13+ and Node.js/npm 22+ available on `PATH`.
+
+```powershell
+..\run.ps1
+```
+
+That command installs dependencies when needed, builds this React app, applies
+backend migrations, and starts FastAPI serving `/dashboard`.
+
+Frontend-only commands are still useful while developing UI changes:
+
 ```bash
 cd frontend
 npm install
@@ -26,8 +40,6 @@ npm run test     # Vitest + Testing Library
 npm run lint     # ESLint
 npm run format   # Prettier
 ```
-
-Run the FastAPI backend separately (see the root `README.md`).
 
 ## How it is served
 

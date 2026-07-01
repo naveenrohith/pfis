@@ -16,6 +16,7 @@ BACKEND_DIR = APP_DIR.parent
 ROOT_DIR = BACKEND_DIR.parent
 DEFAULT_SQLITE_DB = BACKEND_DIR / "pfis.db"
 DEFAULT_SECRET_KEY = "pfis-dev-secret-change-me-please-32bytes"
+EXAMPLE_SECRET_KEY = "change-me-in-production-with-at-least-32-characters"
 
 
 class Settings(BaseSettings):
@@ -121,8 +122,9 @@ class Settings(BaseSettings):
         Intentionally non-fatal so local/demo runs keep working, but the warning
         is escalated when real authentication is enabled with the default key.
         """
+        has_insecure_secret = self.SECRET_KEY in {DEFAULT_SECRET_KEY, EXAMPLE_SECRET_KEY}
         if self.is_production:
-            if self.SECRET_KEY == DEFAULT_SECRET_KEY:
+            if has_insecure_secret:
                 raise ValueError("Production requires a unique SECRET_KEY")
             if not self.AUTH_REQUIRED:
                 raise ValueError("Production requires AUTH_REQUIRED=true")
@@ -132,18 +134,18 @@ class Settings(BaseSettings):
             if set(self.CORS_ORIGINS) <= local_origins:
                 raise ValueError("Production requires explicit non-local CORS_ORIGINS")
 
-        if self.SECRET_KEY == DEFAULT_SECRET_KEY:
+        if has_insecure_secret:
             if self.AUTH_REQUIRED:
                 warnings.warn(
-                    "AUTH_REQUIRED is enabled but SECRET_KEY is the built-in "
-                    "development default. Set a unique SECRET_KEY in your .env "
-                    "before exposing PFIS beyond local use.",
+                    "AUTH_REQUIRED is enabled but SECRET_KEY is a known development "
+                    "placeholder. Set a unique SECRET_KEY in your .env before "
+                    "exposing PFIS beyond local use.",
                     stacklevel=2,
                 )
             else:
                 warnings.warn(
-                    "SECRET_KEY is the built-in development default. This is fine "
-                    "for local/demo use but must be changed before deployment.",
+                    "SECRET_KEY is a known development placeholder. This is fine "
+                    "for local/demo use only and must be changed before deployment.",
                     stacklevel=2,
                 )
         return self

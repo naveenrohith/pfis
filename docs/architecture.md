@@ -1,6 +1,6 @@
 # PFIS Architecture
 
-PFIS is a FastAPI personal-finance backend with a static dashboard. It turns financial emails into structured transactions and insights.
+PFIS is a FastAPI personal-finance backend with a React dashboard served by FastAPI. It turns financial emails into structured transactions and insights.
 
 ## Layers
 
@@ -9,8 +9,8 @@ PFIS is a FastAPI personal-finance backend with a static dashboard. It turns fin
 3. Parser pipeline in `backend/app/services/parser`
 4. ORM models in `backend/app/models`
 5. Pydantic schemas in `backend/app/schemas`
-6. Static dashboard in `backend/app/static`
-7. Svelte migration scaffold in `frontend/`
+6. React dashboard source in `frontend/`
+7. Built dashboard assets served by FastAPI from `frontend/dist`
 8. Tests in `tests/pytest`
 
 ## Core Pipeline
@@ -44,4 +44,4 @@ Gmail/demo raw email
 
 ## Frontend Direction
 
-The FastAPI-served static dashboard is the canonical UI today. The Svelte/Vite app under `frontend/` is migration work until it reaches workflow parity and is explicitly promoted. See `docs/frontend.md`.
+The React/Vite app under `frontend/` is the canonical UI. FastAPI serves its production build at `/dashboard`; the legacy static dashboard under `backend/app/static` remains only as a no-build fallback. See `docs/frontend.md`.

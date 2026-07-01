@@ -12,41 +12,50 @@ through a dashboard.
 
 ## Quick start
 
-```bash
-# 1. Create a virtual environment
-python -m venv .venv
-.venv\Scripts\activate            # Windows
-# source .venv/bin/activate       # macOS/Linux
+From the repository root, run one command:
 
-# 2. Install dependencies (dev includes lint/format/type/test tooling)
-pip install -r backend/requirements-dev.txt
+Prerequisites: Python 3.13+ and Node.js/npm 22+ available on `PATH`.
 
-# 3. Configure environment
-copy backend\.env.example backend\.env    # Windows
-# cp backend/.env.example backend/.env     # macOS/Linux
-#   then set a unique SECRET_KEY (see the file for a generator one-liner)
-
-# 4. Apply migrations
-cd backend && alembic upgrade head && cd ..
-
-# 5. Run the API + dashboard
-cd backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```powershell
+# Windows PowerShell. If script execution is blocked, use Command Prompt: run
+.\run.ps1
 ```
 
-### Build the frontend (React SPA)
+```cmd
+:: Windows Command Prompt
+run
+```
 
 ```bash
-cd frontend
-npm install
-npm run build      # emits frontend/dist, served by FastAPI at /dashboard
-# npm run dev       # or run the Vite dev server on :5173 (proxies /api)
+# macOS/Linux or any shell with Python + Node available
+python scripts/start.py
 ```
+
+The launcher creates `.venv` if needed, installs backend dependencies when
+requirements changed, creates `backend/.env` from the example if missing,
+installs frontend dependencies when needed, builds the React dashboard, applies
+local Alembic migrations, and starts FastAPI.
 
 Then open:
 
 - Dashboard: http://127.0.0.1:8000/dashboard
 - API docs: http://127.0.0.1:8000/docs
+
+### Optional manual startup
+
+Use this only when you want to run each step yourself for debugging:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate            # Windows
+# source .venv/bin/activate       # macOS/Linux
+pip install -r backend/requirements-dev.txt
+copy backend\.env.example backend\.env    # Windows, if missing
+# cp backend/.env.example backend/.env     # macOS/Linux, if missing
+cd frontend && npm install && npm run build && cd ..
+cd backend && alembic upgrade head
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
 
 ## Developer commands
 
@@ -54,6 +63,7 @@ With `make` (or run the underlying commands directly — see the `Makefile`):
 
 | Command | Purpose |
 | --- | --- |
+| `make start` | Prepare frontend/backend and start PFIS locally |
 | `make test` | Run the pytest suite |
 | `make cov` | Run tests with a coverage report |
 | `make lint` | Ruff lint |

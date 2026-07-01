@@ -27,6 +27,11 @@ removed.
 
 - `frontend/dist` is gitignored; CI builds it and FastAPI serves it at
   `/dashboard` (Vite `base` is `/dashboard/`).
+- Local developers should use the repository-root launcher (`run.ps1`,
+  `run.bat`, or `python scripts/start.py`) for the standard full-app workflow;
+  it installs dependencies when needed, builds `frontend/dist`, runs migrations,
+  and starts FastAPI. The launcher requires Python 3.13+ and Node.js/npm 22+ on
+  `PATH`.
 - When the React app is verified in production use, the legacy static dashboard
   under `backend/app/static` can be removed; document the removal in the same
   change and drop the FastAPI fallback branch in `main.py`.

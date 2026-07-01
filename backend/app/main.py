@@ -14,6 +14,7 @@ Phases 0-6:
 """
 
 import logging
+import os
 import pathlib
 import sys
 import uuid
@@ -65,6 +66,14 @@ logger = logging.getLogger("pfis")
 settings = get_settings()
 
 
+def _startup_base_url() -> str:
+    """Return the local URL displayed in startup logs."""
+    host = os.environ.get("PFIS_HOST", "localhost")
+    port = os.environ.get("PFIS_PORT", "8000")
+    display_host = "localhost" if host in {"0.0.0.0", "127.0.0.1"} else host
+    return f"http://{display_host}:{port}"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
@@ -77,8 +86,9 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as db:
         await run_seeds(db)
 
-    logger.info(f"✅ PFIS v{settings.APP_VERSION} ready at http://localhost:8000")
-    logger.info("📖 API docs at http://localhost:8000/docs")
+    base_url = _startup_base_url()
+    logger.info(f"✅ PFIS v{settings.APP_VERSION} ready at {base_url}")
+    logger.info(f"📖 API docs at {base_url}/docs")
 
     yield
 

@@ -39,6 +39,7 @@ Thumbs.db
 # Local test scratch
 .pytest_cache/
 .test-tmp/
+.test-run/
 
 # Tooling caches & coverage
 .ruff_cache/
@@ -51,3 +52,4 @@ coverage.xml
 # Node (for frontend later)
 node_modules/
 .next/
+*.tsbuildinfo
