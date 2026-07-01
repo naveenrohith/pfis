@@ -14,10 +14,11 @@ import base64
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +31,7 @@ from app.services.gmail.email_filter import (
     classify_email,
 )
 from app.services.gmail.oauth_service import build_credentials
+from app.services.sync_events import sync_event_manager
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +166,17 @@ def _build_sender_query() -> str:
     return f"(from:({sender_list}) OR {keyword_query})"
 
 
+def _build_incremental_query(last_sync_started_at: datetime | None) -> str:
+    base_query = _build_sender_query()
+    if last_sync_started_at is None:
+        return f"({base_query}) newer_than:7d"
+
+    if last_sync_started_at.tzinfo is None:
+        last_sync_started_at = last_sync_started_at.replace(tzinfo=UTC)
+    after = (last_sync_started_at - timedelta(days=1)).strftime("%Y/%m/%d")
+    return f"({base_query}) after:{after}"
+
+
 def _extract_email_body(payload: dict) -> str:
     """
     Extract plain text body from Gmail message payload.
@@ -222,6 +235,160 @@ def _extract_headers(headers: list[dict]) -> dict:
     return result
 
 
+async def _get_current_history_id(service) -> str | None:
+    import asyncio
+
+    profile = await asyncio.to_thread(lambda: service.users().getProfile(userId="me").execute())
+    history_id = profile.get("historyId")
+    return str(history_id) if history_id else None
+
+
+async def _list_message_refs_by_query(service, query: str, max_results: int | None) -> list[dict]:
+    messages = []
+    next_page_token = None
+    while True:
+        page_size = 500 if max_results is None else min(max_results - len(messages), 500)
+        if page_size <= 0:
+            break
+
+        list_kwargs = {"userId": "me", "q": query, "maxResults": page_size}
+        if next_page_token:
+            list_kwargs["pageToken"] = next_page_token
+
+        import asyncio
+
+        messages_response = await asyncio.to_thread(
+            lambda lk=list_kwargs: service.users().messages().list(**lk).execute()
+        )
+        messages.extend(messages_response.get("messages", []))
+        next_page_token = messages_response.get("nextPageToken")
+
+        if not next_page_token or (max_results is not None and len(messages) >= max_results):
+            break
+
+    return messages[:max_results] if max_results is not None else messages
+
+
+async def _list_message_refs_by_history(service, start_history_id: str) -> tuple[list[dict], str | None]:
+    messages_by_id: dict[str, dict] = {}
+    next_page_token = None
+    latest_history_id: str | None = None
+
+    while True:
+        list_kwargs = {
+            "userId": "me",
+            "startHistoryId": start_history_id,
+            "historyTypes": ["messageAdded"],
+            "maxResults": 500,
+        }
+        if next_page_token:
+            list_kwargs["pageToken"] = next_page_token
+
+        import asyncio
+
+        response = await asyncio.to_thread(
+            lambda lk=list_kwargs: service.users().history().list(**lk).execute()
+        )
+        latest_history_id = str(response.get("historyId") or latest_history_id or "")
+        for item in response.get("history", []):
+            for added in item.get("messagesAdded", []):
+                message = added.get("message") or {}
+                message_id = message.get("id")
+                if message_id:
+                    messages_by_id[message_id] = {"id": message_id}
+
+        next_page_token = response.get("nextPageToken")
+        if not next_page_token:
+            break
+
+    return list(messages_by_id.values()), latest_history_id or None
+
+
+async def _store_gmail_message_refs(
+    db: AsyncSession,
+    service,
+    user_id: str,
+    message_refs: list[dict],
+) -> dict:
+    stats = {
+        "emails_fetched": len(message_refs),
+        "emails_processed": 0,
+        "emails_stored": 0,
+        "emails_skipped_otp": 0,
+        "emails_skipped_promo": 0,
+        "emails_skipped_duplicate": 0,
+        "emails_failed": 0,
+        "errors": [],
+    }
+
+    for msg_ref in message_refs:
+        gmail_msg_id = msg_ref["id"]
+        scoped_gmail_msg_id = f"{user_id}:{gmail_msg_id}"
+
+        try:
+            existing = await db.execute(
+                select(RawEmail).where(RawEmail.gmail_message_id == scoped_gmail_msg_id)
+            )
+            if existing.scalar_one_or_none():
+                stats["emails_skipped_duplicate"] += 1
+                continue
+
+            import asyncio
+
+            msg = await asyncio.to_thread(
+                lambda mid=gmail_msg_id: service.users()
+                .messages()
+                .get(
+                    userId="me",
+                    id=mid,
+                    format="full",
+                )
+                .execute()
+            )
+
+            payload = msg.get("payload", {})
+            headers = _extract_headers(payload.get("headers", []))
+            body = _clean_email_body(_extract_email_body(payload))
+            sender = headers.get("from", "")
+            subject = headers.get("subject", "")
+            internal_date_ms = int(msg.get("internalDate", 0))
+            received_at = datetime.fromtimestamp(internal_date_ms / 1000, tz=UTC)
+
+            email_type, bank_name, confidence = classify_email(sender, subject, body)
+            if email_type == EmailType.OTP:
+                stats["emails_skipped_otp"] += 1
+                continue
+            if email_type == EmailType.PROMOTION:
+                stats["emails_skipped_promo"] += 1
+                continue
+            if email_type == EmailType.IGNORE:
+                continue
+
+            db.add(
+                RawEmail(
+                    user_id=user_id,
+                    gmail_message_id=scoped_gmail_msg_id,
+                    subject=subject,
+                    body=body,
+                    sender=sender,
+                    received_at=received_at,
+                    processed_flag=False,
+                )
+            )
+            stats["emails_processed"] += 1
+            stats["emails_stored"] += 1
+            logger.info(
+                f"Stored email: [{email_type.value}] [{bank_name}] "
+                f"{subject[:60]} (conf={confidence:.2f})"
+            )
+        except Exception as e:
+            stats["emails_failed"] += 1
+            stats["errors"].append({"gmail_message_id": gmail_msg_id, "error": str(e)})
+            logger.error(f"Failed to process email {gmail_msg_id}: {e}")
+
+    return stats
+
+
 async def sync_gmail_emails(
     db: AsyncSession,
     user_id: str,
@@ -274,119 +441,18 @@ async def sync_gmail_emails(
         query = _build_sender_query()
         logger.info(f"Syncing Gmail for user {user_id[:8]}... query={query[:80]}...")
 
-        # Fetch message IDs with pagination
-        messages = []
-        next_page_token = None
-        while True:
-            page_size = 500 if max_results is None else min(max_results - len(messages), 500)
-            if page_size <= 0:
-                break
-
-            list_kwargs = {"userId": "me", "q": query, "maxResults": page_size}
-            if next_page_token:
-                list_kwargs["pageToken"] = next_page_token
-
-            import asyncio
-
-            messages_response = await asyncio.to_thread(
-                lambda lk=list_kwargs: service.users().messages().list(**lk).execute()
-            )
-
-            messages.extend(messages_response.get("messages", []))
-            next_page_token = messages_response.get("nextPageToken")
-
-            if not next_page_token or (max_results is not None and len(messages) >= max_results):
-                break
-
-        if max_results is not None:
-            messages = messages[:max_results]
+        messages = await _list_message_refs_by_query(service, query, max_results)
         stats["emails_fetched"] = len(messages)
         logger.info(f"Found {len(messages)} emails matching bank senders")
 
-        # Process each message
-        for msg_ref in messages:
-            gmail_msg_id = msg_ref["id"]
-            scoped_gmail_msg_id = f"{user_id}:{gmail_msg_id}"
-
-            try:
-                # Check if already stored (dedup by gmail_message_id)
-                existing = await db.execute(
-                    select(RawEmail).where(RawEmail.gmail_message_id == scoped_gmail_msg_id)
-                )
-                if existing.scalar_one_or_none():
-                    stats["emails_skipped_duplicate"] += 1
-                    continue
-
-                # Fetch full message (non-blocking)
-                import asyncio
-
-                msg = await asyncio.to_thread(
-                    lambda mid=gmail_msg_id: service.users()
-                    .messages()
-                    .get(
-                        userId="me",
-                        id=mid,
-                        format="full",
-                    )
-                    .execute()
-                )
-
-                # Extract headers and body
-                payload = msg.get("payload", {})
-                headers = _extract_headers(payload.get("headers", []))
-                body = _clean_email_body(_extract_email_body(payload))
-                sender = headers.get("from", "")
-                subject = headers.get("subject", "")
-
-                # Parse received date from internal timestamp
-                internal_date_ms = int(msg.get("internalDate", 0))
-                received_at = datetime.fromtimestamp(internal_date_ms / 1000, tz=UTC)
-
-                # Classify the email
-                email_type, bank_name, confidence = classify_email(sender, subject, body)
-
-                # Only store transaction-relevant emails
-                if email_type == EmailType.OTP:
-                    stats["emails_skipped_otp"] += 1
-                    continue
-                elif email_type == EmailType.PROMOTION:
-                    stats["emails_skipped_promo"] += 1
-                    continue
-                elif email_type == EmailType.IGNORE:
-                    continue
-
-                # Store raw email (TRANSACTION or STATEMENT type)
-                raw_email = RawEmail(
-                    user_id=user_id,
-                    gmail_message_id=scoped_gmail_msg_id,
-                    subject=subject,
-                    body=body,
-                    sender=sender,
-                    received_at=received_at,
-                    processed_flag=False,
-                )
-                db.add(raw_email)
-                stats["emails_processed"] += 1
-                stats["emails_stored"] += 1
-
-                logger.info(
-                    f"Stored email: [{email_type.value}] [{bank_name}] "
-                    f"{subject[:60]} (conf={confidence:.2f})"
-                )
-
-            except Exception as e:
-                stats["emails_failed"] += 1
-                stats["errors"].append(
-                    {
-                        "gmail_message_id": gmail_msg_id,
-                        "error": str(e),
-                    }
-                )
-                logger.error(f"Failed to process email {gmail_msg_id}: {e}")
-                continue
+        stats.update(await _store_gmail_message_refs(db, service, user_id, messages))
 
         # Single atomic commit for all changes
         gmail_account.last_synced_at = datetime.now(UTC)
+        gmail_account.last_history_id = await _get_current_history_id(service)
+        gmail_account.last_sync_started_at = sync_run.start_time
+        gmail_account.auto_sync_status = "idle"
+        gmail_account.auto_sync_error = None
         sync_run.status = SyncStatus.COMPLETED
         sync_run.end_time = datetime.now(UTC)
         sync_run.emails_fetched = stats["emails_fetched"]
@@ -413,4 +479,99 @@ async def sync_gmail_emails(
         await db.commit()
 
         logger.error(f"❌ Sync failed: {e}")
+        raise
+
+
+async def sync_gmail_emails_incremental(
+    db: AsyncSession,
+    user_id: str,
+    gmail_account_id: str,
+) -> dict:
+    """Fetch only messages changed since the last Gmail checkpoint."""
+    sync_run = SyncRun(user_id=user_id, status=SyncStatus.RUNNING)
+    db.add(sync_run)
+    await db.commit()
+    await db.refresh(sync_run)
+    await sync_event_manager.broadcast(user_id, "sync_started", {"mode": "incremental"})
+
+    try:
+        result = await db.execute(select(GmailAccount).where(GmailAccount.id == gmail_account_id))
+        gmail_account = result.scalar_one_or_none()
+        if not gmail_account:
+            raise ValueError(f"Gmail account {gmail_account_id} not found")
+
+        gmail_account.auto_sync_status = "running"
+        gmail_account.auto_sync_error = None
+        await db.commit()
+
+        service, credentials, refreshed = await _build_gmail_service(
+            decrypt_secret(gmail_account.access_token_ref) or "",
+            decrypt_secret(gmail_account.refresh_token_ref) or "",
+        )
+        if refreshed:
+            gmail_account.access_token_ref = encrypt_secret(credentials.token)
+            gmail_account.refresh_token_ref = encrypt_secret(
+                credentials.refresh_token or decrypt_secret(gmail_account.refresh_token_ref) or ""
+            )
+
+        latest_history_id: str | None = None
+        fallback = False
+        if gmail_account.last_history_id:
+            try:
+                messages, latest_history_id = await _list_message_refs_by_history(
+                    service, gmail_account.last_history_id
+                )
+            except HttpError as exc:
+                if getattr(exc.resp, "status", None) != 404:
+                    raise
+                fallback = True
+                query = _build_incremental_query(gmail_account.last_sync_started_at)
+                messages = await _list_message_refs_by_query(service, query, 500)
+        else:
+            fallback = True
+            query = _build_incremental_query(gmail_account.last_sync_started_at)
+            messages = await _list_message_refs_by_query(service, query, 500)
+
+        await sync_event_manager.broadcast(
+            user_id,
+            "gmail_checked",
+            {"fetched": len(messages), "fallback": fallback},
+        )
+
+        stats = await _store_gmail_message_refs(db, service, user_id, messages)
+        await sync_event_manager.broadcast(
+            user_id,
+            "emails_stored",
+            {
+                "stored": stats["emails_stored"],
+                "duplicates": stats["emails_skipped_duplicate"],
+                "failed": stats["emails_failed"],
+            },
+        )
+
+        now = datetime.now(UTC)
+        gmail_account.last_synced_at = now
+        gmail_account.last_sync_started_at = sync_run.start_time
+        gmail_account.last_history_id = latest_history_id or await _get_current_history_id(service)
+        gmail_account.auto_sync_status = "idle"
+        gmail_account.auto_sync_error = None
+        sync_run.status = SyncStatus.COMPLETED
+        sync_run.end_time = now
+        sync_run.emails_fetched = stats["emails_fetched"]
+        sync_run.emails_processed = stats["emails_processed"]
+        sync_run.emails_failed = stats["emails_failed"]
+        sync_run.errors = json.dumps(stats["errors"])
+        await db.commit()
+        return stats
+    except Exception as e:
+        result = await db.execute(select(GmailAccount).where(GmailAccount.id == gmail_account_id))
+        gmail_account = result.scalar_one_or_none()
+        if gmail_account:
+            gmail_account.auto_sync_status = "error"
+            gmail_account.auto_sync_error = str(e)
+        sync_run.status = SyncStatus.FAILED
+        sync_run.end_time = datetime.now(UTC)
+        sync_run.errors = json.dumps([{"error": str(e)}])
+        await db.commit()
+        await sync_event_manager.broadcast(user_id, "sync_failed", {"error": str(e)})
         raise

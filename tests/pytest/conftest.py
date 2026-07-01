@@ -19,6 +19,7 @@ if str(BACKEND) not in sys.path:
 
 import app.database as database_module
 import app.main as main_module
+import app.services.auto_sync_service as auto_sync_service_module
 import app.services.job_service as job_service_module
 from app.config import get_settings
 from app.database import Base, get_db
@@ -67,6 +68,7 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(database_module, "AsyncSessionLocal", session_factory, raising=False)
     monkeypatch.setattr(main_module, "AsyncSessionLocal", session_factory, raising=False)
     monkeypatch.setattr(job_service_module, "AsyncSessionLocal", session_factory, raising=False)
+    monkeypatch.setattr(auto_sync_service_module, "AsyncSessionLocal", session_factory, raising=False)
 
     # Invalidate normalizer merchant cache for test isolation
     from app.services.parser.normalizer import invalidate_merchant_cache

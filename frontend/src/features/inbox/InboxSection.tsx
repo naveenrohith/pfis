@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Skeleton, EmptyState } from '@/components/ui/Skeleton';
 import { SectionTitle } from '@/components/SectionTitle';
-import { useEmails, useSyncStatus } from '@/features/workspace/queries';
+import { useAutoSyncStatus, useEmails, useSyncStatus } from '@/features/workspace/queries';
 import { useSync } from '@/features/workspace/SyncContext';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { formatTime } from '@/lib/format';
@@ -12,7 +12,8 @@ import { formatTime } from '@/lib/format';
 export function InboxSection() {
   const emails = useEmails();
   const syncStatus = useSyncStatus();
-  const { running, retrySync } = useSync();
+  const autoSync = useAutoSyncStatus();
+  const { running, liveConnected, retrySync } = useSync();
   const { scrollTo } = useDashboardUi();
 
   const latest = syncStatus.data?.latest_status;
@@ -34,6 +35,9 @@ export function InboxSection() {
         action={
           <div className="flex items-center gap-2">
             <Badge variant={statusVariant}>{latest ? `Latest: ${latest}` : 'No sync yet'}</Badge>
+            <Badge variant={liveConnected ? 'success' : 'default'}>
+              {liveConnected ? 'Live' : 'Fallback'}
+            </Badge>
             <Button variant="outline" size="sm" onClick={retrySync} disabled={running}>
               <RefreshCw className={`mr-1 h-3.5 w-3.5 ${running ? 'animate-spin' : ''}`} />
               Retry
@@ -106,7 +110,9 @@ export function InboxSection() {
               <Tile label="Runs" value={syncStatus.data?.runs.length ?? 0} />
             </div>
             <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-              {emails.data?.unprocessed_total
+              {autoSync.data?.enabled
+                ? `Auto-sync is ${autoSync.data.status} every ${Math.round(autoSync.data.interval_seconds / 60)} minute(s).`
+                : emails.data?.unprocessed_total
                 ? `${emails.data.unprocessed_total} email(s) are waiting to be processed into transactions.`
                 : 'All synced emails have been processed.'}
             </div>

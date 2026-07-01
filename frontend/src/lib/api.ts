@@ -1,6 +1,7 @@
 import { loadSession } from './session';
 import type {
   AuthTokenResponse,
+  AutoSyncStatus,
   BudgetTracker,
   BulkUpdateResponse,
   Category,
@@ -147,6 +148,17 @@ export const api = {
     request<EmailsResponse>('/gmail/emails', { query: { user_id: userId, limit } }),
   syncStatus: (userId: string) =>
     request<SyncStatusResponse>('/gmail/status', { query: { user_id: userId } }),
+  autoSyncStatus: (userId: string) =>
+    request<AutoSyncStatus>('/gmail/auto-sync', { query: { user_id: userId } }),
+  updateAutoSync: (
+    userId: string,
+    payload: { enabled?: boolean; interval_seconds?: number },
+  ) =>
+    request<AutoSyncStatus>('/gmail/auto-sync', {
+      method: 'PATCH',
+      query: { user_id: userId },
+      body: payload,
+    }),
 
   // Insights
   insights: (userId: string, month: number, year: number) =>

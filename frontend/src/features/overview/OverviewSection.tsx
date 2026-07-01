@@ -29,7 +29,7 @@ export function OverviewSection() {
   const summary = useSummary();
   const transactions = useTransactions();
   const emails = useEmails();
-  const { running, status, log, clearLog } = useSync();
+  const { running, status, liveConnected, log, clearLog } = useSync();
 
   const currency = user?.currency ?? 'INR';
   const spend = summary.data?.total_spend ?? 0;
@@ -114,7 +114,12 @@ export function OverviewSection() {
           <CardContent className="flex h-full flex-col gap-3 p-5">
             <div className="flex items-center justify-between">
               <h3 className="font-bold">Command center</h3>
-              <Badge variant={statusTone}>{running ? 'Running' : status === 'idle' ? 'Ready' : status}</Badge>
+              <div className="flex gap-2">
+                <Badge variant={liveConnected ? 'success' : 'default'}>
+                  {liveConnected ? 'Live' : 'Fallback'}
+                </Badge>
+                <Badge variant={statusTone}>{running ? 'Running' : status === 'idle' ? 'Ready' : status}</Badge>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <Stat label="Processed" value={emails.data?.processed_total ?? 0} />

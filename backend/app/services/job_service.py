@@ -16,6 +16,7 @@ from app.models.email import GmailAccount
 from app.models.sync import BackgroundJob, JobStatus
 from app.services.gmail.sync_service import demo_sync_gmail_emails, sync_gmail_emails
 from app.services.parser.pipeline import process_raw_emails, retry_parse_failures
+from app.services.sync_events import sync_event_manager
 
 logger = logging.getLogger(__name__)
 _active_tasks: set[asyncio.Task] = set()
@@ -129,7 +130,26 @@ async def _handle_gmail_sync_pipeline(
         gmail_account_id=gmail_account.id,
         max_results=payload.get("max_results", 50),
     )
+    await sync_event_manager.broadcast(
+        user_id,
+        "emails_stored",
+        {
+            "stored": sync_stats.get("emails_stored", 0),
+            "duplicates": sync_stats.get("emails_skipped_duplicate", 0),
+            "failed": sync_stats.get("emails_failed", 0),
+        },
+    )
+    await sync_event_manager.broadcast(user_id, "pipeline_started", {})
     pipeline_stats = await process_raw_emails(db, user_id, limit=payload.get("limit", 50))
+    await sync_event_manager.broadcast(
+        user_id,
+        "transactions_updated",
+        {
+            "stored": pipeline_stats.get("stored", 0),
+            "duplicates": pipeline_stats.get("duplicates", 0),
+            "parsed_success": pipeline_stats.get("parsed_success", 0),
+        },
+    )
     return {"sync": sync_stats, "pipeline": pipeline_stats}
 
 
@@ -189,6 +209,8 @@ async def run_job(job_id: str) -> None:
             job.finished_at = datetime.now(UTC)
             job.error_message = None
             await db.commit()
+            if job.user_id and job.job_type in {"gmail_sync_pipeline", "demo_sync_pipeline"}:
+                await sync_event_manager.broadcast(job.user_id, "sync_completed", result)
         except Exception as exc:
             logger.exception("Background job %s failed", job_id)
             job.status = JobStatus.FAILED
@@ -196,3 +218,5 @@ async def run_job(job_id: str) -> None:
             job.result_json = _job_error_result(classify_job_error(exc), str(exc))
             job.finished_at = datetime.now(UTC)
             await db.commit()
+            if job.user_id and job.job_type in {"gmail_sync_pipeline", "demo_sync_pipeline"}:
+                await sync_event_manager.broadcast(job.user_id, "sync_failed", {"error": str(exc)})

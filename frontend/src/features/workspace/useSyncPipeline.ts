@@ -1,9 +1,9 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useToast } from '@/components/ui/Toast';
-import type { Job, JobStatus } from '@/lib/types';
+import type { Job, JobStatus, SyncEvent } from '@/lib/types';
 
 export interface ActivityEntry {
   time: string;
@@ -20,8 +20,10 @@ export function useSyncPipeline() {
   const { notify } = useToast();
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<JobStatus | 'idle'>('idle');
+  const [liveConnected, setLiveConnected] = useState(false);
   const [log, setLog] = useState<ActivityEntry[]>([]);
   const pollRef = useRef<number | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const append = useCallback((message: string) => {
     const time = new Date().toLocaleTimeString();
@@ -33,6 +35,69 @@ export function useSyncPipeline() {
   const invalidateAll = useCallback(() => {
     queryClient.invalidateQueries();
   }, [queryClient]);
+
+  const formatSyncEvent = useCallback((event: SyncEvent): string | null => {
+    const data = event.data ?? {};
+    switch (event.event) {
+      case 'ws_connected':
+        return 'Live sync connected';
+      case 'sync_started':
+        setRunning(true);
+        setStatus('running');
+        return 'Automatic sync started';
+      case 'gmail_checked':
+        return `Gmail checked: ${Number(data.fetched ?? 0)} new candidate email(s)`;
+      case 'emails_stored':
+        return `Emails stored: ${Number(data.stored ?? 0)} new, ${Number(data.duplicates ?? 0)} duplicate`;
+      case 'pipeline_started':
+        return 'Parser pipeline started';
+      case 'transactions_updated':
+        invalidateAll();
+        return `Transactions updated: ${Number(data.stored ?? 0)} stored`;
+      case 'sync_completed':
+        setRunning(false);
+        setStatus('completed');
+        invalidateAll();
+        return 'Sync completed';
+      case 'sync_failed':
+        setRunning(false);
+        setStatus('failed');
+        invalidateAll();
+        return `Sync failed: ${String(data.error ?? 'unknown error')}`;
+      default:
+        return null;
+    }
+  }, [invalidateAll]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const params = new URLSearchParams({ user_id: user.id });
+    if (session?.token) params.set('token', session.token);
+    const wsUrl = `${protocol}//${window.location.host}/api/ws/sync?${params.toString()}`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => setLiveConnected(true);
+    ws.onclose = () => setLiveConnected(false);
+    ws.onerror = () => setLiveConnected(false);
+    ws.onmessage = (message) => {
+      try {
+        const event = JSON.parse(message.data) as SyncEvent;
+        const line = formatSyncEvent(event);
+        if (line) append(line);
+      } catch {
+        append('Live sync event could not be read');
+      }
+    };
+
+    return () => {
+      ws.close();
+      if (wsRef.current === ws) wsRef.current = null;
+      setLiveConnected(false);
+    };
+  }, [user, session, append, formatSyncEvent]);
 
   const pollJob = useCallback(
     (jobId: string) => {
@@ -108,5 +173,5 @@ export function useSyncPipeline() {
     }
   }, [user, running, append, notify, pollJob]);
 
-  return { running, status, log, runSync, retrySync, clearLog };
+  return { running, status, liveConnected, log, runSync, retrySync, clearLog };
 }

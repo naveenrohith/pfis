@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +40,23 @@ gmail_router = APIRouter(prefix="/gmail", tags=["Gmail"])
 
 # OAuth state TTL
 _OAUTH_STATE_TTL_MINUTES = 10
+
+
+class AutoSyncUpdate(BaseModel):
+    enabled: bool | None = None
+    interval_seconds: int | None = Field(default=None, ge=60, le=86400)
+
+
+def _serialize_auto_sync(account: GmailAccount) -> dict:
+    return {
+        "gmail_account_id": account.id,
+        "enabled": bool(account.auto_sync_enabled),
+        "interval_seconds": account.auto_sync_interval_seconds,
+        "status": account.auto_sync_status,
+        "error": account.auto_sync_error,
+        "last_synced_at": account.last_synced_at.isoformat() if account.last_synced_at else None,
+        "last_history_id": account.last_history_id,
+    }
 
 
 # ─── OAuth Flow ───
@@ -218,6 +236,49 @@ async def get_sync_status(
             for r in runs
         ],
     }
+
+
+@gmail_router.get("/auto-sync")
+async def get_auto_sync_status(
+    user_id: str = Query(...),
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return automatic Gmail sync settings and runtime state."""
+    user_id = resolve_user_scope(user_id, current_user)
+    result = await db.execute(select(GmailAccount).where(GmailAccount.user_id == user_id))
+    gmail_account = result.scalar_one_or_none()
+    if not gmail_account:
+        raise HTTPException(
+            status_code=404, detail="No Gmail account connected. Use /api/auth/gmail/connect first."
+        )
+    return _serialize_auto_sync(gmail_account)
+
+
+@gmail_router.patch("/auto-sync")
+async def update_auto_sync_status(
+    payload: AutoSyncUpdate,
+    user_id: str = Query(...),
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enable/disable automatic Gmail sync or adjust its interval."""
+    user_id = resolve_user_scope(user_id, current_user)
+    result = await db.execute(select(GmailAccount).where(GmailAccount.user_id == user_id))
+    gmail_account = result.scalar_one_or_none()
+    if not gmail_account:
+        raise HTTPException(
+            status_code=404, detail="No Gmail account connected. Use /api/auth/gmail/connect first."
+        )
+
+    if payload.enabled is not None:
+        gmail_account.auto_sync_enabled = payload.enabled
+        gmail_account.auto_sync_status = "idle" if payload.enabled else "paused"
+    if payload.interval_seconds is not None:
+        gmail_account.auto_sync_interval_seconds = payload.interval_seconds
+    await db.commit()
+    await db.refresh(gmail_account)
+    return _serialize_auto_sync(gmail_account)
 
 
 @gmail_router.get("/emails")

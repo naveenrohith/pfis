@@ -10,6 +10,7 @@ export const queryKeys = {
   transactions: (u: string, m: number, y: number) => ['transactions', u, m, y] as const,
   emails: (u: string) => ['emails', u] as const,
   syncStatus: (u: string) => ['syncStatus', u] as const,
+  autoSyncStatus: (u: string) => ['autoSyncStatus', u] as const,
   insights: (u: string, m: number, y: number) => ['insights', u, m, y] as const,
   budgets: (u: string, m: number, y: number) => ['budgets', u, m, y] as const,
 };
@@ -34,6 +35,7 @@ export function useSummary() {
     queryKey: queryKeys.summary(userId, month, year),
     queryFn: () => api.summary(userId, month, year),
     enabled: !!userId,
+    refetchInterval: 30_000,
   });
 }
 
@@ -44,6 +46,7 @@ export function useTransactions() {
     queryKey: queryKeys.transactions(userId, month, year),
     queryFn: () => api.transactions(userId, { month, year, limit: 200 }),
     enabled: !!userId,
+    refetchInterval: 30_000,
   });
 }
 
@@ -53,6 +56,7 @@ export function useEmails() {
     queryKey: queryKeys.emails(userId),
     queryFn: () => api.emails(userId, 12),
     enabled: !!userId,
+    refetchInterval: 30_000,
   });
 }
 
@@ -62,6 +66,18 @@ export function useSyncStatus() {
     queryKey: queryKeys.syncStatus(userId),
     queryFn: () => api.syncStatus(userId),
     enabled: !!userId,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useAutoSyncStatus() {
+  const userId = useUserId();
+  return useQuery({
+    queryKey: queryKeys.autoSyncStatus(userId),
+    queryFn: () => api.autoSyncStatus(userId),
+    enabled: !!userId,
+    retry: false,
+    refetchInterval: 30_000,
   });
 }
 
@@ -72,6 +88,7 @@ export function useInsights() {
     queryKey: queryKeys.insights(userId, month, year),
     queryFn: () => api.insights(userId, month, year),
     enabled: !!userId,
+    refetchInterval: 30_000,
   });
 }
 

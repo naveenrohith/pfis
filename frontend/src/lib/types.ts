@@ -124,6 +124,33 @@ export interface SyncStatusResponse {
   runs: SyncRun[];
 }
 
+export interface AutoSyncStatus {
+  gmail_account_id: string;
+  enabled: boolean;
+  interval_seconds: number;
+  status: 'idle' | 'running' | 'paused' | 'error';
+  error?: string | null;
+  last_synced_at?: string | null;
+  last_history_id?: string | null;
+}
+
+export type SyncEventName =
+  | 'ws_connected'
+  | 'sync_started'
+  | 'gmail_checked'
+  | 'emails_stored'
+  | 'pipeline_started'
+  | 'transactions_updated'
+  | 'sync_completed'
+  | 'sync_failed';
+
+export interface SyncEvent {
+  event: SyncEventName;
+  user_id: string;
+  timestamp: string;
+  data?: Record<string, unknown>;
+}
+
 export type BudgetStatus = 'under' | 'warning' | 'over';
 
 export interface BudgetTracker {

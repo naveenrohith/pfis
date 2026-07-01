@@ -6,7 +6,7 @@ Stores raw emails fetched from Gmail for traceability and re-processing.
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -54,6 +54,14 @@ class GmailAccount(Base):
     access_token_ref: Mapped[str] = mapped_column(String(500), nullable=True)
     refresh_token_ref: Mapped[str] = mapped_column(String(500), nullable=True)
     last_synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_history_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_sync_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    auto_sync_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_sync_interval_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    auto_sync_status: Mapped[str] = mapped_column(String(20), default="idle")
+    auto_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
     user = relationship("User", back_populates="gmail_accounts")

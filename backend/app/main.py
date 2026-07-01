@@ -45,6 +45,7 @@ from app.api.routes import (
     reports,
     transactions,
     users,
+    ws,
 )
 from app.api.routes.gmail import auth_router as gmail_auth_router
 from app.api.routes.gmail import gmail_router
@@ -52,6 +53,7 @@ from app.config import get_settings
 from app.database import AsyncSessionLocal, close_db, init_db
 from app.observability import install_request_id_logging, request_id_ctx
 from app.rate_limit import limiter
+from app.services.auto_sync_service import start_auto_sync_scheduler, stop_auto_sync_scheduler
 from app.services.job_service import recover_interrupted_jobs
 from app.services.seed_service import run_seeds
 
@@ -91,12 +93,14 @@ async def lifespan(app: FastAPI):
             logger.warning("Marked %s interrupted background job(s) as failed", recovered_jobs)
 
     base_url = _startup_base_url()
+    start_auto_sync_scheduler()
     logger.info(f"✅ PFIS v{settings.APP_VERSION} ready at {base_url}")
     logger.info(f"📖 API docs at {base_url}/docs")
 
     yield
 
     # Shutdown
+    await stop_auto_sync_scheduler()
     await close_db()
     logger.info("👋 PFIS shutdown complete")
 
@@ -160,6 +164,7 @@ app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
+app.include_router(ws.router, prefix="/api")
 app.include_router(transactions.router, prefix="/api")
 app.include_router(categories.router, prefix="/api")
 
