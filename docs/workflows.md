@@ -14,7 +14,18 @@
 3. Google redirects to callback.
 4. Exchange code for tokens.
 5. Encrypt and store token references.
-6. `POST /api/gmail/sync` fetches raw emails.
+6. Record a connector audit event.
+7. `POST /api/gmail/sync` or auto-sync invokes the ingestion coordinator.
+8. `GmailConnector` fetches records, `SourceRecord` values are classified and stored, then the parser pipeline processes them.
+
+## Automatic Sync
+
+1. Scheduler finds due connected Gmail accounts.
+2. Incremental sync uses the saved Gmail history cursor when possible.
+3. Expired cursor falls back to a bounded recent query.
+4. Transient connector failures retry with bounded backoff.
+5. Permanent credential failures pause auto-sync and surface an error state.
+6. WebSocket events update the dashboard live; polling remains a fallback.
 
 ## Processing
 
@@ -35,4 +46,3 @@ Transaction updates can create correction records and improve merchant aliases/c
 ## Reports
 
 Reports use stored transactions and insights. CSV export returns monthly transaction rows. Monthly HTML report is printable and must escape or control server-rendered content.
-

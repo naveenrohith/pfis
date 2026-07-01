@@ -1,0 +1,273 @@
+"""Gmail connector implementation for connector-driven ingestion."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import logging
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+from app.models.email import GmailAccount
+from app.security import decrypt_secret, encrypt_secret
+from app.services.classification.engine import KNOWN_BANK_SENDERS
+from app.services.connectors.base import BackfillOptions, ConnectorBatch, ConnectorCursor
+from app.services.connectors.source_record import SourceRecord, SourceType
+from app.services.gmail.oauth_service import build_credentials
+from app.utils.text import clean_html_to_text
+
+logger = logging.getLogger(__name__)
+
+
+class GmailConnector:
+    source_type = SourceType.GMAIL.value
+
+    def __init__(self, account: GmailAccount) -> None:
+        self.account = account
+        self._service = None
+        self._refreshed_credentials = None
+
+    async def refresh_credentials(self) -> dict[str, Any]:
+        service, credentials, refreshed = await asyncio.to_thread(self._build_service_sync)
+        self._service = service
+        if refreshed:
+            self.account.access_token_ref = encrypt_secret(credentials.token)
+            self.account.refresh_token_ref = encrypt_secret(
+                credentials.refresh_token or decrypt_secret(self.account.refresh_token_ref) or ""
+            )
+            self._refreshed_credentials = credentials
+        return {"refreshed": refreshed}
+
+    async def fetch_incremental(self, user_id: str, cursor: ConnectorCursor) -> ConnectorBatch:
+        service = await self._service_or_refresh()
+        fallback_used = False
+        latest_history_id: str | None = None
+
+        if cursor.history_id:
+            try:
+                refs, latest_history_id = await self._list_message_refs_by_history(
+                    service, cursor.history_id
+                )
+            except HttpError as exc:
+                if getattr(exc.resp, "status", None) != 404:
+                    raise
+                fallback_used = True
+                refs = await self._list_message_refs_by_query(
+                    service,
+                    self._build_incremental_query(self.account.last_sync_started_at),
+                    500,
+                )
+        else:
+            fallback_used = True
+            refs = await self._list_message_refs_by_query(
+                service,
+                self._build_incremental_query(self.account.last_sync_started_at),
+                500,
+            )
+
+        records = await self._message_refs_to_records(service, user_id, refs)
+        return ConnectorBatch(
+            records=records,
+            cursor=ConnectorCursor(
+                history_id=latest_history_id or await self._get_current_history_id(service),
+                fallback_used=fallback_used,
+            ),
+            metrics={
+                "fetched": len(refs),
+                "records": len(records),
+                "fallback_used": fallback_used,
+                "credentials_refreshed": self._refreshed_credentials is not None,
+            },
+        )
+
+    async def fetch_backfill(self, user_id: str, options: BackfillOptions) -> ConnectorBatch:
+        service = await self._service_or_refresh()
+        refs = await self._list_message_refs_by_query(
+            service,
+            self._build_sender_query(),
+            options.max_results,
+        )
+        records = await self._message_refs_to_records(service, user_id, refs)
+        return ConnectorBatch(
+            records=records,
+            cursor=ConnectorCursor(history_id=await self._get_current_history_id(service)),
+            metrics={
+                "fetched": len(refs),
+                "records": len(records),
+                "fallback_used": False,
+                "credentials_refreshed": self._refreshed_credentials is not None,
+            },
+        )
+
+    def _build_service_sync(self):
+        credentials = build_credentials(
+            decrypt_secret(self.account.access_token_ref) or "",
+            decrypt_secret(self.account.refresh_token_ref) or "",
+        )
+        refreshed = False
+        if credentials.expired:
+            logger.info("Access token expired, refreshing...")
+            credentials.refresh(Request())
+            refreshed = True
+        return build("gmail", "v1", credentials=credentials), credentials, refreshed
+
+    async def _service_or_refresh(self):
+        if self._service is None:
+            await self.refresh_credentials()
+        return self._service
+
+    @staticmethod
+    def _build_sender_query() -> str:
+        sender_list = " OR ".join(KNOWN_BANK_SENDERS.keys())
+        keyword_query = (
+            '"debited" OR "credited" OR "spent" OR "transaction" OR "payment" OR '
+            '"UPI" OR "card" OR "account" OR "bank" OR "refund"'
+        )
+        return f"(from:({sender_list}) OR {keyword_query})"
+
+    @classmethod
+    def _build_incremental_query(cls, last_sync_started_at: datetime | None) -> str:
+        base_query = cls._build_sender_query()
+        if last_sync_started_at is None:
+            return f"({base_query}) newer_than:7d"
+        if last_sync_started_at.tzinfo is None:
+            last_sync_started_at = last_sync_started_at.replace(tzinfo=UTC)
+        after = (last_sync_started_at - timedelta(days=1)).strftime("%Y/%m/%d")
+        return f"({base_query}) after:{after}"
+
+    @staticmethod
+    async def _get_current_history_id(service) -> str | None:
+        profile = await asyncio.to_thread(lambda: service.users().getProfile(userId="me").execute())
+        history_id = profile.get("historyId")
+        return str(history_id) if history_id else None
+
+    @staticmethod
+    async def _list_message_refs_by_query(
+        service, query: str, max_results: int | None
+    ) -> list[dict]:
+        messages = []
+        next_page_token = None
+        while True:
+            page_size = 500 if max_results is None else min(max_results - len(messages), 500)
+            if page_size <= 0:
+                break
+
+            list_kwargs = {"userId": "me", "q": query, "maxResults": page_size}
+            if next_page_token:
+                list_kwargs["pageToken"] = next_page_token
+
+            response = await asyncio.to_thread(
+                lambda lk=list_kwargs: service.users().messages().list(**lk).execute()
+            )
+            messages.extend(response.get("messages", []))
+            next_page_token = response.get("nextPageToken")
+            if not next_page_token or (max_results is not None and len(messages) >= max_results):
+                break
+
+        return messages[:max_results] if max_results is not None else messages
+
+    @staticmethod
+    async def _list_message_refs_by_history(
+        service, start_history_id: str
+    ) -> tuple[list[dict], str | None]:
+        messages_by_id: dict[str, dict] = {}
+        next_page_token = None
+        latest_history_id: str | None = None
+
+        while True:
+            list_kwargs = {
+                "userId": "me",
+                "startHistoryId": start_history_id,
+                "historyTypes": ["messageAdded"],
+                "maxResults": 500,
+            }
+            if next_page_token:
+                list_kwargs["pageToken"] = next_page_token
+
+            response = await asyncio.to_thread(
+                lambda lk=list_kwargs: service.users().history().list(**lk).execute()
+            )
+            latest_history_id = str(response.get("historyId") or latest_history_id or "")
+            for item in response.get("history", []):
+                for added in item.get("messagesAdded", []):
+                    message = added.get("message") or {}
+                    message_id = message.get("id")
+                    if message_id:
+                        messages_by_id[message_id] = {"id": message_id}
+
+            next_page_token = response.get("nextPageToken")
+            if not next_page_token:
+                break
+
+        return list(messages_by_id.values()), latest_history_id or None
+
+    async def _message_refs_to_records(
+        self,
+        service,
+        user_id: str,
+        refs: list[dict],
+    ) -> list[SourceRecord]:
+        records: list[SourceRecord] = []
+        for ref in refs:
+            message = await asyncio.to_thread(
+                lambda mid=ref["id"]: service.users()
+                .messages()
+                .get(userId="me", id=mid, format="full")
+                .execute()
+            )
+            records.append(self._message_to_record(user_id, message))
+        return records
+
+    @classmethod
+    def _message_to_record(cls, user_id: str, message: dict) -> SourceRecord:
+        payload = message.get("payload", {})
+        headers = cls._extract_headers(payload.get("headers", []))
+        internal_date_ms = int(message.get("internalDate", 0))
+        received_at = datetime.fromtimestamp(internal_date_ms / 1000, tz=UTC)
+        return SourceRecord(
+            user_id=user_id,
+            source_type=SourceType.GMAIL,
+            source_message_id=message.get("id"),
+            sender=headers.get("from", ""),
+            subject=headers.get("subject", ""),
+            body=clean_html_to_text(cls._extract_email_body(payload)),
+            received_at=received_at,
+        )
+
+    @staticmethod
+    def _extract_headers(headers: list[dict]) -> dict:
+        result = {}
+        for header in headers:
+            name = header.get("name", "").lower()
+            if name in ("from", "subject", "date"):
+                result[name] = header.get("value", "")
+        return result
+
+    @classmethod
+    def _extract_email_body(cls, payload: dict) -> str:
+        if "body" in payload and payload["body"].get("data"):
+            return base64.urlsafe_b64decode(payload["body"]["data"]).decode(
+                "utf-8", errors="replace"
+            )
+
+        parts = payload.get("parts", [])
+        for part in parts:
+            if part.get("mimeType") == "text/plain" and part.get("body", {}).get("data"):
+                return base64.urlsafe_b64decode(part["body"]["data"]).decode(
+                    "utf-8", errors="replace"
+                )
+            if "parts" in part:
+                nested_body = cls._extract_email_body(part)
+                if nested_body:
+                    return nested_body
+
+        for part in parts:
+            if part.get("mimeType") == "text/html" and part.get("body", {}).get("data"):
+                return base64.urlsafe_b64decode(part["body"]["data"]).decode(
+                    "utf-8", errors="replace"
+                )
+        return ""

@@ -23,6 +23,8 @@ async def test_operational_health_exposes_safe_runtime_state(client):
         "completed",
         "failed",
     }
+    assert "sync" in body
+    assert "audit_events" in body["sync"]
 
 
 async def test_request_id_header_is_added(client):

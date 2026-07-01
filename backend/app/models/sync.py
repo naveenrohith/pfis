@@ -166,3 +166,22 @@ class OAuthState(Base):
 
     def __repr__(self) -> str:
         return f"<OAuthState {self.flow_type} expires={self.expires_at}>"
+
+
+class ConnectorAuditEvent(Base):
+    """Non-secret audit events for connector lifecycle and sync operations."""
+
+    __tablename__ = "connector_audit_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    connector_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    connector_account_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<ConnectorAuditEvent {self.connector_type}:{self.event_type}>"

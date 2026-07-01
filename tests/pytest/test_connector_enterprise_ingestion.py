@@ -1,0 +1,119 @@
+"""Connector-driven ingestion regression tests."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from app.models.email import GmailAccount
+from app.models.sync import ConnectorAuditEvent
+from app.services.classification import ClassificationType, classify_source_record
+from app.services.connectors.base import ConnectorBatch, ConnectorCursor, ConnectorErrorType
+from app.services.connectors.errors import classify_connector_exception
+from app.services.connectors.gmail_connector import GmailConnector
+from app.services.connectors.source_record import SourceType
+from app.services.ingestion import IngestionCoordinator, IngestionMode
+from sqlalchemy import select
+
+from tests.pytest.helpers import create_user
+
+
+def test_gmail_connector_converts_message_to_source_record():
+    message = {
+        "id": "gmail-1",
+        "internalDate": str(int(datetime(2026, 5, 7, tzinfo=UTC).timestamp() * 1000)),
+        "payload": {
+            "headers": [
+                {"name": "From", "value": "HDFC Bank <alerts@hdfcbank.net>"},
+                {"name": "Subject", "value": "Payment alert"},
+            ],
+            "body": {
+                "data": "UGF5bWVudCBvZiBScy43NTAuMDAgdG8gQk9PS01ZU0hPVyB2aWEgVVBJLg=="
+            },
+        },
+    }
+
+    record = GmailConnector._message_to_record("user-1", message)
+
+    assert record.user_id == "user-1"
+    assert record.source_type == SourceType.GMAIL
+    assert record.source_message_id == "gmail-1"
+    assert record.sender == "HDFC Bank <alerts@hdfcbank.net>"
+    assert record.subject == "Payment alert"
+    assert "BOOKMYSHOW" in record.body
+
+
+def test_classification_engine_supports_enterprise_categories():
+    samples = [
+        ("salary credited", "Your salary of INR 100000 has been credited", ClassificationType.SALARY),
+        ("refund processed", "Refund of INR 500 credited to your account", ClassificationType.REFUND),
+        ("payment failed", "Your payment failed for INR 1200", ClassificationType.FAILED_PAYMENT),
+        ("subscription charged", "Subscription auto-pay of INR 299 completed", ClassificationType.SUBSCRIPTION),
+        ("SIP update", "Your mutual fund SIP of INR 5000 was processed", ClassificationType.INVESTMENT),
+        ("loan EMI", "Your loan EMI of INR 12000 has been debited", ClassificationType.LOAN),
+    ]
+
+    for subject, body, expected in samples:
+        result = classify_source_record("HDFC Bank <alerts@hdfcbank.net>", subject, body)
+        assert result.classification == expected
+        assert result.confidence > 0
+        assert result.reason
+        assert result.matched_signals
+
+
+async def test_ingestion_coordinator_retries_transient_failure_and_audits(
+    client, test_session_factory, monkeypatch
+):
+    user = await create_user(client, "coordinator")
+    async with test_session_factory() as db:
+        account = GmailAccount(
+            user_id=user["id"],
+            google_account_id="gmail-test",
+            access_token_ref="token",
+            refresh_token_ref="refresh",
+        )
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
+        account_id = account.id
+
+    attempts = {"count": 0}
+
+    async def fake_fetch_backfill(self, user_id, options):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise TimeoutError("temporary timeout")
+        return ConnectorBatch(
+            records=[],
+            cursor=ConnectorCursor(history_id="history-2"),
+            metrics={"fetched": 0, "records": 0, "fallback_used": False},
+        )
+
+    monkeypatch.setattr(GmailConnector, "fetch_backfill", fake_fetch_backfill)
+
+    async with test_session_factory() as db:
+        stats = await IngestionCoordinator(db).run_gmail(
+            user["id"],
+            account_id,
+            IngestionMode.BACKFILL,
+            max_results=10,
+        )
+        audits = await db.execute(
+            select(ConnectorAuditEvent).where(ConnectorAuditEvent.connector_account_id == account_id)
+        )
+        event_types = [event.event_type for event in audits.scalars().all()]
+
+    assert attempts["count"] == 2
+    assert stats["emails_fetched"] == 0
+    assert "sync_started" in event_types
+    assert "sync_completed" in event_types
+
+
+def test_connector_error_classifier_marks_permanent_credentials():
+    assert classify_connector_exception(Exception("invalid_grant revoked")) == ConnectorErrorType.PERMANENT
+
+
+def test_connector_error_classifier_marks_dns_failures_transient():
+    assert (
+        classify_connector_exception(Exception("Unable to find the server at gmail.googleapis.com"))
+        == ConnectorErrorType.TRANSIENT
+    )

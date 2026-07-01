@@ -27,12 +27,24 @@ Gmail/demo raw email
   -> insights, budgets, reports, dashboard
 ```
 
+Connector-driven ingestion now sits before raw email storage:
+
+```
+Connector
+  -> SourceRecord
+  -> classification engine
+  -> RawEmail persistence
+  -> domain events
+  -> parser pipeline
+```
+
 ## Module Boundaries
 
 - Route modules validate HTTP inputs and call services.
 - `TransactionService` owns transaction create/update/delete, dedup, correction learning, and summaries.
 - Parser modules extract transaction data only; they do not write database rows directly.
 - Gmail sync stores raw email and sync metadata; processing happens through parser pipeline.
+- Connector implementations fetch source records only; the ingestion coordinator owns sync orchestration, audit records, retry handling, and domain events.
 - Security helpers own JWT decoding, optional auth, user-scope resolution, and resource ownership checks.
 
 ## Extension Points

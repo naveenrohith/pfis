@@ -103,3 +103,30 @@ async def test_auto_sync_scheduler_does_not_overlap_running_account(
 
     assert due == 1
     assert scheduled == []
+
+
+async def test_auto_sync_scheduler_respects_error_cooldown(test_session_factory, monkeypatch):
+    async with test_session_factory() as db:
+        account = GmailAccount(
+            user_id="user-1",
+            google_account_id="gmail-test",
+            access_token_ref="token",
+            refresh_token_ref="refresh",
+            last_sync_started_at=datetime.now(UTC),
+            auto_sync_interval_seconds=60,
+            auto_sync_status="error",
+        )
+        db.add(account)
+        await db.commit()
+
+    scheduled: list[str] = []
+
+    def fake_schedule(account_id: str):
+        scheduled.append(account_id)
+        return None
+
+    monkeypatch.setattr(auto_sync_service, "_schedule_account_sync", fake_schedule)
+    due = await auto_sync_service.run_due_auto_syncs_once()
+
+    assert due == 0
+    assert scheduled == []

@@ -27,6 +27,8 @@ from app.services.parser.normalizer import (
 )
 from app.services.parser.registry import get_parser_registry
 from app.services.transaction_service import DuplicateTransactionError, TransactionService
+from app.services.connectors.source_record import SourceType
+from app.services.domain_events import DomainEvent, domain_event_dispatcher
 
 logger = logging.getLogger(__name__)
 _TEXT_NORMALIZER = BaseParser()
@@ -301,6 +303,14 @@ async def _process_email_batch(
                 stats["stored"] += 1
                 email_result["status"] = "stored"
                 email_result["transaction_id"] = txn.id
+                await domain_event_dispatcher.publish(
+                    DomainEvent(
+                        "TransactionCreated",
+                        user_id,
+                        SourceType.GMAIL,
+                        {"transaction_id": txn.id, "source_email_id": email.id},
+                    )
+                )
             except DuplicateTransactionError:
                 stats["duplicates"] += 1
                 email_result["status"] = "duplicate"

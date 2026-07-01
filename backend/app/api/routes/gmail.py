@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.models.email import GmailAccount, RawEmail
-from app.models.sync import OAuthState, SyncRun
+from app.models.sync import ConnectorAuditEvent, OAuthState, SyncRun
 from app.models.user import User
 from app.security import encrypt_secret, get_current_user_optional, resolve_user_scope
 from app.services.gmail.oauth_service import (
@@ -149,6 +149,13 @@ async def gmail_callback(
             logger.info(f"Created Gmail account link for user {user_id[:8]}...")
 
         await db.commit()
+        await _record_connector_audit(
+            db,
+            user_id,
+            gmail_account_id,
+            "connect",
+            {"status": "connected"},
+        )
 
         return {
             "status": "connected",
@@ -379,3 +386,24 @@ async def demo_sync(
         "mode": "demo",
         "stats": stats,
     }
+
+
+async def _record_connector_audit(
+    db: AsyncSession,
+    user_id: str,
+    gmail_account_id: str | None,
+    event_type: str,
+    payload: dict,
+) -> None:
+    import json
+
+    db.add(
+        ConnectorAuditEvent(
+            user_id=user_id,
+            connector_type="gmail",
+            connector_account_id=gmail_account_id,
+            event_type=event_type,
+            payload_json=json.dumps(payload),
+        )
+    )
+    await db.commit()

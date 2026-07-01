@@ -11,6 +11,8 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.models.email import GmailAccount
+from app.services.connectors.base import ConnectorErrorType
+from app.services.connectors.errors import classify_connector_exception
 from app.services.gmail.sync_service import sync_gmail_emails_incremental
 from app.services.parser.pipeline import process_raw_emails
 from app.services.sync_events import sync_event_manager
@@ -20,6 +22,7 @@ logger = logging.getLogger(__name__)
 _scheduler_task: asyncio.Task | None = None
 _running_account_ids: set[str] = set()
 _poll_interval_seconds = 30
+_error_cooldown_seconds = 900
 
 
 def get_running_auto_sync_count() -> int:
@@ -71,6 +74,16 @@ def _schedule_account_sync(gmail_account_id: str) -> asyncio.Task:
 def _is_due(account: GmailAccount) -> bool:
     if account.auto_sync_status == "running":
         return False
+    if account.auto_sync_status == "paused":
+        return False
+    if account.auto_sync_status == "error":
+        last_attempt = account.last_sync_started_at or account.last_synced_at
+        if last_attempt is None:
+            return True
+        if last_attempt.tzinfo is None:
+            last_attempt = last_attempt.replace(tzinfo=UTC)
+        cooldown = max(account.auto_sync_interval_seconds or 300, _error_cooldown_seconds)
+        return datetime.now(UTC) - last_attempt >= timedelta(seconds=cooldown)
     if account.last_synced_at is None:
         return True
 
@@ -125,15 +138,30 @@ async def _run_account_sync(gmail_account_id: str) -> None:
             {"sync": _public_sync_stats(sync_stats), "pipeline": _public_sync_stats(pipeline_stats)},
         )
     except Exception as exc:
-        logger.exception("Automatic sync failed for Gmail account %s", gmail_account_id)
+        error_type = classify_connector_exception(exc)
+        if error_type == ConnectorErrorType.TRANSIENT:
+            logger.warning(
+                "Automatic sync transient failure for Gmail account %s: %s",
+                gmail_account_id,
+                exc,
+            )
+        else:
+            logger.exception("Automatic sync failed for Gmail account %s", gmail_account_id)
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(GmailAccount).where(GmailAccount.id == gmail_account_id))
             account = result.scalar_one_or_none()
             if account:
-                account.auto_sync_status = "error"
+                account.auto_sync_status = (
+                    "paused" if error_type == ConnectorErrorType.PERMANENT else "error"
+                )
                 account.auto_sync_error = str(exc)
+                account.last_sync_started_at = datetime.now(UTC)
                 await db.commit()
-                await sync_event_manager.broadcast(account.user_id, "sync_failed", {"error": str(exc)})
+                await sync_event_manager.broadcast(
+                    account.user_id,
+                    "sync_failed",
+                    {"error": str(exc), "error_type": error_type.value},
+                )
     finally:
         _running_account_ids.discard(gmail_account_id)
 

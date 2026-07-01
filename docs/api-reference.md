@@ -50,6 +50,24 @@ Operations router (`/api/gmail`):
 | `GET` | `/api/gmail/emails` | `user_id`, `processed?` (bool), `limit` (1–100, def 20), `offset` (≥0) | `200` | — | `{total, all_total, processed_total, unprocessed_total, applied_filter, emails[]}` |
 | `POST` | `/api/gmail/demo-sync` | `user_id` | `200` | — | `{status, mode, stats}` (injects sample emails, no OAuth) |
 
+Auto-sync additions:
+
+| Method | Path | Query | Success | Errors | Returns |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/gmail/auto-sync` | `user_id` | `200` | `404` | Auto-sync settings, status, last sync, and cursor |
+| `PATCH` | `/api/gmail/auto-sync` | `user_id` | `200` | `404,422` | Update auto-sync enabled state or interval |
+
+## WebSocket
+
+| Method | Path | Query | Success | Returns |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/ws/sync` | `user_id`, `token?` | WebSocket | Sync progress events scoped to the user |
+
+Sync events include `sync_started`, `gmail_checked`, `emails_stored`,
+`pipeline_started`, `transactions_updated`, `sync_completed`, and `sync_failed`.
+When `AUTH_REQUIRED=true`, the optional `token` query value must identify the
+same user as `user_id`.
+
 ## Pipeline
 
 | Method | Path | Query | Success | Errors | Returns |
