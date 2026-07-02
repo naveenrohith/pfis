@@ -10,9 +10,9 @@ PLANNER -> CODE -> TEST -> QUALITY -> REVIEW -> FIX
 
 ## Current Phase
 
-Phase 6: Connector Platform Expansion.
+Phase 9: Financial Event Processing Engine.
 
-Status: implementation pass complete through Phase 6. Remaining production decisions require a hosted deployment target.
+Status: implementation pass in progress. Phase 9 evolves the parser pipeline without replacing the existing parser registry or introducing external queue infrastructure.
 
 Goal: keep modernization work phased, tested, and reversible while preserving the local/demo developer path.
 
@@ -35,6 +35,7 @@ Goal: keep modernization work phased, tested, and reversible while preserving th
 | 4 | Reliability and operations | Job error classification and operational health counters complete |
 | 5 | Production hardening | Production config validation and deployment runbook complete |
 | 6 | Connector platform expansion | SourceRecord contract complete |
+| 9 | Parser pipeline observability and replay | Active |
 
 ## Phase 0 Scope
 
@@ -120,3 +121,20 @@ Remaining Phase 1 follow-up:
 - Production database provider and backup tooling.
 - Svelte dashboard promotion and static dashboard retirement.
 - Hosted observability stack and alert routing.
+
+## Phase 9 Acceptance Criteria
+
+- Parser behavior remains protected by regression fixtures before extraction rules change.
+- Parser stages are explicit: prepare, classify, parse, validate, normalize, identity, persist, events, metrics.
+- `ParseResult` keeps existing public fields and adds optional per-field confidence, validation, parser, pattern, confidence, and normalization metadata.
+- Parse failures act as a DLQ with non-secret diagnostic metadata; raw email bodies remain only in `raw_emails`.
+- Pipeline events are persisted for source preparation, classification, parsing, validation failure, normalization, duplicate detection, transaction creation, retry, and replay.
+- Replay supports dry-run comparison without mutating transactions.
+- No external queue, broker, or AI parser is introduced in this phase.
+
+## Phase 9 Validation Commands
+
+```powershell
+New-Item -ItemType Directory -Force .test-run | Out-Null; $env:TEMP=(Resolve-Path .test-run).Path; $env:TMP=(Resolve-Path .test-run).Path; .\.venv\Scripts\python.exe -m pytest -p no:cacheprovider --basetemp .test-run\pytest tests\pytest\test_parser_regression.py tests\pytest\test_parser_edge_cases.py tests\pytest\test_jobs_pipeline.py tests\pytest\test_pipeline_phase9.py
+New-Item -ItemType Directory -Force .test-run | Out-Null; $env:TEMP=(Resolve-Path .test-run).Path; $env:TMP=(Resolve-Path .test-run).Path; .\.venv\Scripts\python.exe -m pytest -p no:cacheprovider --basetemp .test-run\pytest
+```

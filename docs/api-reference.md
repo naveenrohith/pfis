@@ -74,6 +74,58 @@ same user as `user_id`.
 | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/pipeline/process` | `user_id`, `limit` (1–200, def 50) | `200` | `500` | `{status, stats}` (parse → normalize → categorize → dedup → store) |
 
+### GET `/api/pipeline/metrics`
+
+Returns parser-pipeline health for a user/month:
+
+- parse attempts
+- transaction created count
+- parse success rate
+- average confidence
+- fallback rate
+- unknown merchant rate
+- duplicate rate
+- retry count
+- DLQ size
+- average parse time
+
+Query parameters: `user_id`, optional `month`, optional `year`.
+
+### GET `/api/pipeline/failures`
+
+Lists parser DLQ items without raw email bodies. Query parameters:
+
+- `user_id`
+- `resolved` defaults to `false`
+- `limit`
+- `offset`
+
+Each item includes failure stage/code, parser versions, retry metadata, subject/sender previews, and non-secret diagnostics.
+
+### POST `/api/pipeline/failures/{failure_id}/retry`
+
+Retries one unresolved parse failure for the scoped user.
+
+Query parameters: `user_id`.
+
+### POST `/api/pipeline/reprocess`
+
+Replays retained raw emails. The default `dry_run: true` compares parser output without mutating transactions.
+
+Query parameters: `user_id`.
+
+JSON body:
+
+```json
+{
+  "email_ids": ["optional-email-id"],
+  "from_date": "2026-05-01",
+  "to_date": "2026-05-31",
+  "dry_run": true,
+  "limit": 100
+}
+```
+
 ## Transactions
 
 | Method | Path | Body | Query / Path | Success | Errors | Returns |
@@ -107,6 +159,59 @@ same user as `user_id`.
 | Method | Path | Query | Success | Returns |
 | --- | --- | --- | --- | --- |
 | `GET` | `/api/insights/` | `user_id`, `month?` (1–12, def current), `year?` (2020–2030, def current) | `200` | `{meta, insights, daily_trend, recurring}` |
+
+## Dashboard
+
+| Method | Path | Query | Success | Returns |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/dashboard/workspace` | `user_id`, `month` (1–12), `year` (2020–2030) | `200` | `WorkspaceResponse` |
+
+`WorkspaceResponse` is an aggregate DTO for the Financial Decision Workspace,
+composed from existing deterministic services (transactions, insights, budgets,
+gmail status). It never contains raw email bodies, tokens, or secrets.
+
+```jsonc
+{
+  "month": 7, "year": 2026,
+  "snapshot": {
+    "income": 0, "spend": 0, "savings": 0, "net_cash_flow": 0,
+    "transaction_count": 0, "review_count": 0, "budget_risk_count": 0,
+    "sync_status": "idle"
+  },
+  "timeline": [
+    { "type": "income|subscription|bill|shopping|refund|spending",
+      "label": "Merchant", "merchant": "Merchant", "category": "Food",
+      "amount": 0, "direction": "in|out", "date": "2026-07-01", "confidence": 0.9 }
+  ],
+  "insights": [ { "type": "…", "icon": "🏷️", "title": "…", "description": "…", "severity": "info" } ],
+  "recommendations": [
+    { "type": "savings|recurring|budget|anomaly|review", "severity": "warning",
+      "title": "…", "description": "…", "action_label": "Open review queue", "target": "review" }
+  ],
+  "review_summary": { "pending_count": 0, "low_confidence_count": 0, "avg_confidence": null },
+  "sync_summary": { "latest_status": null, "last_synced_at": null, "processed_total": 0, "unprocessed_total": 0 }
+}
+```
+
+## Merchant, Category, Analytics, Goals, and AI-ready Explanations
+
+These endpoints extend the Financial Decision Workspace with Phase 2-4 read
+models. They are deterministic and aggregate-only; they do not expose raw email
+bodies, tokens, passwords, or connector secrets.
+
+| Method | Path | Query / Body | Success | Returns |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/merchants/` | `user_id`, `month`, `year` | `200` | `list[MerchantSummary]` with spend, count, average, trend, category, recurrence likelihood |
+| `GET` | `/api/merchants/{merchant_key}` | `user_id`, `month`, `year` | `200` | `MerchantDetail` with aliases, default category, latest transactions |
+| `PATCH` | `/api/merchants/{merchant_key}` | `user_id`, `month`, `year`, `MerchantUpdate` | `200` | Updated `MerchantDetail`; can apply normalized name/category to existing transactions |
+| `GET` | `/api/categories/intelligence` | `user_id`, `month`, `year` | `200` | `CategoryIntelligenceResponse` with hierarchy, budget usage, MoM change, top merchants |
+| `GET` | `/api/analytics/cash-flow` | `user_id`, `month`, `year` | `200` | `CashFlowProjection` |
+| `GET` | `/api/analytics/month-comparison` | `user_id`, `month`, `year` | `200` | `MonthComparison` with category deltas |
+| `GET` | `/api/analytics/financial-health` | `user_id`, `month`, `year` | `200` | `FinancialHealthScore` |
+| `GET` | `/api/goals/` | `user_id`, `month`, `year` | `200` | `list[GoalResponse]` |
+| `POST` | `/api/goals/` | `user_id`, `GoalCreate` | `201` | Created `GoalResponse` |
+| `PATCH` | `/api/goals/{goal_id}` | `user_id`, `month`, `year`, `GoalUpdate` | `200` | Updated `GoalResponse` |
+| `POST` | `/api/ai/explain` | `ExplainRequest` | `200` | `ExplainResponse` with summary, drivers, next actions, safety note |
 
 ## Reports
 
