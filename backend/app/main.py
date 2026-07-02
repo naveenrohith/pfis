@@ -35,12 +35,16 @@ from slowapi.middleware import SlowAPIMiddleware
 # Import all models so SQLAlchemy Base.metadata registers them before create_all()
 import app.models  # noqa: F401
 from app.api.routes import (
+    ai,
+    analytics,
     auth,
     budgets,
     categories,
+    dashboard,
     health,
     insights,
     jobs,
+    merchants,
     pipeline,
     reports,
     transactions,
@@ -177,6 +181,11 @@ app.include_router(pipeline.router, prefix="/api")
 
 # Phase 5: Insights routes
 app.include_router(insights.router, prefix="/api")
+app.include_router(dashboard.router, prefix="/api")
+app.include_router(merchants.router, prefix="/api")
+app.include_router(analytics.router, prefix="/api")
+app.include_router(analytics.goals_router, prefix="/api")
+app.include_router(ai.router, prefix="/api")
 
 # Phase 6: Budget + Reports routes
 app.include_router(budgets.router, prefix="/api")

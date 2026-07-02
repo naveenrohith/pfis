@@ -149,6 +149,32 @@ class BackgroundJob(Base):
         return f"<BackgroundJob {self.job_type} status={self.status.value}>"
 
 
+class Goal(Base):
+    """User-defined financial goal tracked against monthly aggregates."""
+
+    __tablename__ = "goals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
+    )
+    goal_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(160), nullable=False)
+    target_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    target_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    target_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+
+    user = relationship("User", back_populates="goals")
+
+    def __repr__(self) -> str:
+        return f"<Goal {self.goal_type}:{self.label}>"
+
+
 class OAuthState(Base):
     """Persistent OAuth state storage (replaces in-memory sets/dicts)."""
 
