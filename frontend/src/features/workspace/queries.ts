@@ -13,6 +13,16 @@ export const queryKeys = {
   autoSyncStatus: (u: string) => ['autoSyncStatus', u] as const,
   insights: (u: string, m: number, y: number) => ['insights', u, m, y] as const,
   budgets: (u: string, m: number, y: number) => ['budgets', u, m, y] as const,
+  workspace: (u: string, m: number, y: number) => ['workspace', u, m, y] as const,
+  merchants: (u: string, m: number, y: number) => ['merchants', u, m, y] as const,
+  categoryIntelligence: (u: string, m: number, y: number) =>
+    ['categoryIntelligence', u, m, y] as const,
+  cashFlow: (u: string, m: number, y: number) => ['cashFlow', u, m, y] as const,
+  monthComparison: (u: string, m: number, y: number) => ['monthComparison', u, m, y] as const,
+  financialHealth: (u: string, m: number, y: number) => ['financialHealth', u, m, y] as const,
+  goals: (u: string, m: number, y: number) => ['goals', u, m, y] as const,
+  pipelineMetrics: (u: string, m: number, y: number) => ['pipelineMetrics', u, m, y] as const,
+  pipelineFailures: (u: string, resolved: boolean) => ['pipelineFailures', u, resolved] as const,
 };
 
 function useUserId(): string {
@@ -99,5 +109,103 @@ export function useBudgets() {
     queryKey: queryKeys.budgets(userId, month, year),
     queryFn: () => api.budgetsTrack(userId, month, year),
     enabled: !!userId,
+  });
+}
+
+export function useWorkspaceSnapshot() {
+  const userId = useUserId();
+  const { month, year } = useWorkspace();
+  return useQuery({
+    queryKey: queryKeys.workspace(userId, month, year),
+    queryFn: () => api.workspace(userId, month, year),
+    enabled: !!userId,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useMerchants() {
+  const userId = useUserId();
+  const { month, year } = useWorkspace();
+  return useQuery({
+    queryKey: queryKeys.merchants(userId, month, year),
+    queryFn: () => api.merchants(userId, month, year),
+    enabled: !!userId,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useCategoryIntelligence() {
+  const userId = useUserId();
+  const { month, year } = useWorkspace();
+  return useQuery({
+    queryKey: queryKeys.categoryIntelligence(userId, month, year),
+    queryFn: () => api.categoryIntelligence(userId, month, year),
+    enabled: !!userId,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useCashFlow() {
+  const userId = useUserId();
+  const { month, year } = useWorkspace();
+  return useQuery({
+    queryKey: queryKeys.cashFlow(userId, month, year),
+    queryFn: () => api.cashFlow(userId, month, year),
+    enabled: !!userId,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useMonthComparison() {
+  const userId = useUserId();
+  const { month, year } = useWorkspace();
+  return useQuery({
+    queryKey: queryKeys.monthComparison(userId, month, year),
+    queryFn: () => api.monthComparison(userId, month, year),
+    enabled: !!userId,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useFinancialHealth() {
+  const userId = useUserId();
+  const { month, year } = useWorkspace();
+  return useQuery({
+    queryKey: queryKeys.financialHealth(userId, month, year),
+    queryFn: () => api.financialHealth(userId, month, year),
+    enabled: !!userId,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useGoals() {
+  const userId = useUserId();
+  const { month, year } = useWorkspace();
+  return useQuery({
+    queryKey: queryKeys.goals(userId, month, year),
+    queryFn: () => api.goals(userId, month, year),
+    enabled: !!userId,
+    refetchInterval: 30_000,
+  });
+}
+
+export function usePipelineMetrics() {
+  const userId = useUserId();
+  const { month, year } = useWorkspace();
+  return useQuery({
+    queryKey: queryKeys.pipelineMetrics(userId, month, year),
+    queryFn: () => api.pipelineMetrics(userId, month, year),
+    enabled: !!userId,
+    refetchInterval: 30_000,
+  });
+}
+
+export function usePipelineFailures(resolved = false) {
+  const userId = useUserId();
+  return useQuery({
+    queryKey: queryKeys.pipelineFailures(userId, resolved),
+    queryFn: () => api.pipelineFailures(userId, resolved, 20),
+    enabled: !!userId,
+    refetchInterval: 30_000,
   });
 }

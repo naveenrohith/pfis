@@ -4,15 +4,31 @@ import type {
   AutoSyncStatus,
   BudgetTracker,
   BulkUpdateResponse,
+  CashFlowProjection,
   Category,
+  CategoryIntelligenceResponse,
   EmailsResponse,
+  ExplainPayload,
+  ExplainResponse,
+  FinancialHealthScore,
+  Goal,
+  GoalCreatePayload,
   InsightsResponse,
   Job,
+  MerchantDetail,
+  MerchantSummary,
+  MonthComparison,
+  PipelineFailuresResponse,
+  PipelineMetrics,
+  PipelineReprocessRequest,
+  PipelineReprocessResponse,
+  PipelineRetryResponse,
   SyncStatusResponse,
   Transaction,
   TransactionSummary,
   TransactionType,
   User,
+  WorkspaceResponse,
 } from './types';
 
 const API_BASE = '/api';
@@ -163,6 +179,65 @@ export const api = {
   // Insights
   insights: (userId: string, month: number, year: number) =>
     request<InsightsResponse>('/insights/', { query: { user_id: userId, month, year } }),
+
+  // Financial Decision Workspace (aggregate)
+  workspace: (userId: string, month: number, year: number) =>
+    request<WorkspaceResponse>('/dashboard/workspace', {
+      query: { user_id: userId, month, year },
+    }),
+
+  // Merchant and category intelligence
+  merchants: (userId: string, month: number, year: number) =>
+    request<MerchantSummary[]>('/merchants/', { query: { user_id: userId, month, year } }),
+  merchant: (userId: string, merchantKey: string, month: number, year: number) =>
+    request<MerchantDetail>(`/merchants/${encodeURIComponent(merchantKey)}`, {
+      query: { user_id: userId, month, year },
+    }),
+  categoryIntelligence: (userId: string, month: number, year: number) =>
+    request<CategoryIntelligenceResponse>('/categories/intelligence', {
+      query: { user_id: userId, month, year },
+    }),
+
+  // Advanced analytics and goals
+  cashFlow: (userId: string, month: number, year: number) =>
+    request<CashFlowProjection>('/analytics/cash-flow', {
+      query: { user_id: userId, month, year },
+    }),
+  monthComparison: (userId: string, month: number, year: number) =>
+    request<MonthComparison>('/analytics/month-comparison', {
+      query: { user_id: userId, month, year },
+    }),
+  financialHealth: (userId: string, month: number, year: number) =>
+    request<FinancialHealthScore>('/analytics/financial-health', {
+      query: { user_id: userId, month, year },
+    }),
+  goals: (userId: string, month: number, year: number) =>
+    request<Goal[]>('/goals/', { query: { user_id: userId, month, year } }),
+  createGoal: (userId: string, payload: GoalCreatePayload) =>
+    request<Goal>('/goals/', { method: 'POST', query: { user_id: userId }, body: payload }),
+  explain: (payload: ExplainPayload) =>
+    request<ExplainResponse>('/ai/explain', { method: 'POST', body: payload }),
+
+  // Parser pipeline operations
+  pipelineMetrics: (userId: string, month: number, year: number) =>
+    request<PipelineMetrics>('/pipeline/metrics', {
+      query: { user_id: userId, month, year },
+    }),
+  pipelineFailures: (userId: string, resolved = false, limit = 20, offset = 0) =>
+    request<PipelineFailuresResponse>('/pipeline/failures', {
+      query: { user_id: userId, resolved, limit, offset },
+    }),
+  retryPipelineFailure: (userId: string, failureId: string) =>
+    request<PipelineRetryResponse>(`/pipeline/failures/${failureId}/retry`, {
+      method: 'POST',
+      query: { user_id: userId },
+    }),
+  reprocessPipeline: (userId: string, payload: PipelineReprocessRequest) =>
+    request<PipelineReprocessResponse>('/pipeline/reprocess', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: payload,
+    }),
 
   // Budgets
   budgetsTrack: (userId: string, month: number, year: number) =>

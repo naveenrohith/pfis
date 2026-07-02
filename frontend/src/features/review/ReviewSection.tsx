@@ -48,12 +48,18 @@ export function ReviewSection() {
     const all = transactions.data ?? [];
     const base = filter === 'pending' ? all.filter((t) => !t.reviewed_flag) : all;
     const q = search.trim().toLowerCase();
-    if (!q) return base;
-    return base.filter((t) =>
-      [t.merchant_normalized, t.merchant_raw, t.account_last4, t.reference_id]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q)),
-    );
+    const filtered = !q
+      ? base
+      : base.filter((t) =>
+          [t.merchant_normalized, t.merchant_raw, t.account_last4, t.reference_id]
+            .filter(Boolean)
+            .some((v) => String(v).toLowerCase().includes(q)),
+        );
+    // Low-confidence, unreviewed transactions are the primary workflow — surface them first.
+    return [...filtered].sort((a, b) => {
+      if (a.reviewed_flag !== b.reviewed_flag) return a.reviewed_flag ? 1 : -1;
+      return a.confidence_score - b.confidence_score;
+    });
   }, [transactions.data, filter, search]);
 
   const focused = useMemo(
@@ -114,8 +120,8 @@ export function ReviewSection() {
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Queue */}
         <Card className="lg:col-span-2">
-          <CardContent className="p-5">
-            <div className="mb-3 flex flex-wrap items-center gap-2">
+          <CardContent className="p-4 sm:p-5">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
               <Segmented
                 aria-label="Review queue filter"
                 value={filter}
@@ -129,7 +135,7 @@ export function ReviewSection() {
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   className="pl-9"
-                  placeholder="Search merchant, account, reference…"
+                  placeholder="Search merchant, account, reference..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
@@ -138,14 +144,14 @@ export function ReviewSection() {
 
             {/* Bulk toolbar */}
             {selected.size > 0 && (
-              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-2">
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/25 bg-primary/5 p-2">
                 <span className="text-sm font-semibold">{selected.size} selected</span>
                 <Select
                   className="h-9 w-auto"
                   value={bulkCategory}
                   onChange={(e) => setBulkCategory(e.target.value)}
                 >
-                  <option value="">Category…</option>
+                  <option value="">Category...</option>
                   {categories.data?.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -157,7 +163,7 @@ export function ReviewSection() {
                   value={bulkType}
                   onChange={(e) => setBulkType(e.target.value)}
                 >
-                  <option value="">Type…</option>
+                  <option value="">Type...</option>
                   <option value="debit">Debit</option>
                   <option value="credit">Credit</option>
                   <option value="refund">Refund</option>
@@ -180,7 +186,7 @@ export function ReviewSection() {
             ) : items.length === 0 ? (
               <EmptyState icon={<CheckCircle2 />} title="Nothing to review" description="This queue is clear." />
             ) : (
-              <div className="grid max-h-[32rem] gap-1.5 overflow-y-auto pr-1">
+              <div className="grid max-h-[34rem] gap-2 overflow-y-auto pr-1">
                 {items.map((t) => (
                   <ReviewRow
                     key={t.id}
@@ -227,8 +233,8 @@ function ReviewRow({
 }) {
   return (
     <div
-      className={`flex items-center gap-3 rounded-lg border p-2.5 transition-colors ${
-        active ? 'border-primary bg-accent/40' : 'border-border hover:bg-muted/50'
+      className={`flex items-center gap-3 rounded-lg border p-3 transition-colors ${
+        active ? 'border-primary bg-primary/5' : 'border-border bg-card hover:bg-muted/35'
       }`}
     >
       <input
@@ -238,17 +244,20 @@ function ReviewRow({
         aria-label={`Select ${txn.merchant_normalized ?? 'transaction'}`}
         className="h-4 w-4 accent-[hsl(var(--primary))]"
       />
-      <button onClick={onFocus} className="flex flex-1 items-center justify-between gap-2 text-left">
+      <button
+        onClick={onFocus}
+        className="grid min-w-0 flex-1 gap-2 text-left sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+      >
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">
             {txn.merchant_normalized || txn.merchant_raw || 'Unknown'}
           </p>
           <p className="truncate text-xs text-muted-foreground">
-            {txn.category_name || 'Uncategorized'} · {txn.transaction_date}
-            {txn.account_last4 ? ` · ••${txn.account_last4}` : ''}
+            {txn.category_name || 'Uncategorized'} / {txn.transaction_date}
+            {txn.account_last4 ? ` / **${txn.account_last4}` : ''}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:justify-end">
           <span className="text-sm font-semibold">{formatCurrency(txn.amount, currency)}</span>
           <Badge variant={confidenceVariant(txn.confidence_score)}>
             {Math.round(txn.confidence_score * 100)}%

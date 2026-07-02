@@ -4,73 +4,84 @@ import {
   PiggyBank,
   Receipt,
   ClipboardCheck,
+  Wallet,
+  ShieldAlert,
+  Activity,
   Trash2,
+  MailCheck,
+  MailWarning,
 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { SectionTitle } from '@/components/SectionTitle';
-import { useSummary, useTransactions, useEmails } from '@/features/workspace/queries';
+import { StatCard, type CardTone } from '@/components/cards/StatCard';
+import { useWorkspaceSnapshot } from '@/features/workspace/queries';
 import { useSync } from '@/features/workspace/SyncContext';
+import { useDashboardUi } from '@/app/DashboardUiContext';
 import { useAuth } from '@/features/auth/AuthContext';
 import { formatCurrency } from '@/lib/format';
 
-const REVIEW_THRESHOLD = 0.85;
-
-const TONE_TEXT: Record<string, string> = {
-  danger: 'text-danger',
-  success: 'text-success',
-  warning: 'text-warning',
-  info: 'text-info',
-};
-
 export function OverviewSection() {
   const { user } = useAuth();
-  const summary = useSummary();
-  const transactions = useTransactions();
-  const emails = useEmails();
+  const workspace = useWorkspaceSnapshot();
   const { running, status, liveConnected, log, clearLog } = useSync();
+  const { scrollTo } = useDashboardUi();
 
   const currency = user?.currency ?? 'INR';
-  const spend = summary.data?.total_spend ?? 0;
-  const income = summary.data?.total_income ?? 0;
-  const saved = income - spend;
-  const txnCount = summary.data?.transaction_count ?? 0;
-  const pendingReview =
-    transactions.data?.filter((t) => !t.reviewed_flag && t.confidence_score < REVIEW_THRESHOLD)
-      .length ?? 0;
-  const unprocessed = emails.data?.unprocessed_total ?? 0;
+  const snap = workspace.data?.snapshot;
+  const sync = workspace.data?.sync_summary;
 
-  const metrics = [
-    {
-      label: 'Spent',
-      value: formatCurrency(spend, currency),
-      icon: TrendingDown,
-      tone: 'danger' as const,
-    },
-    {
-      label: 'Income',
-      value: formatCurrency(income, currency),
-      icon: TrendingUp,
-      tone: 'success' as const,
-    },
+  const income = snap?.income ?? 0;
+  const spend = snap?.spend ?? 0;
+  const savings = snap?.savings ?? 0;
+  const netCashFlow = snap?.net_cash_flow ?? 0;
+  const txnCount = snap?.transaction_count ?? 0;
+  const reviewCount = snap?.review_count ?? 0;
+  const budgetRisk = snap?.budget_risk_count ?? 0;
+
+  const metrics: {
+    label: string;
+    value: string;
+    icon: typeof TrendingDown;
+    tone: CardTone;
+    target?: string;
+  }[] = [
+    { label: 'Income', value: formatCurrency(income, currency), icon: TrendingUp, tone: 'success' },
+    { label: 'Spent', value: formatCurrency(spend, currency), icon: TrendingDown, tone: 'danger' },
     {
       label: 'Saved',
-      value: formatCurrency(saved, currency),
+      value: formatCurrency(savings, currency),
       icon: PiggyBank,
-      tone: saved >= 0 ? ('success' as const) : ('warning' as const),
+      tone: savings >= 0 ? 'success' : 'warning',
+    },
+    {
+      label: 'Net cash flow',
+      value: formatCurrency(netCashFlow, currency),
+      icon: Wallet,
+      tone: netCashFlow >= 0 ? 'success' : 'danger',
     },
     {
       label: 'Transactions',
       value: String(txnCount),
       icon: Receipt,
-      tone: 'info' as const,
+      tone: 'info',
+      target: 'transactions',
     },
     {
       label: 'Needs review',
-      value: String(pendingReview),
+      value: String(reviewCount),
       icon: ClipboardCheck,
-      tone: pendingReview > 0 ? ('warning' as const) : ('success' as const),
+      tone: reviewCount > 0 ? 'warning' : 'success',
+      target: 'review',
+    },
+    {
+      label: 'Budget risk',
+      value: String(budgetRisk),
+      icon: ShieldAlert,
+      tone: budgetRisk > 0 ? 'danger' : 'success',
+      target: 'budgets',
     },
   ];
 
@@ -87,46 +98,63 @@ export function OverviewSection() {
     <div>
       <SectionTitle
         eyebrow="Overview"
-        title={saved >= 0 ? `You saved ${formatCurrency(saved, currency)} this month` : 'Spending exceeds income'}
-        description="A snapshot of your money this month."
+        title={
+          savings >= 0
+            ? `You saved ${formatCurrency(savings, currency)} this month`
+            : 'Spending exceeds income'
+        }
+        description="Month-to-date performance, sync health, and review pressure in one workspace."
       />
 
-      {/* Hero metrics */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:col-span-2">
-          {summary.isLoading
-            ? Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-28" />)
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 lg:col-span-3">
+          {workspace.isLoading
+            ? Array.from({ length: 7 }).map((_, i) => <Skeleton key={i} className="h-28" />)
             : metrics.map((m) => (
-                <Card key={m.label}>
-                  <CardContent className="flex flex-col gap-2 p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-muted-foreground">{m.label}</span>
-                      <m.icon className={`h-4 w-4 ${TONE_TEXT[m.tone]}`} />
-                    </div>
-                    <span className="text-2xl font-extrabold">{m.value}</span>
-                  </CardContent>
-                </Card>
+                <StatCard
+                  key={m.label}
+                  label={m.label}
+                  value={m.value}
+                  icon={m.icon}
+                  tone={m.tone}
+                  onClick={m.target ? () => scrollTo(m.target!) : undefined}
+                />
               ))}
         </div>
 
-        {/* Command center */}
-        <Card className="lg:col-span-1">
-          <CardContent className="flex h-full flex-col gap-3 p-5">
+        <Card className="lg:col-span-2">
+          <CardContent className="flex h-full flex-col gap-4 p-4 sm:p-5">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold">Command center</h3>
+              <h3 className="flex items-center gap-2 font-bold">
+                <Activity className="h-4 w-4 text-info" /> Command center
+              </h3>
               <div className="flex gap-2">
                 <Badge variant={liveConnected ? 'success' : 'default'}>
                   {liveConnected ? 'Live' : 'Fallback'}
                 </Badge>
-                <Badge variant={statusTone}>{running ? 'Running' : status === 'idle' ? 'Ready' : status}</Badge>
+                <Badge variant={statusTone}>
+                  {running ? 'Running' : status === 'idle' ? 'Ready' : status}
+                </Badge>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <Stat label="Processed" value={emails.data?.processed_total ?? 0} />
-              <Stat label="Unprocessed" value={unprocessed} />
-              <Stat label="Pending review" value={pendingReview} />
-              <Stat label="Mode" value={user ? 'Active' : '—'} text />
+            <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+              <Stat icon={<MailCheck className="h-4 w-4" />} label="Processed" value={sync?.processed_total ?? 0} />
+              <Stat icon={<MailWarning className="h-4 w-4" />} label="Waiting" value={sync?.unprocessed_total ?? 0} />
+              <Stat icon={<ClipboardCheck className="h-4 w-4" />} label="Review" value={reviewCount} />
+              <Stat icon={<Activity className="h-4 w-4" />} label="Sync" value={sync?.latest_status ?? snap?.sync_status ?? 'idle'} text />
             </div>
+            <p className="rounded-lg border border-border bg-muted/35 p-3 text-sm text-muted-foreground">
+              {reviewCount > 0
+                ? `${reviewCount} transaction(s) need confirmation before this month is clean.`
+                : budgetRisk > 0
+                  ? `${budgetRisk} budget area(s) need attention.`
+                  : 'No immediate cleanup items. Keep the inbox sync current.'}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="flex h-full flex-col gap-3 p-4 sm:p-5">
             <div className="mt-1 flex items-center justify-between">
               <p className="text-xs font-semibold text-muted-foreground">Activity log</p>
               {log.length > 0 && (
@@ -138,7 +166,7 @@ export function OverviewSection() {
                 </button>
               )}
             </div>
-            <div className="h-32 overflow-y-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-xs">
+            <div className="h-40 overflow-y-auto rounded-lg border border-border bg-muted/40 p-3 font-mono text-xs">
               {log.length === 0 ? (
                 <p className="text-muted-foreground">No activity yet. Run a sync to begin.</p>
               ) : (
@@ -156,11 +184,24 @@ export function OverviewSection() {
   );
 }
 
-function Stat({ label, value, text }: { label: string; value: number | string; text?: boolean }) {
+function Stat({
+  label,
+  value,
+  text,
+  icon,
+}: {
+  label: string;
+  value: number | string;
+  text?: boolean;
+  icon?: ReactNode;
+}) {
   return (
-    <div className="rounded-md border border-border bg-muted/40 p-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={text ? 'font-semibold' : 'text-lg font-bold'}>{value}</p>
+    <div className="rounded-lg border border-border bg-muted/35 p-3">
+      <div className="mb-2 flex items-center justify-between text-muted-foreground">
+        <p className="text-xs font-semibold">{label}</p>
+        {icon}
+      </div>
+      <p className={text ? 'font-semibold capitalize' : 'text-xl font-bold'}>{value}</p>
     </div>
   );
 }

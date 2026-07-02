@@ -48,8 +48,8 @@ export function InboxSection() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <CardContent className="p-5">
-            <div className="mb-3 flex items-center justify-between">
+          <CardContent className="p-4 sm:p-5">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted-foreground">
                 {emails.data
                   ? `${emails.data.all_total} synced · ${emails.data.processed_total} processed · ${emails.data.unprocessed_total} waiting`
@@ -73,7 +73,7 @@ export function InboxSection() {
                 {emails.data.emails.map((email, i) => (
                   <div
                     key={email.id ?? i}
-                    className={`rounded-lg border-l-4 border border-border p-3 ${
+                    className={`rounded-lg border-l-4 border border-border bg-card p-3 transition-colors hover:bg-muted/30 ${
                       email.processed ? 'border-l-success' : 'border-l-warning'
                     }`}
                   >
@@ -101,7 +101,7 @@ export function InboxSection() {
         </Card>
 
         <Card>
-          <CardContent className="grid gap-3 p-5">
+          <CardContent className="grid gap-3 p-4 sm:p-5">
             <h3 className="font-bold">Sync overview</h3>
             <div className="grid grid-cols-2 gap-2">
               <Tile label="Synced" value={emails.data?.all_total ?? 0} />
@@ -125,7 +125,7 @@ export function InboxSection() {
 
 function Tile({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-md border border-border bg-muted/40 p-3">
+    <div className="rounded-lg border border-border bg-muted/35 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="text-xl font-bold">{value}</p>
     </div>

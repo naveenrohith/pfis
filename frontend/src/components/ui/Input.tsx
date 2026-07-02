@@ -7,7 +7,7 @@ export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTML
       ref={ref}
       type={type}
       className={cn(
-        'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+        'flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm shadow-slate-900/5 transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50',
         className,
       )}
       {...props}
@@ -23,7 +23,7 @@ export const Select = forwardRef<
   <select
     ref={ref}
     className={cn(
-      'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+      'flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm shadow-slate-900/5 transition-colors focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50',
       className,
     )}
     {...props}
@@ -37,7 +37,7 @@ export const Label = forwardRef<HTMLLabelElement, React.LabelHTMLAttributes<HTML
   ({ className, ...props }, ref) => (
     <label
       ref={ref}
-      className={cn('text-sm font-medium text-muted-foreground', className)}
+      className={cn('text-xs font-bold uppercase tracking-wide text-muted-foreground', className)}
       {...props}
     />
   ),

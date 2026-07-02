@@ -95,8 +95,8 @@ export function TransactionsSection() {
       />
 
       <Card>
-        <CardContent className="p-5">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
+        <CardContent className="p-4 sm:p-5">
+          <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center">
             <Segmented
               aria-label="Transaction type filters"
               value={type}
@@ -113,7 +113,7 @@ export function TransactionsSection() {
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-9"
-                placeholder="Search transactions…"
+                placeholder="Search transactions..."
                 value={explorerSearch}
                 onChange={(e) => setExplorerSearch(e.target.value)}
               />
@@ -158,9 +158,9 @@ export function TransactionsSection() {
                         <button
                           key={t.id}
                           onClick={() => focusReview(t.id)}
-                          className="flex items-center gap-3 rounded-lg border border-border p-2.5 text-left transition-colors hover:bg-muted/50"
+                          className="dashboard-row grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-3 text-left sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]"
                         >
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-bold text-accent-foreground">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent text-xs font-bold text-accent-foreground">
                             {initials(t.merchant_normalized || t.merchant_raw || '?')}
                           </span>
                           <div className="min-w-0 flex-1">
@@ -168,7 +168,7 @@ export function TransactionsSection() {
                               {t.merchant_normalized || t.merchant_raw || 'Unknown'}
                             </p>
                             <p className="truncate text-xs text-muted-foreground">
-                              {t.category_name || 'Uncategorized'} · {t.transaction_date}
+                              {t.category_name || 'Uncategorized'} / {t.transaction_date}
                             </p>
                           </div>
                           <span className={`text-sm font-bold ${TONE_CLASS[amount.tone]}`}>
@@ -195,7 +195,7 @@ export function TransactionsSection() {
 
 function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2.5 py-1 text-xs">
+    <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-2.5 py-1 text-xs">
       {label}
       <button onClick={onClear} aria-label={`Clear ${label}`}>
         <X className="h-3 w-3" />

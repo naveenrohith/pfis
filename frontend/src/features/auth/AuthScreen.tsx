@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ShieldCheck, Sparkles, Zap, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Sparkles, Zap, AlertCircle, WalletCards } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input, Label } from '@/components/ui/Input';
 import { Segmented } from '@/components/ui/Segmented';
@@ -40,10 +40,11 @@ export function AuthScreen() {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* Spotlight */}
-      <div className="relative hidden flex-col justify-between overflow-hidden bg-primary p-12 text-primary-foreground lg:flex">
-        <div className="absolute -right-24 -top-24 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute -bottom-24 -left-24 h-96 w-96 rounded-full bg-black/10 blur-3xl" />
-        <div className="relative">
+      <div className="hidden flex-col justify-between overflow-hidden bg-primary p-12 text-primary-foreground lg:flex">
+        <div>
+          <span className="mb-8 flex h-12 w-12 items-center justify-center rounded-lg bg-white/15">
+            <WalletCards className="h-6 w-6" />
+          </span>
           <p className="text-sm font-bold uppercase tracking-widest opacity-80">
             PFIS · Personal Finance
           </p>
@@ -55,9 +56,9 @@ export function AuthScreen() {
             clear, actionable insight.
           </p>
         </div>
-        <div className="relative grid gap-4">
+        <div className="grid gap-4">
           {FEATURES.map((f) => (
-            <div key={f.title} className="flex items-start gap-3 rounded-xl bg-white/10 p-4">
+            <div key={f.title} className="flex items-start gap-3 rounded-lg border border-white/15 bg-white/10 p-4">
               <f.icon className="mt-0.5 h-5 w-5 shrink-0" />
               <div>
                 <p className="font-semibold">{f.title}</p>
@@ -70,7 +71,7 @@ export function AuthScreen() {
 
       {/* Panel */}
       <div className="flex items-center justify-center bg-background p-6">
-        <div className="w-full max-w-sm">
+        <div className="w-full max-w-sm rounded-lg border border-border bg-card p-5 shadow-sm sm:p-6">
           <div className="mb-6 flex items-center justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">

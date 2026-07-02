@@ -1,7 +1,8 @@
-import { ChevronLeft, ChevronRight, RefreshCw, LogOut, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw, LogOut, Calendar, WalletCards } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ThemeToggle } from './ThemeToggle';
+import { GlobalSearch } from '@/features/search/GlobalSearch';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
 import { useSync } from '@/features/workspace/SyncContext';
@@ -16,24 +17,23 @@ export function Header() {
     session?.mode === 'demo' ? 'demo workspace' : formatCountdown(session?.expiresAt ?? null);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
-            ₹
+    <header className="sticky top-0 z-40 border-b border-border bg-card/90 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-2 px-4 py-3 sm:gap-3 sm:px-6">
+        <div className="flex min-w-[8rem] items-center gap-2">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm shadow-primary/25">
+            <WalletCards className="h-5 w-5" />
           </span>
           <div className="leading-tight">
             <p className="text-sm font-bold">PFIS</p>
-            <p className="text-xs text-muted-foreground">Finance Intelligence</p>
+            <p className="hidden text-xs text-muted-foreground sm:block">Finance Intelligence</p>
           </div>
         </div>
 
-        {/* Month nav */}
-        <div className="flex items-center gap-1 rounded-full border border-border bg-card p-1">
+        <div className="order-3 flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/45 p-1 sm:order-none sm:w-auto">
           <Button variant="ghost" size="icon" onClick={goPrev} aria-label="Previous month">
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="min-w-[8.5rem] text-center text-sm font-semibold">
+          <span className="min-w-[8.5rem] text-center text-sm font-semibold sm:min-w-[9rem]">
             {monthLabel(month, year)}
           </span>
           <Button
@@ -47,12 +47,16 @@ export function Header() {
           </Button>
         </div>
         {!isCurrentMonth && (
-          <Button variant="ghost" size="sm" onClick={goToday}>
+          <Button variant="ghost" size="sm" onClick={goToday} className="order-4 sm:order-none">
             <Calendar className="mr-1 h-3.5 w-3.5" /> Today
           </Button>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="order-5 w-full md:order-none md:ml-auto md:w-auto">
+          <GlobalSearch />
+        </div>
+
+        <div className="ml-auto flex items-center gap-1.5 sm:gap-2 md:ml-0">
           <Button onClick={runSync} disabled={running} size="sm">
             <RefreshCw className={`mr-1 h-3.5 w-3.5 ${running ? 'animate-spin' : ''}`} />
             {running ? 'Syncing…' : 'Sync inbox'}
@@ -60,7 +64,7 @@ export function Header() {
           <ThemeToggle />
           <div className="hidden items-center gap-2 sm:flex">
             <div className="text-right leading-tight">
-              <p className="text-sm font-semibold">{user?.name ?? user?.email}</p>
+              <p className="max-w-[12rem] truncate text-sm font-semibold">{user?.name ?? user?.email}</p>
               {countdown && (
                 <p className="text-xs text-muted-foreground">
                   {session?.mode === 'demo' ? countdown : `Session: ${countdown}`}

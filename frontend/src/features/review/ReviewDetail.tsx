@@ -58,8 +58,8 @@ export function ReviewDetail({ transaction, categories, onSaved, onNext }: Revie
 
   if (!transaction) {
     return (
-      <Card>
-        <CardContent className="p-5">
+      <Card className="lg:sticky lg:top-32 lg:self-start">
+        <CardContent className="p-4 sm:p-5">
           <EmptyState
             title="Nothing selected"
             description="Pick a transaction from the queue to review its details."
@@ -70,9 +70,9 @@ export function ReviewDetail({ transaction, categories, onSaved, onNext }: Revie
   }
 
   return (
-    <Card>
-      <CardContent className="grid gap-3 p-5">
-        <div className="flex flex-wrap gap-1.5">
+    <Card className="lg:sticky lg:top-32 lg:self-start">
+      <CardContent className="grid gap-4 p-4 sm:p-5">
+        <div className="flex flex-wrap gap-1.5 rounded-lg border border-border bg-muted/30 p-2">
           <Badge variant="info">Confidence {Math.round(transaction.confidence_score * 100)}%</Badge>
           <Badge variant="outline">{transaction.transaction_date}</Badge>
           {transaction.account_last4 && <Badge variant="outline">••{transaction.account_last4}</Badge>}
@@ -128,7 +128,7 @@ export function ReviewDetail({ transaction, categories, onSaved, onNext }: Revie
             <button
               key={c.id}
               onClick={() => setCategoryId(c.id)}
-              className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+              className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors ${
                 categoryId === c.id
                   ? 'border-primary bg-accent text-accent-foreground'
                   : 'border-border hover:bg-muted'
@@ -139,7 +139,7 @@ export function ReviewDetail({ transaction, categories, onSaved, onNext }: Revie
           ))}
         </div>
 
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
           <Button variant="secondary" onClick={() => save.mutate(false)} disabled={save.isPending}>
             Save
           </Button>

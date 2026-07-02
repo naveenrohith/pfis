@@ -82,66 +82,82 @@ export function BudgetsSection() {
           description="Create a budget to track category spending."
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-2">
           {budgets.data.map((b) => {
             const pct = Math.min(b.usage_pct, 100);
             return (
               <Card key={b.id}>
-                <CardContent className="flex items-center gap-4 p-5">
-                  <div
-                    className="relative flex h-20 w-20 shrink-0 items-center justify-center rounded-full"
-                    style={{
-                      background: `conic-gradient(${RING_COLOR[b.status]} ${pct * 3.6}deg, hsl(var(--muted)) 0deg)`,
-                    }}
-                  >
-                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-card text-sm font-bold">
-                      {Math.round(b.usage_pct)}%
+                <CardContent className="grid gap-4 p-4 sm:p-5">
+                  <div className="flex items-start gap-4">
+                    <div
+                      className="relative flex h-20 w-20 shrink-0 items-center justify-center rounded-full"
+                      style={{
+                        background: `conic-gradient(${RING_COLOR[b.status]} ${pct * 3.6}deg, hsl(var(--muted)) 0deg)`,
+                      }}
+                    >
+                      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-card text-sm font-bold">
+                        {Math.round(b.usage_pct)}%
+                      </div>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-bold">
+                            {b.category_icon} {b.category}
+                          </p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {formatCurrency(b.actual_spend, currency)} of{' '}
+                            {formatCurrency(b.limit, currency)}
+                          </p>
+                        </div>
+                        <Badge variant={STATUS_VARIANT[b.status]} className="capitalize">
+                          {b.status}
+                        </Badge>
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${pct}%`,
+                            background: RING_COLOR[b.status],
+                          }}
+                        />
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {b.remaining >= 0
+                          ? `${formatCurrency(b.remaining, currency)} remaining`
+                          : `${formatCurrency(-b.remaining, currency)} over limit`}
+                      </p>
                     </div>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="truncate font-bold">
-                        {b.category_icon} {b.category}
-                      </p>
-                      <Badge variant={STATUS_VARIANT[b.status]}>{b.status}</Badge>
-                    </div>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {formatCurrency(b.actual_spend, currency)} of {formatCurrency(b.limit, currency)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {b.remaining >= 0
-                        ? `${formatCurrency(b.remaining, currency)} remaining`
-                        : `${formatCurrency(-b.remaining, currency)} over`}
-                    </p>
-                    <div className="mt-2 flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setEditing(b);
-                          setModalOpen(true);
-                        }}
-                      >
-                        <Pencil className="mr-1 h-3 w-3" /> Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => deleteMutation.mutate(b.id)}
-                      >
-                        <Trash2 className="mr-1 h-3 w-3" /> Delete
-                      </Button>
-                      <Button
-                        variant="link"
-                        size="sm"
-                        onClick={() => {
-                          setCategoryDrill({ categoryId: b.category, label: b.category });
-                          scrollTo('transactions');
-                        }}
-                      >
-                        View
-                      </Button>
-                    </div>
+                  <div className="flex flex-wrap gap-1.5 border-t border-border pt-3">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEditing(b);
+                        setModalOpen(true);
+                      }}
+                    >
+                      <Pencil className="mr-1 h-3 w-3" /> Edit
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => deleteMutation.mutate(b.id)}
+                    >
+                      <Trash2 className="mr-1 h-3 w-3" /> Delete
+                    </Button>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={() => {
+                        setCategoryDrill({ categoryId: b.category, label: b.category });
+                        scrollTo('transactions');
+                      }}
+                    >
+                      View
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
