@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
@@ -37,8 +37,14 @@ class ParseResult:
     reference_id: str | None = None
     bank: str = ""
     parser_version: int = 1
+    parser_name: str | None = None
+    pattern_version: int = 1
+    confidence_version: int = 1
+    normalization_version: int = 1
     merchant_source: str = "missing"  # exact | inferred | generic | missing
     used_fallback: bool = False  # True when the generic fallback parser handled this email
+    validation_errors: list[str] = field(default_factory=list)
+    field_confidence: dict[str, float] = field(default_factory=dict)
 
     # Computed
     confidence_score: float = 0.0
@@ -51,20 +57,34 @@ class ParseResult:
         - date found      → +20
         - type found      → +10
         """
+        field_scores: dict[str, float] = {
+            "amount": 0.0,
+            "merchant": 0.0,
+            "date": 0.0,
+            "type": 0.0,
+            "reference": 1.0 if self.reference_id else 0.0,
+            "account": 1.0 if self.account_last4 else 0.0,
+            "currency": 1.0 if self.currency else 0.0,
+        }
         score = 0
         if self.amount is not None and self.amount > 0:
             score += CONFIDENCE_WEIGHT_AMOUNT
+            field_scores["amount"] = 1.0
         if self.merchant_raw:
             merchant_score = CONFIDENCE_WEIGHT_MERCHANT.get(
                 self.merchant_source, CONFIDENCE_WEIGHT_MERCHANT["exact"]
             )
             score += merchant_score
+            field_scores["merchant"] = merchant_score / CONFIDENCE_WEIGHT_MERCHANT["exact"]
         if self.date is not None:
             score += CONFIDENCE_WEIGHT_DATE
+            field_scores["date"] = 1.0
         if self.transaction_type is not None:
             score += CONFIDENCE_WEIGHT_TYPE
+            field_scores["type"] = 1.0
 
         self.confidence_score = score / 100.0
+        self.field_confidence = field_scores
         return self.confidence_score
 
     @property

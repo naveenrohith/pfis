@@ -77,6 +77,8 @@ class ParserRegistry:
         # Parse
         result = parser.parse(subject, body)
         result.used_fallback = parser is self._fallback
+        result.parser_name = parser.__class__.__name__
+        result.parser_version = getattr(parser, "VERSION", result.parser_version)
 
         # Override bank name if we know it
         if is_known:

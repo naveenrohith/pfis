@@ -33,6 +33,7 @@ class User(Base):
     sync_runs = relationship("SyncRun", back_populates="user", lazy="select")
     jobs = relationship("BackgroundJob", back_populates="user", lazy="select")
     goals = relationship("Goal", back_populates="user", lazy="select")
+    pipeline_events = relationship("PipelineEvent", back_populates="user", lazy="select")
 
     def __repr__(self) -> str:
         return f"<User {self.email}>"

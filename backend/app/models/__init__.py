@@ -13,6 +13,7 @@ from app.models.sync import (
     Goal,
     OAuthState,
     ParseFailure,
+    PipelineEvent,
     SyncRun,
     UserCorrection,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "Budget",
     "UserCorrection",
     "ParseFailure",
+    "PipelineEvent",
     "BackgroundJob",
     "Goal",
     "OAuthState",

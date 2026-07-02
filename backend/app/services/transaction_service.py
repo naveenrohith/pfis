@@ -176,6 +176,7 @@ class TransactionService:
             account_last4=data.account_last4,
             reference_id=data.reference_id,
             confidence_score=data.confidence_score,
+            parser_version=data.parser_version,
             reviewed_flag=data.confidence_score >= AUTO_REVIEW_THRESHOLD,
             reviewed_at=(
                 datetime.now(UTC) if data.confidence_score >= AUTO_REVIEW_THRESHOLD else None

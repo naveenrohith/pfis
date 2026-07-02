@@ -111,7 +111,14 @@ class ParseFailure(Base):
         String(36), ForeignKey("raw_emails.id"), nullable=False, index=True
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_stage: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    parser_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     parser_version: Mapped[int] = mapped_column(Integer, default=1)
+    pattern_version: Mapped[int] = mapped_column(Integer, default=1)
+    confidence_version: Mapped[int] = mapped_column(Integer, default=1)
+    normalization_version: Mapped[int] = mapped_column(Integer, default=1)
+    diagnostic_json: Mapped[str] = mapped_column(Text, default="{}")
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     last_retry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -121,6 +128,35 @@ class ParseFailure(Base):
 
     def __repr__(self) -> str:
         return f"<ParseFailure retries={self.retry_count} resolved={self.resolved}>"
+
+
+class PipelineEvent(Base):
+    """Non-secret event log for parser and transaction pipeline observability."""
+
+    __tablename__ = "pipeline_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
+    )
+    email_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("raw_emails.id"), nullable=True, index=True)
+    transaction_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("transactions.id"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    stage: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    parser_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    parser_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+
+    user = relationship("User", back_populates="pipeline_events")
+
+    def __repr__(self) -> str:
+        return f"<PipelineEvent {self.event_type}:{self.status}>"
 
 
 class BackgroundJob(Base):

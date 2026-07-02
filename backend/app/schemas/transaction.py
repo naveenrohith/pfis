@@ -31,6 +31,7 @@ class TransactionCreate(BaseModel):
     account_last4: str | None = Field(None, max_length=4)
     reference_id: str | None = None
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    parser_version: int = Field(default=1, ge=1)
     source_email_id: str | None = None
 
 
