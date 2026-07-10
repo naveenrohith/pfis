@@ -146,7 +146,9 @@ class IngestionCoordinator:
                         user_id,
                         ConnectorCursor(history_id=account.last_history_id),
                     )
-                return await connector.fetch_backfill(user_id, BackfillOptions(max_results=max_results))
+                return await connector.fetch_backfill(
+                    user_id, BackfillOptions(max_results=max_results)
+                )
             except Exception as exc:
                 error_type = classify_connector_exception(exc)
                 if error_type == ConnectorErrorType.TRANSIENT and attempts < MAX_TRANSIENT_ATTEMPTS:
@@ -155,7 +157,9 @@ class IngestionCoordinator:
                 raise
 
     async def _get_gmail_account(self, gmail_account_id: str) -> GmailAccount:
-        result = await self.db.execute(select(GmailAccount).where(GmailAccount.id == gmail_account_id))
+        result = await self.db.execute(
+            select(GmailAccount).where(GmailAccount.id == gmail_account_id)
+        )
         account = result.scalar_one_or_none()
         if account is None:
             raise ValueError(f"Gmail account {gmail_account_id} not found")
@@ -170,7 +174,9 @@ class IngestionCoordinator:
     ) -> None:
         error_type = classify_connector_exception(exc)
         account = await self._get_gmail_account(gmail_account_id)
-        account.auto_sync_status = "paused" if error_type == ConnectorErrorType.PERMANENT else "error"
+        account.auto_sync_status = (
+            "paused" if error_type == ConnectorErrorType.PERMANENT else "error"
+        )
         account.auto_sync_error = str(exc)
         account.last_sync_started_at = sync_run.start_time
         sync_run.status = SyncStatus.FAILED
@@ -229,5 +235,6 @@ def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in payload.items()
-        if key not in {"errors", "classifications"} and isinstance(value, (str, int, float, bool, type(None), dict))
+        if key not in {"errors", "classifications"}
+        and isinstance(value, str | int | float | bool | type(None) | dict)
     }

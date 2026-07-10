@@ -58,9 +58,9 @@ class IntelligenceService:
 
         result = await self.db.execute(
             select(
-                func.coalesce(Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown").label(
-                    "merchant"
-                ),
+                func.coalesce(
+                    Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown"
+                ).label("merchant"),
                 Category.id.label("category_id"),
                 Category.name.label("category_name"),
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
@@ -129,7 +129,9 @@ class IntelligenceService:
         return MerchantDetail(
             **summary.model_dump(),
             aliases=parse_merchant_aliases(merchant_row.aliases) if merchant_row else [],
-            default_category_id=merchant_row.category_default_id if merchant_row else summary.category_id,
+            default_category_id=(
+                merchant_row.category_default_id if merchant_row else summary.category_id
+            ),
             latest_transactions=txns,
         )
 
@@ -150,7 +152,9 @@ class IntelligenceService:
         if data.default_category_id is not None:
             merchant.category_default_id = data.default_category_id
 
-        aliases = data.aliases if data.aliases is not None else parse_merchant_aliases(merchant.aliases)
+        aliases = (
+            data.aliases if data.aliases is not None else parse_merchant_aliases(merchant.aliases)
+        )
         if merchant_name.lower() != normalized_name.lower() and merchant_name not in aliases:
             aliases.append(merchant_name)
         merchant.aliases = json.dumps(sorted({a.strip() for a in aliases if a and a.strip()}))
@@ -222,7 +226,9 @@ class IntelligenceService:
                     icon=category.icon,
                     total_spend=spend["total"],
                     transaction_count=spend["count"],
-                    month_change_pct=_pct_change(spend["total"], previous_spend.get(category.id, 0.0)),
+                    month_change_pct=_pct_change(
+                        spend["total"], previous_spend.get(category.id, 0.0)
+                    ),
                     budget_limit=budget_limit,
                     budget_usage_pct=(
                         round(spend["total"] / budget_limit * 100, 1)
@@ -249,9 +255,7 @@ class IntelligenceService:
         out.sort(key=lambda c: (c.total_spend == 0, -c.total_spend, c.name))
         return CategoryIntelligenceResponse(month=month, year=year, categories=out)
 
-    async def cash_flow_projection(
-        self, user_id: str, month: int, year: int
-    ) -> CashFlowProjection:
+    async def cash_flow_projection(self, user_id: str, month: int, year: int) -> CashFlowProjection:
         income, spend = await self._monthly_income_spend(user_id, month, year)
         days_in_month = calendar.monthrange(year, month)[1]
         today = date.today()
@@ -277,10 +281,14 @@ class IntelligenceService:
     async def month_comparison(self, user_id: str, month: int, year: int) -> MonthComparison:
         previous_month, previous_year = _prev_month(month, year)
         income, spend = await self._monthly_income_spend(user_id, month, year)
-        prev_income, prev_spend = await self._monthly_income_spend(user_id, previous_month, previous_year)
+        prev_income, prev_spend = await self._monthly_income_spend(
+            user_id, previous_month, previous_year
+        )
 
         current_categories = await self._category_name_spend_map(user_id, month, year)
-        previous_categories = await self._category_name_spend_map(user_id, previous_month, previous_year)
+        previous_categories = await self._category_name_spend_map(
+            user_id, previous_month, previous_year
+        )
         category_deltas = []
         for name in sorted(set(current_categories) | set(previous_categories)):
             current = current_categories.get(name, 0.0)
@@ -311,9 +319,7 @@ class IntelligenceService:
             category_deltas=category_deltas[:8],
         )
 
-    async def financial_health(
-        self, user_id: str, month: int, year: int
-    ) -> FinancialHealthScore:
+    async def financial_health(self, user_id: str, month: int, year: int) -> FinancialHealthScore:
         income, spend = await self._monthly_income_spend(user_id, month, year)
         savings_rate = ((income - spend) / income * 100) if income > 0 else 0.0
         budget_adherence = await self._budget_adherence(user_id, month, year)
@@ -368,7 +374,9 @@ class IntelligenceService:
             .where(Goal.user_id == user_id)
             .order_by(Goal.is_active.desc(), Goal.created_at.desc())
         )
-        return [await self._goal_response(goal, user_id, month, year) for goal in result.scalars().all()]
+        return [
+            await self._goal_response(goal, user_id, month, year) for goal in result.scalars().all()
+        ]
 
     async def create_goal(self, user_id: str, data: GoalCreate) -> GoalResponse:
         now = datetime.now(UTC)
@@ -411,7 +419,11 @@ class IntelligenceService:
             progress = current / goal.target_amount * 100 if goal.target_amount > 0 else 0.0
             status = "achieved" if current >= goal.target_amount else "tracking"
         else:
-            progress = (goal.target_amount - current) / goal.target_amount * 100 if goal.target_amount > 0 else 0.0
+            progress = (
+                (goal.target_amount - current) / goal.target_amount * 100
+                if goal.target_amount > 0
+                else 0.0
+            )
             status = "at_risk" if current > goal.target_amount else "tracking"
         return GoalResponse(
             id=goal.id,
@@ -440,13 +452,18 @@ class IntelligenceService:
         )
         return sum(float(r.get("avg_amount", 0)) for r in recurring)
 
-    async def _monthly_income_spend(self, user_id: str, month: int, year: int) -> tuple[float, float]:
+    async def _monthly_income_spend(
+        self, user_id: str, month: int, year: int
+    ) -> tuple[float, float]:
         result = await self.db.execute(
             select(
                 func.coalesce(
                     func.sum(
                         case(
-                            (Transaction.transaction_type == TransactionType.CREDIT, Transaction.amount),
+                            (
+                                Transaction.transaction_type == TransactionType.CREDIT,
+                                Transaction.amount,
+                            ),
                             else_=0,
                         )
                     ),
@@ -455,7 +472,10 @@ class IntelligenceService:
                 func.coalesce(
                     func.sum(
                         case(
-                            (Transaction.transaction_type == TransactionType.DEBIT, Transaction.amount),
+                            (
+                                Transaction.transaction_type == TransactionType.DEBIT,
+                                Transaction.amount,
+                            ),
                             else_=0,
                         )
                     ),
@@ -473,9 +493,9 @@ class IntelligenceService:
     async def _merchant_spend_map(self, user_id: str, month: int, year: int) -> dict[str, float]:
         result = await self.db.execute(
             select(
-                func.coalesce(Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown").label(
-                    "merchant"
-                ),
+                func.coalesce(
+                    Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown"
+                ).label("merchant"),
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
             )
             .where(
@@ -484,11 +504,15 @@ class IntelligenceService:
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
-            .group_by(func.coalesce(Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown"))
+            .group_by(
+                func.coalesce(Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown")
+            )
         )
         return {_merchant_key(row.merchant).lower(): float(row.total or 0) for row in result.all()}
 
-    async def _category_spend_map(self, user_id: str, month: int, year: int) -> dict[str | None, float]:
+    async def _category_spend_map(
+        self, user_id: str, month: int, year: int
+    ) -> dict[str | None, float]:
         result = await self.db.execute(
             select(
                 Transaction.category_id,
@@ -504,7 +528,9 @@ class IntelligenceService:
         )
         return {row.category_id: float(row.total or 0) for row in result.all()}
 
-    async def _category_name_spend_map(self, user_id: str, month: int, year: int) -> dict[str, float]:
+    async def _category_name_spend_map(
+        self, user_id: str, month: int, year: int
+    ) -> dict[str, float]:
         result = await self.db.execute(
             select(
                 func.coalesce(Category.name, "Uncategorized").label("category"),
@@ -527,9 +553,9 @@ class IntelligenceService:
         result = await self.db.execute(
             select(
                 Transaction.category_id,
-                func.coalesce(Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown").label(
-                    "merchant"
-                ),
+                func.coalesce(
+                    Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown"
+                ).label("merchant"),
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
                 func.count(Transaction.id).label("count"),
             )
@@ -611,7 +637,9 @@ class IntelligenceService:
             extract("year", Transaction.transaction_date) == year,
         ]
         if target_key:
-            conditions.append(or_(Transaction.category_id == target_key, Category.name == target_key))
+            conditions.append(
+                or_(Transaction.category_id == target_key, Category.name == target_key)
+            )
         result = await self.db.execute(
             select(func.coalesce(func.sum(Transaction.amount), 0))
             .join(Category, Transaction.category_id == Category.id, isouter=True)
@@ -627,7 +655,11 @@ class IntelligenceService:
             return 100.0
         scores = []
         for budget in budgets:
-            usage = category_spend.get(budget.category_id, 0.0) / budget.monthly_limit if budget.monthly_limit > 0 else 0
+            usage = (
+                category_spend.get(budget.category_id, 0.0) / budget.monthly_limit
+                if budget.monthly_limit > 0
+                else 0
+            )
             scores.append(max(0.0, 100.0 - max(0.0, usage - 1.0) * 100.0))
         return sum(scores) / len(scores)
 

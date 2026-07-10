@@ -57,7 +57,9 @@ class Transaction(Base):
         default=PaymentMethod.OTHER,
     )
     transaction_status: Mapped[str] = mapped_column(String(24), nullable=False, default="completed")
-    transaction_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    transaction_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     merchant_raw: Mapped[str] = mapped_column(String(255), nullable=True)
     merchant_normalized: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
     category_id: Mapped[str] = mapped_column(String(36), ForeignKey("categories.id"), nullable=True)

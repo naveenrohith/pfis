@@ -327,13 +327,11 @@ def classify_source_record(sender: str, subject: str, body: str) -> Classificati
     for classification, patterns, reason in SPECIAL_PATTERNS:
         matches = _matches(patterns, combined_text)
         requires_amount = classification != ClassificationType.FAILED_PAYMENT
-        if (
-            matches
-            and money_movement_matches
-            and (has_amount or not requires_amount)
-        ):
+        if matches and money_movement_matches and (has_amount or not requires_amount):
             confidence = 0.90 if is_known else 0.72
-            return ClassificationResult(classification, institution or "UNKNOWN", confidence, matches, reason)
+            return ClassificationResult(
+                classification, institution or "UNKNOWN", confidence, matches, reason
+            )
 
     if is_known and txn_matches and has_amount:
         return ClassificationResult(

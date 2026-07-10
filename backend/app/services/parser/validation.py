@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 
 from app.services.parser.base_parser import ParseResult
 
@@ -33,16 +33,24 @@ def validate_parse_result(parse_result: ParseResult) -> list[ValidationIssue]:
     else:
         today = datetime.now(UTC).date()
         if parse_result.date.year < 2000 or parse_result.date > today.replace(year=today.year + 1):
-            issues.append(ValidationIssue("impossible_date", "Transaction date is outside supported range"))
+            issues.append(
+                ValidationIssue("impossible_date", "Transaction date is outside supported range")
+            )
 
     if parse_result.currency and parse_result.currency.upper() not in SUPPORTED_CURRENCIES:
         issues.append(ValidationIssue("unsupported_currency", "Currency is not supported"))
 
     if parse_result.account_last4 and not re.fullmatch(r"\d{4}", parse_result.account_last4):
-        issues.append(ValidationIssue("malformed_account", "Account suffix must contain four digits"))
+        issues.append(
+            ValidationIssue("malformed_account", "Account suffix must contain four digits")
+        )
 
-    if parse_result.reference_id and not re.fullmatch(r"[A-Za-z0-9._/-]{4,100}", parse_result.reference_id):
-        issues.append(ValidationIssue("malformed_reference", "Reference id contains unsupported characters"))
+    if parse_result.reference_id and not re.fullmatch(
+        r"[A-Za-z0-9._/-]{4,100}", parse_result.reference_id
+    ):
+        issues.append(
+            ValidationIssue("malformed_reference", "Reference id contains unsupported characters")
+        )
 
     parse_result.validation_errors = [issue.code for issue in issues]
     return issues

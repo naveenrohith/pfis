@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "hdfc-upi-debit",
+      "sender": "HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
+      "subject": "You have done a UPI txn. Check details!",
+      "body": "Rs.72.00 is debited from your account ending 1441 towards VPA shop@upi (SAMPLE MERCHANT) on 09-07-26. UPI transaction reference no.: 125997704118.",
+      "expected": {"bank": "HDFC", "amount": 72.0, "transaction_type": "debit", "merchant_raw": "SAMPLE MERCHANT", "account_last4": "1441", "payment_method": "upi", "min_confidence": 1.0}
+    },
+    {
+      "id": "sbi-debit-fallback-merchant",
+      "sender": "alerts@sbi.co.in",
+      "subject": "SBI Alert",
+      "body": "Your a/c no. XXXXXXXX1234 is debited for Rs.230.00 on 05-05-2026. Ref No 412345678901",
+      "expected": {"bank": "SBI", "amount": 230.0, "transaction_type": "debit", "merchant_raw": "BANK DEBIT", "account_last4": "1234", "min_confidence": 0.8}
+    },
+    {
+      "id": "icici-credit-card-debit",
+      "sender": "alerts@icicibank.com",
+      "subject": "ICICI Card Alert",
+      "body": "INR 499.00 has been debited from your ICICI Bank Account XX5678 on 05-May-2026 towards NETFLIX.COM on Credit Card.",
+      "expected": {"bank": "ICICI", "amount": 499.0, "transaction_type": "debit", "merchant_raw": "NETFLIX", "account_last4": "5678", "payment_method": "credit_card", "min_confidence": 1.0}
+    },
+    {
+      "id": "generic-upi-fallback",
+      "sender": "alerts@example-payments.test",
+      "subject": "Payment successful",
+      "body": "Payment of Rs.750.00 to BOOKMYSHOW via UPI on 07-05-2026. Ref No: 555555123456.",
+      "expected": {"bank": "GENERIC", "amount": 750.0, "transaction_type": "debit", "merchant_raw": "BOOKMYSHOW", "payment_method": "upi", "min_confidence": 1.0}
+    }
+  ]
+}

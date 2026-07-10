@@ -49,6 +49,8 @@ async def update_merchant(
 ):
     user_id = resolve_user_scope(user_id, current_user)
     try:
-        return await IntelligenceService(db).update_merchant(user_id, merchant_key, data, month, year)
+        return await IntelligenceService(db).update_merchant(
+            user_id, merchant_key, data, month, year
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

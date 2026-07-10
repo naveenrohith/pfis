@@ -122,7 +122,9 @@ async def test_pipeline_records_dlq_metadata_and_metrics(client, test_session_fa
     assert metrics["parse_attempts"] >= 1
 
 
-async def test_reprocess_dry_run_compares_without_mutating_transactions(client, test_session_factory):
+async def test_reprocess_dry_run_compares_without_mutating_transactions(
+    client, test_session_factory
+):
     user = await create_user(client, "phase9replay")
 
     async with test_session_factory() as db:

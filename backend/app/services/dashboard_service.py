@@ -222,7 +222,9 @@ class WorkspaceService:
             merchant = txn.merchant_normalized or txn.merchant_raw or "Unknown"
             event_type = self._classify_event(txn, category_name, recurring_merchants)
             direction = (
-                "in" if txn.transaction_type in (TransactionType.CREDIT, TransactionType.REFUND) else "out"
+                "in"
+                if txn.transaction_type in (TransactionType.CREDIT, TransactionType.REFUND)
+                else "out"
             )
             events.append(
                 TimelineEvent(
@@ -322,7 +324,11 @@ class WorkspaceService:
                     ),
                     description=(
                         f"Spent ₹{b['actual']:,.0f} of a ₹{b['limit']:,.0f} limit. "
-                        + ("Review this category before it grows." if over else "Slow down to stay on track.")
+                        + (
+                            "Review this category before it grows."
+                            if over
+                            else "Slow down to stay on track."
+                        )
                     ),
                     action_label="Open budgets",
                     target="budgets",

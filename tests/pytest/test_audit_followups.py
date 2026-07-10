@@ -87,9 +87,7 @@ async def test_monthly_summary_cache_is_rebuilt_after_transaction_correction(
     user = await create_user(client, "monthly-summary")
     async with test_session_factory() as db:
         service = TransactionService(db)
-        transaction = await service.create_transaction(
-            user["id"], _txn(reference_id="SUMMARY-ONE")
-        )
+        transaction = await service.create_transaction(user["id"], _txn(reference_id="SUMMARY-ONE"))
 
         first_summary = await service.get_monthly_summary(user["id"], 2, 2026)
         cached = await db.execute(

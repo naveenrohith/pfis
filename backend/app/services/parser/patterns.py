@@ -132,9 +132,13 @@ def detect_payment_method(text: str) -> str:
 
 def detect_transaction_status(text: str) -> str:
     text_lower = text.lower()
-    if "reversal" in text_lower and any(token in text_lower for token in ("initiated", "allow up to", "pending")):
+    if "reversal" in text_lower and any(
+        token in text_lower for token in ("initiated", "allow up to", "pending")
+    ):
         return "reversal_pending"
-    if "refund" in text_lower and any(token in text_lower for token in ("initiated", "allow up to", "pending")):
+    if "refund" in text_lower and any(
+        token in text_lower for token in ("initiated", "allow up to", "pending")
+    ):
         return "refund_pending"
     return "completed"
 
@@ -233,7 +237,9 @@ def extract_transaction_timestamp(text: str) -> datetime | None:
         if not month:
             return None
         ist = timezone(timedelta(hours=5, minutes=30))
-        return datetime(int(year), month, int(day), int(hour), int(minute), int(second or 0), tzinfo=ist)
+        return datetime(
+            int(year), month, int(day), int(hour), int(minute), int(second or 0), tzinfo=ist
+        )
     except ValueError:
         return None
 

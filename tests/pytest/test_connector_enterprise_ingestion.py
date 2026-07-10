@@ -26,9 +26,7 @@ def test_gmail_connector_converts_message_to_source_record():
                 {"name": "From", "value": "HDFC Bank <alerts@hdfcbank.net>"},
                 {"name": "Subject", "value": "Payment alert"},
             ],
-            "body": {
-                "data": "UGF5bWVudCBvZiBScy43NTAuMDAgdG8gQk9PS01ZU0hPVyB2aWEgVVBJLg=="
-            },
+            "body": {"data": "UGF5bWVudCBvZiBScy43NTAuMDAgdG8gQk9PS01ZU0hPVyB2aWEgVVBJLg=="},
         },
     }
 
@@ -44,11 +42,27 @@ def test_gmail_connector_converts_message_to_source_record():
 
 def test_classification_engine_supports_enterprise_categories():
     samples = [
-        ("salary credited", "Your salary of INR 100000 has been credited", ClassificationType.SALARY),
-        ("refund processed", "Refund of INR 500 credited to your account", ClassificationType.REFUND),
+        (
+            "salary credited",
+            "Your salary of INR 100000 has been credited",
+            ClassificationType.SALARY,
+        ),
+        (
+            "refund processed",
+            "Refund of INR 500 credited to your account",
+            ClassificationType.REFUND,
+        ),
         ("payment failed", "Your payment failed for INR 1200", ClassificationType.FAILED_PAYMENT),
-        ("subscription charged", "Subscription auto-pay of INR 299 completed", ClassificationType.SUBSCRIPTION),
-        ("SIP update", "Your mutual fund SIP of INR 5000 was processed", ClassificationType.INVESTMENT),
+        (
+            "subscription charged",
+            "Subscription auto-pay of INR 299 completed",
+            ClassificationType.SUBSCRIPTION,
+        ),
+        (
+            "SIP update",
+            "Your mutual fund SIP of INR 5000 was processed",
+            ClassificationType.INVESTMENT,
+        ),
         ("loan EMI", "Your loan EMI of INR 12000 has been debited", ClassificationType.LOAN),
     ]
 
@@ -98,7 +112,9 @@ async def test_ingestion_coordinator_retries_transient_failure_and_audits(
             max_results=10,
         )
         audits = await db.execute(
-            select(ConnectorAuditEvent).where(ConnectorAuditEvent.connector_account_id == account_id)
+            select(ConnectorAuditEvent).where(
+                ConnectorAuditEvent.connector_account_id == account_id
+            )
         )
         event_types = [event.event_type for event in audits.scalars().all()]
 
@@ -109,7 +125,10 @@ async def test_ingestion_coordinator_retries_transient_failure_and_audits(
 
 
 def test_connector_error_classifier_marks_permanent_credentials():
-    assert classify_connector_exception(Exception("invalid_grant revoked")) == ConnectorErrorType.PERMANENT
+    assert (
+        classify_connector_exception(Exception("invalid_grant revoked"))
+        == ConnectorErrorType.PERMANENT
+    )
 
 
 def test_connector_error_classifier_marks_dns_failures_transient():

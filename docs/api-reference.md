@@ -239,6 +239,27 @@ classification.
 Keep this file updated whenever paths, query parameters, response headers, or
 response shapes change. Route source lives in `backend/app/api/routes`.
 
+## Error contract
+
+Successful response bodies retain their endpoint-specific schema. API failures
+use this stable envelope and also expose the same correlation value through
+`X-Request-ID`:
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "Transaction not found",
+    "details": null,
+    "request_id": "trace-abc-123"
+  }
+}
+```
+
+Validation errors use `code: "validation_error"` and include Pydantic error
+items in `details`; server errors return a generic message and do not expose
+internal exception text.
+
 ## Health
 
 | Method | Path | Query | Success | Returns |

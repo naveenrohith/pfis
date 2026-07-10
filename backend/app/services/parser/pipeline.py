@@ -5,8 +5,8 @@ The core engine: Raw Email → Parse → Normalize → Categorize → Store Tran
 Processes unprocessed raw emails end-to-end.
 """
 
-import logging
 import json
+import logging
 from collections.abc import Iterable
 from datetime import UTC, date, datetime
 from time import perf_counter
@@ -20,6 +20,8 @@ from app.models.email import RawEmail
 from app.models.sync import ParseFailure, PipelineEvent
 from app.schemas.transaction import PaymentMethodEnum, TransactionCreate
 from app.schemas.transaction import TransactionTypeEnum as TransactionSchemaType
+from app.services.connectors.source_record import SourceType
+from app.services.domain_events import DomainEvent, domain_event_dispatcher
 from app.services.gmail.email_filter import EmailType, classify_email
 from app.services.parser.base_parser import BaseParser, ParseResult
 from app.services.parser.confidence import score_parse_result
@@ -30,10 +32,12 @@ from app.services.parser.normalizer import (
     normalize_merchant,
 )
 from app.services.parser.registry import get_parser_registry
-from app.services.parser.validation import ValidationIssue, validate_parse_result, validation_summary
+from app.services.parser.validation import (
+    ValidationIssue,
+    validate_parse_result,
+    validation_summary,
+)
 from app.services.transaction_service import DuplicateTransactionError, TransactionService
-from app.services.connectors.source_record import SourceType
-from app.services.domain_events import DomainEvent, domain_event_dispatcher
 
 logger = logging.getLogger(__name__)
 _TEXT_NORMALIZER = BaseParser()
@@ -70,7 +74,11 @@ def _public_parse_diagnostics(parse_result: ParseResult | None) -> dict[str, Any
         "type": parse_result.transaction_type.value if parse_result.transaction_type else None,
         "payment_method": parse_result.payment_method,
         "transaction_status": parse_result.transaction_status,
-        "transaction_timestamp": parse_result.transaction_timestamp.isoformat() if parse_result.transaction_timestamp else None,
+        "transaction_timestamp": (
+            parse_result.transaction_timestamp.isoformat()
+            if parse_result.transaction_timestamp
+            else None
+        ),
         "merchant_source": parse_result.merchant_source,
         "date_present": parse_result.date is not None,
         "account_present": parse_result.account_last4 is not None,
@@ -146,7 +154,11 @@ def _attach_parse_result(email_result: dict[str, Any], parse_result: ParseResult
     )
     email_result["payment_method"] = parse_result.payment_method
     email_result["transaction_status"] = parse_result.transaction_status
-    email_result["transaction_timestamp"] = parse_result.transaction_timestamp.isoformat() if parse_result.transaction_timestamp else None
+    email_result["transaction_timestamp"] = (
+        parse_result.transaction_timestamp.isoformat()
+        if parse_result.transaction_timestamp
+        else None
+    )
     email_result["merchant_raw"] = parse_result.merchant_raw
     email_result["merchant_source"] = parse_result.merchant_source
     email_result["date"] = str(parse_result.date) if parse_result.date else None
@@ -652,7 +664,9 @@ async def get_pipeline_metrics(
 
     parsed_events = [event for event in events if event.event_type == "Parsed"]
     created_events = [event for event in events if event.event_type == "TransactionCreated"]
-    failed_events = [event for event in events if event.event_type in {"ParseFailed", "ValidationFailed"}]
+    failed_events = [
+        event for event in events if event.event_type in {"ParseFailed", "ValidationFailed"}
+    ]
     duplicate_events = [event for event in events if event.event_type == "DuplicateDetected"]
     fallback_events = [
         event
@@ -686,7 +700,9 @@ async def get_pipeline_metrics(
     confidence_values = [
         event.confidence_score for event in parsed_events if event.confidence_score is not None
     ]
-    duration_values = [event.duration_ms for event in parsed_events if event.duration_ms is not None]
+    duration_values = [
+        event.duration_ms for event in parsed_events if event.duration_ms is not None
+    ]
 
     return {
         "user_id": user_id,
@@ -696,17 +712,17 @@ async def get_pipeline_metrics(
         "parsed_count": len(parsed_events),
         "transaction_created_count": len(created_events),
         "parse_success_rate": _pct(len(created_events), max(parse_attempts, 1)),
-        "average_confidence": round(sum(confidence_values) / len(confidence_values), 3)
-        if confidence_values
-        else 0.0,
+        "average_confidence": (
+            round(sum(confidence_values) / len(confidence_values), 3) if confidence_values else 0.0
+        ),
         "fallback_rate": _pct(len(fallback_events), max(len(parsed_events), 1)),
         "unknown_merchant_rate": _pct(len(unknown_merchant_events), max(len(parsed_events), 1)),
         "duplicate_rate": _pct(len(duplicate_events), max(parse_attempts, 1)),
         "retry_count": retry_count,
         "dlq_size": dlq_size,
-        "average_parse_time_ms": round(sum(duration_values) / len(duration_values), 3)
-        if duration_values
-        else 0.0,
+        "average_parse_time_ms": (
+            round(sum(duration_values) / len(duration_values), 3) if duration_values else 0.0
+        ),
     }
 
 
@@ -722,7 +738,11 @@ async def list_parse_failures(
         .options(selectinload(ParseFailure.email).selectinload(RawEmail.transaction))
         .join(RawEmail, ParseFailure.email_id == RawEmail.id)
         .where(RawEmail.user_id == user_id)
-        .order_by(ParseFailure.resolved.asc(), ParseFailure.last_retry_at.desc().nullslast(), ParseFailure.id.asc())
+        .order_by(
+            ParseFailure.resolved.asc(),
+            ParseFailure.last_retry_at.desc().nullslast(),
+            ParseFailure.id.asc(),
+        )
     )
     count_query = (
         select(func.count(ParseFailure.id))
@@ -810,7 +830,9 @@ async def reprocess_raw_emails(
         for email in emails:
             parser_body = _normalize_email_body(email.body or "") or (email.body or "")
             parse_started_at = perf_counter()
-            parse_result = registry.parse_email(email.sender or "", email.subject or "", parser_body)
+            parse_result = registry.parse_email(
+                email.sender or "", email.subject or "", parser_body
+            )
             score_parse_result(parse_result)
             issues = validate_parse_result(parse_result)
             comparisons.append(
@@ -820,7 +842,11 @@ async def reprocess_raw_emails(
                     "existing_transaction_id": email.transaction.id if email.transaction else None,
                     "new_result": {
                         "amount": parse_result.amount,
-                        "type": parse_result.transaction_type.value if parse_result.transaction_type else None,
+                        "type": (
+                            parse_result.transaction_type.value
+                            if parse_result.transaction_type
+                            else None
+                        ),
                         "merchant_raw": parse_result.merchant_raw,
                         "date": str(parse_result.date) if parse_result.date else None,
                         "confidence": parse_result.confidence_score,

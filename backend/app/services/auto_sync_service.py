@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -42,10 +43,8 @@ async def stop_auto_sync_scheduler() -> None:
     if not _scheduler_task:
         return
     _scheduler_task.cancel()
-    try:
+    with suppress(asyncio.CancelledError):
         await _scheduler_task
-    except asyncio.CancelledError:
-        pass
     _scheduler_task = None
     logger.info("Auto-sync scheduler stopped")
 
@@ -110,7 +109,9 @@ async def _run_account_sync(gmail_account_id: str) -> None:
 
     try:
         async with AsyncSessionLocal() as db:
-            result = await db.execute(select(GmailAccount).where(GmailAccount.id == gmail_account_id))
+            result = await db.execute(
+                select(GmailAccount).where(GmailAccount.id == gmail_account_id)
+            )
             account = result.scalar_one_or_none()
             if account is None or not account.auto_sync_enabled:
                 return
@@ -135,7 +136,10 @@ async def _run_account_sync(gmail_account_id: str) -> None:
         await sync_event_manager.broadcast(
             user_id,
             "sync_completed",
-            {"sync": _public_sync_stats(sync_stats), "pipeline": _public_sync_stats(pipeline_stats)},
+            {
+                "sync": _public_sync_stats(sync_stats),
+                "pipeline": _public_sync_stats(pipeline_stats),
+            },
         )
     except Exception as exc:
         error_type = classify_connector_exception(exc)
@@ -148,7 +152,9 @@ async def _run_account_sync(gmail_account_id: str) -> None:
         else:
             logger.exception("Automatic sync failed for Gmail account %s", gmail_account_id)
         async with AsyncSessionLocal() as db:
-            result = await db.execute(select(GmailAccount).where(GmailAccount.id == gmail_account_id))
+            result = await db.execute(
+                select(GmailAccount).where(GmailAccount.id == gmail_account_id)
+            )
             account = result.scalar_one_or_none()
             if account:
                 account.auto_sync_status = (
@@ -171,5 +177,5 @@ def _public_sync_stats(stats: dict[str, Any]) -> dict[str, Any]:
         key: value
         for key, value in stats.items()
         if key not in {"errors", "classifications"}
-        and isinstance(value, (str, int, float, bool, type(None)))
+        and isinstance(value, str | int | float | bool | type(None))
     }

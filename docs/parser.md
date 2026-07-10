@@ -2,6 +2,13 @@
 
 Parser code lives in `backend/app/services/parser`.
 
+## Sanitized parser corpus
+
+The regression corpus is stored in `tests/parser_corpus/`. It contains synthetic
+notification formats and expected extractions; never add raw emails, complete
+account numbers, personal addresses, or live reference IDs. Every parser-format
+fix must add or update a corpus case and pass `tests/pytest/test_parser_corpus.py`.
+
 ## Components
 
 - `base_parser.py`: `BaseParser`, `ParseResult`, transaction type enum.
@@ -35,4 +42,3 @@ review rather than auto-accepted.
 - Do not silently drop failed parses; record `ParseFailure`.
 - Add regression tests for every parser change.
 - Keep raw email available for reprocessing.
-

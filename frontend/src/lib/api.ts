@@ -36,10 +36,16 @@ const API_BASE = '/api';
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code?: string;
+  requestId?: string;
+  details?: unknown;
+  constructor(message: string, status: number, code?: string, requestId?: string, details?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
+    this.requestId = requestId;
+    this.details = details;
   }
 }
 
@@ -84,13 +90,23 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 
   if (!response.ok) {
     let detail = response.statusText;
+    let code: string | undefined;
+    let requestId: string | undefined;
+    let details: unknown;
     try {
       const errBody = await response.json();
-      detail = (errBody as { detail?: string }).detail || detail;
+      const error = (errBody as {
+        detail?: string;
+        error?: { code?: string; message?: string; request_id?: string; details?: unknown };
+      }).error;
+      detail = error?.message || (errBody as { detail?: string }).detail || detail;
+      code = error?.code;
+      requestId = error?.request_id;
+      details = error?.details;
     } catch {
       // keep statusText
     }
-    throw new ApiError(detail, response.status);
+    throw new ApiError(detail, response.status, code, requestId, details);
   }
 
   if (response.status === 204) return undefined as T;

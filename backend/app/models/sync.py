@@ -140,8 +140,12 @@ class PipelineEvent(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
-    email_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("raw_emails.id"), nullable=True, index=True)
-    transaction_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("transactions.id"), nullable=True, index=True)
+    email_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("raw_emails.id"), nullable=True, index=True
+    )
+    transaction_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("transactions.id"), nullable=True, index=True
+    )
     event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     stage: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
@@ -237,7 +241,9 @@ class ConnectorAuditEvent(Base):
     __tablename__ = "connector_audit_events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True, index=True
+    )
     connector_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     connector_account_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)

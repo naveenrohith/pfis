@@ -5,7 +5,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 Severity = Literal["info", "success", "warning", "danger"]
 GoalType = Literal["savings", "category_reduction", "recurring_reduction"]
 

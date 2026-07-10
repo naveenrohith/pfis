@@ -42,11 +42,15 @@ def extract_transaction_type(text: str) -> TransactionTypeEnum | None:
     return TransactionTypeEnum(raw_type) if raw_type else None
 
 
-def extract_merchant(text: str, transaction_type: TransactionTypeEnum | None) -> tuple[str | None, str]:
+def extract_merchant(
+    text: str, transaction_type: TransactionTypeEnum | None
+) -> tuple[str | None, str]:
     merchant = patterns.extract_merchant(text)
     if merchant:
         return merchant, "exact"
-    inferred = patterns.infer_generic_merchant(text, transaction_type.value if transaction_type else None)
+    inferred = patterns.infer_generic_merchant(
+        text, transaction_type.value if transaction_type else None
+    )
     if inferred:
         return inferred, "generic"
     return None, "missing"

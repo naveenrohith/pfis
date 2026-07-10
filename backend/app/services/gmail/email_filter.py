@@ -1,11 +1,14 @@
 """Compatibility facade for the connector-neutral classification engine."""
 
 from app.services.classification.engine import (
-    KNOWN_BANK_SENDERS,
     ClassificationType as EmailType,
+)
+from app.services.classification.engine import (
     classify_source_record,
     is_known_sender,
 )
+
+__all__ = ["EmailType", "classify_email", "is_known_sender"]
 
 
 def classify_email(sender: str, subject: str, body: str) -> tuple[EmailType, str, float]:

@@ -68,7 +68,9 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(database_module, "AsyncSessionLocal", session_factory, raising=False)
     monkeypatch.setattr(main_module, "AsyncSessionLocal", session_factory, raising=False)
     monkeypatch.setattr(job_service_module, "AsyncSessionLocal", session_factory, raising=False)
-    monkeypatch.setattr(auto_sync_service_module, "AsyncSessionLocal", session_factory, raising=False)
+    monkeypatch.setattr(
+        auto_sync_service_module, "AsyncSessionLocal", session_factory, raising=False
+    )
 
     # Invalidate normalizer merchant cache for test isolation
     from app.services.parser.normalizer import invalidate_merchant_cache

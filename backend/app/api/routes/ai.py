@@ -30,15 +30,31 @@ async def explain_surface(data: ExplainRequest):
 
     surface = data.surface.lower()
     if "budget" in surface:
-        next_actions.extend(["Review the category transactions.", "Adjust the monthly limit if the spend is expected."])
+        next_actions.extend(
+            [
+                "Review the category transactions.",
+                "Adjust the monthly limit if the spend is expected.",
+            ]
+        )
     elif "merchant" in surface:
-        next_actions.extend(["Open the latest transactions.", "Set a default category if this merchant repeats."])
+        next_actions.extend(
+            ["Open the latest transactions.", "Set a default category if this merchant repeats."]
+        )
     elif "category" in surface:
-        next_actions.extend(["Compare the category against last month.", "Check the top merchants driving the total."])
+        next_actions.extend(
+            [
+                "Compare the category against last month.",
+                "Check the top merchants driving the total.",
+            ]
+        )
     elif "health" in surface or "cash" in surface:
-        next_actions.extend(["Review projected month-end net.", "Create a goal for the weakest signal."])
+        next_actions.extend(
+            ["Review projected month-end net.", "Create a goal for the weakest signal."]
+        )
     else:
-        next_actions.extend(["Open the related workspace section.", "Review any unconfirmed transactions first."])
+        next_actions.extend(
+            ["Open the related workspace section.", "Review any unconfirmed transactions first."]
+        )
 
     return ExplainResponse(
         surface=data.surface,

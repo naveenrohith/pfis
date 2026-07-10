@@ -25,15 +25,21 @@ if __name__ == "__main__" and (__package__ is None or __package__ == ""):
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Import all models so SQLAlchemy Base.metadata registers them before create_all()
 import app.models  # noqa: F401
+from app.api.error_responses import (
+    error_response,
+    http_exception_handler,
+    request_validation_exception_handler,
+)
 from app.api.routes import (
     ai,
     analytics,
@@ -120,7 +126,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
+
+
+async def rate_limit_exception_handler(request, exc):
+    return error_response(
+        request,
+        429,
+        code="rate_limited",
+        message="Rate limit exceeded",
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, rate_limit_exception_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 # CORS

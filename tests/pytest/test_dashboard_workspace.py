@@ -70,26 +70,46 @@ async def test_workspace_snapshot_and_timeline_with_data(client: AsyncClient):
     today = date.today()
 
     await _seed_transaction(
-        client, user["id"], cat_id,
-        amount=50000.0, transaction_type="credit",
-        merchant_normalized="Employer", confidence_score=0.95, reference_id="salary",
+        client,
+        user["id"],
+        cat_id,
+        amount=50000.0,
+        transaction_type="credit",
+        merchant_normalized="Employer",
+        confidence_score=0.95,
+        reference_id="salary",
     )
     await _seed_transaction(
-        client, user["id"], cat_id,
-        amount=1200.0, transaction_type="debit",
-        merchant_normalized="Grocery Store", confidence_score=0.92, reference_id="grocery",
+        client,
+        user["id"],
+        cat_id,
+        amount=1200.0,
+        transaction_type="debit",
+        merchant_normalized="Grocery Store",
+        confidence_score=0.92,
+        reference_id="grocery",
     )
     # Low-confidence, unreviewed transaction for review summary
     await _seed_transaction(
-        client, user["id"], cat_id,
-        amount=800.0, transaction_type="debit",
-        merchant_normalized="Unknown Shop", confidence_score=0.5, reference_id="lowconf",
+        client,
+        user["id"],
+        cat_id,
+        amount=800.0,
+        transaction_type="debit",
+        merchant_normalized="Unknown Shop",
+        confidence_score=0.5,
+        reference_id="lowconf",
     )
     # Refund -> should map to an "in" direction refund event
     await _seed_transaction(
-        client, user["id"], cat_id,
-        amount=300.0, transaction_type="refund",
-        merchant_normalized="Online Store", confidence_score=0.9, reference_id="refund",
+        client,
+        user["id"],
+        cat_id,
+        amount=300.0,
+        transaction_type="refund",
+        merchant_normalized="Online Store",
+        confidence_score=0.9,
+        reference_id="refund",
     )
 
     resp = await client.get(
@@ -137,8 +157,12 @@ async def test_workspace_budget_risk_recommendation(client: AsyncClient):
         json={"category_id": cat_id, "monthly_limit": 500.0},
     )
     await _seed_transaction(
-        client, user["id"], cat_id,
-        amount=2000.0, transaction_type="debit", reference_id="overspend",
+        client,
+        user["id"],
+        cat_id,
+        amount=2000.0,
+        transaction_type="debit",
+        reference_id="overspend",
     )
 
     resp = await client.get(
