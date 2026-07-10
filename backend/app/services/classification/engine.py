@@ -35,6 +35,7 @@ class ClassificationResult:
 
 KNOWN_BANK_SENDERS = {
     "alerts@hdfcbank.net": "HDFC",
+    "alerts@hdfcbank.bank.in": "HDFC",
     "alerts@hdfcbank.com": "HDFC",
     "donotreply@hdfcbank.net": "HDFC",
     "alerts@sbi.co.in": "SBI",
@@ -56,6 +57,8 @@ KNOWN_BANK_SENDERS = {
     "creditcard@hdfcbank.net": "HDFC_CC",
     "creditcards@icicibank.com": "ICICI_CC",
     "creditcard@axisbank.com": "AXIS_CC",
+    "noreply@lazypay.in": "LAZYPAY",
+    "no-reply@razorpay.com": "RAZORPAY",
 }
 
 TRANSACTION_KEYWORDS = [
@@ -68,7 +71,9 @@ TRANSACTION_KEYWORDS = [
     r"withdrawn",
     r"deposited",
     r"payment\s+of",
+    r"\bpaid\b",
     r"paid\s+to",
+    r"\breceived\b",
     r"received\s+from",
     r"UPI",
     r"NEFT",
@@ -84,6 +89,31 @@ TRANSACTION_KEYWORDS = [
     r"has\s+been\s+credited",
 ]
 
+# Unlike a broad mention of "transaction" or "UPI", these patterns describe
+# an actual movement of money. They protect the parser from newsletters and
+# product updates that discuss financial topics but are not ledger events.
+MONEY_MOVEMENT_KEYWORDS = [
+    r"payment\s+(?:failed|declined|unsuccessful)",
+    r"transaction\s+(?:failed|declined)",
+    r"\bprocessed\b",
+    r"debited",
+    r"credited",
+    r"spent",
+    r"charged",
+    r"transferred",
+    r"withdrawn",
+    r"deposited",
+    r"payment\s+of",
+    r"\bpaid\b",
+    r"paid\s+to",
+    r"\breceived\b",
+    r"received\s+from",
+    r"purchase",
+    r"refund",
+    r"reversal",
+    r"transaction\s+successful",
+]
+
 OTP_KEYWORDS = [
     r"\bOTP\b",
     r"one.?time.?password",
@@ -93,6 +123,7 @@ OTP_KEYWORDS = [
 ]
 
 PROMO_KEYWORDS = [
+    r"\bpromotion\b",
     r"offer",
     r"discount",
     r"cashback\s+offer",
@@ -122,6 +153,18 @@ PROMO_KEYWORDS = [
     r"\d+%\s+off",
     r"holiday\s+(?:magic|delights|offer|sale)",
     r"festive\s+(?:offer|sale)",
+]
+
+NEWSLETTER_SENDER_PATTERNS = [
+    r"@(?:[a-z0-9-]+\.)?substack\.com\b",
+    r"\binformation@mailers\.hdfcbank\.bank\.in\b",
+]
+
+NEWSLETTER_KEYWORDS = [
+    r"\bdigest\b",
+    r"\bnewsletter\b",
+    r"\bunsubscribe\b",
+    r"view\s+(?:this\s+)?email\s+in\s+(?:your\s+)?browser",
 ]
 
 NON_TRANSACTION_KEYWORDS = [
@@ -191,7 +234,7 @@ SPECIAL_PATTERNS: list[tuple[ClassificationType, list[str], str]] = [
 ]
 
 AMOUNT_PATTERN = re.compile(
-    r"(?:Rs\.?\s?(?:INR\s?)?|INR)\s?[\d,]+(?:\.\d{1,2})?",
+    r"(?:Rs\.?\s?(?:INR\s?)?|INR|\u20B9)\s?[\d,]+(?:\.\d{1,2})?",
     re.IGNORECASE,
 )
 
@@ -219,7 +262,7 @@ def is_known_sender(sender_email: str) -> tuple[bool, str]:
 def classify_source_record(sender: str, subject: str, body: str) -> ClassificationResult:
     subject = subject or ""
     body = _clean_text(body)
-    combined_text = _clean_text(f"{subject} {body}")
+    combined_text = _clean_text(f"{sender} {subject} {body}")
     is_known, institution = is_known_sender(sender)
 
     otp_matches = _matches(OTP_KEYWORDS, combined_text)
@@ -235,8 +278,20 @@ def classify_source_record(sender: str, subject: str, body: str) -> Classificati
 
     promo_matches = _matches(PROMO_KEYWORDS, combined_text)
     txn_matches = _matches(TRANSACTION_KEYWORDS, combined_text)
+    money_movement_matches = _matches(MONEY_MOVEMENT_KEYWORDS, combined_text)
     non_transaction_matches = _matches(NON_TRANSACTION_KEYWORDS, combined_text)
     has_amount = bool(AMOUNT_PATTERN.search(combined_text))
+    newsletter_sender_matches = _matches(NEWSLETTER_SENDER_PATTERNS, sender)
+    newsletter_matches = _matches(NEWSLETTER_KEYWORDS, combined_text)
+
+    if newsletter_sender_matches or newsletter_matches:
+        return ClassificationResult(
+            ClassificationType.IGNORE,
+            institution,
+            0.95,
+            newsletter_sender_matches or newsletter_matches,
+            "newsletter sender or content signal",
+        )
 
     if len(promo_matches) >= 2 and not txn_matches:
         return ClassificationResult(
@@ -265,9 +320,18 @@ def classify_source_record(sender: str, subject: str, body: str) -> Classificati
             "non-transaction account/service signal",
         )
 
+    # A topical word such as "investment", "loan", or "salary" is not enough
+    # to make an email a transaction. Newsletters often include those terms and
+    # an illustrative amount, which previously sent them to the parser and DLQ.
+    # Require an explicit money-movement signal as well.
     for classification, patterns, reason in SPECIAL_PATTERNS:
         matches = _matches(patterns, combined_text)
-        if matches and (has_amount or classification == ClassificationType.FAILED_PAYMENT):
+        requires_amount = classification != ClassificationType.FAILED_PAYMENT
+        if (
+            matches
+            and money_movement_matches
+            and (has_amount or not requires_amount)
+        ):
             confidence = 0.90 if is_known else 0.72
             return ClassificationResult(classification, institution or "UNKNOWN", confidence, matches, reason)
 
@@ -280,7 +344,7 @@ def classify_source_record(sender: str, subject: str, body: str) -> Classificati
             "known financial sender with transaction and amount signals",
         )
 
-    if len(txn_matches) >= 2 and has_amount and not promo_matches:
+    if money_movement_matches and has_amount and not promo_matches:
         return ClassificationResult(
             ClassificationType.TRANSACTION,
             "UNKNOWN",
@@ -294,8 +358,8 @@ def classify_source_record(sender: str, subject: str, body: str) -> Classificati
             ClassificationType.STATEMENT,
             institution,
             0.50,
-            tuple(),
+            (),
             "known financial sender without transaction amount signal",
         )
 
-    return ClassificationResult(ClassificationType.IGNORE, "", 0.0, tuple(), "no financial signal")
+    return ClassificationResult(ClassificationType.IGNORE, "", 0.0, (), "no financial signal")

@@ -11,7 +11,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -34,6 +34,7 @@ class SyncRun(Base):
     """Tracks each Gmail sync operation for observability and debugging."""
 
     __tablename__ = "sync_runs"
+    __table_args__ = (Index("ix_sync_runs_user_started", "user_id", "start_time"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(

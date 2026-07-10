@@ -117,6 +117,7 @@ async def test_workspace_snapshot_and_timeline_with_data(client: AsyncClient):
     assert "refund" in types
     assert any(e["direction"] == "in" for e in data["timeline"])
     assert any(e["direction"] == "out" for e in data["timeline"])
+    assert all("payment_method" in event for event in data["timeline"])
 
     # Low-confidence cleanup recommendation should be present
     rec_types = {r["type"] for r in data["recommendations"]}

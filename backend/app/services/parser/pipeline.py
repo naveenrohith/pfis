@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.email import RawEmail
 from app.models.sync import ParseFailure, PipelineEvent
-from app.schemas.transaction import TransactionCreate
+from app.schemas.transaction import PaymentMethodEnum, TransactionCreate
 from app.schemas.transaction import TransactionTypeEnum as TransactionSchemaType
 from app.services.gmail.email_filter import EmailType, classify_email
 from app.services.parser.base_parser import BaseParser, ParseResult
@@ -68,6 +68,9 @@ def _public_parse_diagnostics(parse_result: ParseResult | None) -> dict[str, Any
     return {
         "amount_present": parse_result.amount is not None,
         "type": parse_result.transaction_type.value if parse_result.transaction_type else None,
+        "payment_method": parse_result.payment_method,
+        "transaction_status": parse_result.transaction_status,
+        "transaction_timestamp": parse_result.transaction_timestamp.isoformat() if parse_result.transaction_timestamp else None,
         "merchant_source": parse_result.merchant_source,
         "date_present": parse_result.date is not None,
         "account_present": parse_result.account_last4 is not None,
@@ -141,6 +144,9 @@ def _attach_parse_result(email_result: dict[str, Any], parse_result: ParseResult
     email_result["type"] = (
         parse_result.transaction_type.value if parse_result.transaction_type else None
     )
+    email_result["payment_method"] = parse_result.payment_method
+    email_result["transaction_status"] = parse_result.transaction_status
+    email_result["transaction_timestamp"] = parse_result.transaction_timestamp.isoformat() if parse_result.transaction_timestamp else None
     email_result["merchant_raw"] = parse_result.merchant_raw
     email_result["merchant_source"] = parse_result.merchant_source
     email_result["date"] = str(parse_result.date) if parse_result.date else None
@@ -229,6 +235,9 @@ def _build_transaction_create(
         amount=parse_result.amount,
         currency=parse_result.currency,
         transaction_type=TransactionSchemaType(parse_result.transaction_type.value),
+        payment_method=PaymentMethodEnum(parse_result.payment_method),
+        transaction_status=parse_result.transaction_status,
+        transaction_timestamp=parse_result.transaction_timestamp,
         merchant_raw=parse_result.merchant_raw,
         merchant_normalized=merchant_normalized,
         category_id=category_id,

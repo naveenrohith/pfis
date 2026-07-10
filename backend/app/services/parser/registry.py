@@ -7,6 +7,7 @@ Fallback to GenericParser when no specific parser matches.
 import logging
 
 from app.services.gmail.email_filter import is_known_sender
+from app.services.parser import patterns
 from app.services.parser.bank_parsers import (
     GenericParser,
     HDFCParser,
@@ -76,6 +77,10 @@ class ParserRegistry:
 
         # Parse
         result = parser.parse(subject, body)
+        combined = f"{subject} {body}"
+        result.payment_method = patterns.detect_payment_method(combined)
+        result.transaction_status = patterns.detect_transaction_status(combined)
+        result.transaction_timestamp = patterns.extract_transaction_timestamp(combined)
         result.used_fallback = parser is self._fallback
         result.parser_name = parser.__class__.__name__
         result.parser_version = getattr(parser, "VERSION", result.parser_version)

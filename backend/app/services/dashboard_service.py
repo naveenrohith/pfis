@@ -233,6 +233,8 @@ class WorkspaceService:
                     amount=float(txn.amount),
                     direction=direction,
                     date=txn.transaction_date.isoformat(),
+                    payment_method=txn.payment_method.value,
+                    transaction_status=txn.transaction_status,
                     confidence=float(txn.confidence_score or 0.0),
                 )
             )

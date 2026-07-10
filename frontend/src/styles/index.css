@@ -88,6 +88,7 @@
   body {
     @apply bg-background text-foreground antialiased;
     min-width: 320px;
+    overflow-x: hidden;
     background:
       linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--muted) / 0.6) 100%);
     font-feature-settings:

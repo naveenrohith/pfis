@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 
 # Confidence weights (0–100 scale). Centralized so scoring stays tunable.
@@ -31,6 +31,9 @@ class ParseResult:
     amount: float | None = None
     currency: str = "INR"
     transaction_type: TransactionTypeEnum | None = None
+    payment_method: str = "other"
+    transaction_status: str = "completed"
+    transaction_timestamp: datetime | None = None
     merchant_raw: str | None = None
     date: date | None = None
     account_last4: str | None = None

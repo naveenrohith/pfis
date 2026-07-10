@@ -18,7 +18,7 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-card/90 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-2 px-4 py-3 sm:gap-3 sm:px-6">
+      <div className="flex w-full flex-wrap items-center gap-2 px-3 py-3 sm:gap-3 sm:px-5 lg:px-8 2xl:px-10">
         <div className="flex min-w-[8rem] items-center gap-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm shadow-primary/25">
             <WalletCards className="h-5 w-5" />

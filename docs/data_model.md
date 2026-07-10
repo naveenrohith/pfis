@@ -21,6 +21,15 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 - `BackgroundJob`: async job tracking.
 - `OAuthState`: persisted OAuth state with expiry.
 
+## Operational access paths
+
+In addition to the transaction reporting indexes, the persistence layer keeps
+composite user/time indexes on `RawEmail(user_id, received_at)` and
+`SyncRun(user_id, start_time)`. These support incremental ingestion history,
+sync-run timelines, and user-scoped operational queries without scanning all
+users' records. The indexes are managed by Alembic migration
+`008_operational_indexes` for shared and production databases.
+
 ## Rules
 
 - All user-owned entities must be queried with user scope or checked with ownership helpers.

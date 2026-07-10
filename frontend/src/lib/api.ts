@@ -27,6 +27,7 @@ import type {
   Transaction,
   TransactionSummary,
   TransactionType,
+  PaymentMethod,
   User,
   WorkspaceResponse,
 } from './types';
@@ -101,6 +102,7 @@ export interface TransactionUpdatePayload {
   category_id?: string | null;
   amount?: number;
   transaction_type?: TransactionType;
+  payment_method?: PaymentMethod;
   reviewed_flag?: boolean;
 }
 
@@ -108,6 +110,7 @@ export interface BulkUpdatePayload {
   transaction_ids: string[];
   category_id?: string | null;
   transaction_type?: TransactionType;
+  payment_method?: PaymentMethod;
   reviewed_flag?: boolean;
 }
 

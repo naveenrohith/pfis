@@ -5,7 +5,7 @@ Centralizing these avoids duplication and makes improvement easier.
 """
 
 import re
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 # ─── Amount Extraction ───
 
@@ -14,6 +14,8 @@ AMOUNT_PATTERNS = [
     re.compile(r"Rs\.?\s?(?:INR\s?)?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
     # INR 450.00 / INR 1,200
     re.compile(r"INR\s?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
+    # Indian rupee symbol: ₹450.00 / ₹ 1,200
+    re.compile(r"\u20B9\s?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
     # ₹450.00 / ₹ 1,200
     re.compile(r"₹\s?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
 ]
@@ -108,6 +110,35 @@ def detect_transaction_type(text: str) -> str | None:
     return None
 
 
+def detect_payment_method(text: str) -> str:
+    """Identify the payment rail used by a transaction notification."""
+    text_upper = text.upper()
+    if "UPI" in text_upper or "VPA" in text_upper:
+        return "upi"
+    if "CREDIT CARD" in text_upper:
+        return "credit_card"
+    if "DEBIT CARD" in text_upper:
+        return "debit_card"
+    if "EMI" in text_upper:
+        return "emi"
+    if "LAZYPAY" in text_upper or "PAY LATER" in text_upper or "PAYLATER" in text_upper:
+        return "pay_later"
+    if "WALLET" in text_upper:
+        return "wallet"
+    if any(token in text_upper for token in ("NEFT", "IMPS", "RTGS")):
+        return "bank_transfer"
+    return "other"
+
+
+def detect_transaction_status(text: str) -> str:
+    text_lower = text.lower()
+    if "reversal" in text_lower and any(token in text_lower for token in ("initiated", "allow up to", "pending")):
+        return "reversal_pending"
+    if "refund" in text_lower and any(token in text_lower for token in ("initiated", "allow up to", "pending")):
+        return "refund_pending"
+    return "completed"
+
+
 # ─── Date Extraction ───
 
 DATE_PATTERNS = [
@@ -185,6 +216,28 @@ def extract_date(text: str) -> date | None:
     return None
 
 
+_DATETIME_PATTERN = re.compile(
+    r"(\d{1,2})\s+([A-Za-z]{3,9}),?\s+(\d{4})\s+at\s+(\d{1,2}):(\d{2})(?::(\d{2}))?",
+    re.IGNORECASE,
+)
+
+
+def extract_transaction_timestamp(text: str) -> datetime | None:
+    """Extract a bank-supplied transaction time in India Standard Time."""
+    match = _DATETIME_PATTERN.search(text)
+    if not match:
+        return None
+    try:
+        day, month_name, year, hour, minute, second = match.groups()
+        month = MONTH_MAP.get(month_name.lower()[:3])
+        if not month:
+            return None
+        ist = timezone(timedelta(hours=5, minutes=30))
+        return datetime(int(year), month, int(day), int(hour), int(minute), int(second or 0), tzinfo=ist)
+    except ValueError:
+        return None
+
+
 # ─── Account Number Extraction ───
 
 ACCOUNT_PATTERNS = [
@@ -215,6 +268,8 @@ REF_PATTERNS = [
     re.compile(r"(?:UPI\s+)?Ref\.?\s*(?:No\.?\s*)?:?\s*(\d{6,20})", re.IGNORECASE),
     # "UPI transaction reference number is 609704956003"
     re.compile(r"UPI\s+transaction\s+reference\s+number\s+is\s+(\d{6,20})", re.IGNORECASE),
+    re.compile(r"UPI\s+transaction\s+reference\s+no\.?\s*:\s*(\d{6,20})", re.IGNORECASE),
+    re.compile(r"Payment\s+Id\s*:?\s*([A-Za-z0-9_]{6,100})", re.IGNORECASE),
     # Transaction ID: PHO412345678906
     re.compile(r"Transaction\s+ID:?\s*(\w{6,25})", re.IGNORECASE),
     # NEFT Ref No SBIN123456789012
@@ -238,6 +293,7 @@ MERCHANT_PATTERNS = [
     re.compile(r"\bfrom\s+NEFT\s+Cr-[^-]+-([A-Z][A-Z0-9\s.&]+?)-", re.IGNORECASE),
     # HDFC UPI: "to VPA payzomato@hdfcbank ZOMATO on ..."
     re.compile(r"\bto\s+VPA\s+\S+\s+([A-Z][A-Z0-9\s.&-]+?)\s+on\s+\d", re.IGNORECASE),
+    re.compile(r"\btowards\s+VPA\s+\S+\s+\(([^)]+)\)\s+on\s+\d", re.IGNORECASE),
     # "at SWIGGY" / "at AMAZON PAY INDIA PV"
     re.compile(
         r"\bat\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:via|on|for|UPI|Ref|If|Available|Avl))", re.IGNORECASE

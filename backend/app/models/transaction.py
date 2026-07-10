@@ -20,6 +20,17 @@ class TransactionType(str, enum.Enum):
     REFUND = "refund"
 
 
+class PaymentMethod(str, enum.Enum):
+    UPI = "upi"
+    DEBIT_CARD = "debit_card"
+    CREDIT_CARD = "credit_card"
+    EMI = "emi"
+    PAY_LATER = "pay_later"
+    WALLET = "wallet"
+    BANK_TRANSFER = "bank_transfer"
+    OTHER = "other"
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
@@ -35,6 +46,18 @@ class Transaction(Base):
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="INR")
     transaction_type: Mapped[TransactionType] = mapped_column(Enum(TransactionType), nullable=False)
+    payment_method: Mapped[PaymentMethod] = mapped_column(
+        Enum(
+            PaymentMethod,
+            values_callable=lambda enum_type: [member.value for member in enum_type],
+            native_enum=False,
+            length=20,
+        ),
+        nullable=False,
+        default=PaymentMethod.OTHER,
+    )
+    transaction_status: Mapped[str] = mapped_column(String(24), nullable=False, default="completed")
+    transaction_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     merchant_raw: Mapped[str] = mapped_column(String(255), nullable=True)
     merchant_normalized: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
     category_id: Mapped[str] = mapped_column(String(36), ForeignKey("categories.id"), nullable=True)
@@ -61,6 +84,12 @@ class Transaction(Base):
     category = relationship("Category", back_populates="transactions")
     source_email = relationship("RawEmail", back_populates="transaction")
     corrections = relationship("UserCorrection", back_populates="transaction", lazy="selectin")
+
+    @property
+    def source_received_at(self) -> datetime | None:
+        """Timestamp of the source notification, when PFIS ingested from email."""
+        source_email = self.__dict__.get("source_email")
+        return source_email.received_at if source_email else None
 
     def __repr__(self) -> str:
         return f"<Transaction {self.merchant_normalized} ₹{self.amount}>"

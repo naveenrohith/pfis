@@ -33,7 +33,7 @@ export function SectionNav({ sections }: SectionNavProps) {
   return (
     <nav
       aria-label="Dashboard sections"
-      className="scrollbar-none sticky top-[6.85rem] z-30 -mx-4 mb-6 overflow-x-auto border-b border-border bg-background/90 px-4 backdrop-blur-xl sm:top-[4.55rem] sm:mx-0 sm:rounded-lg sm:border sm:bg-card/90"
+      className="scrollbar-none sticky top-[6.85rem] z-30 -mx-3 mb-6 overflow-x-auto border-b border-border bg-background/90 px-3 backdrop-blur-xl sm:top-[4.55rem] sm:mx-0 sm:rounded-lg sm:border sm:bg-card/90 lg:-mx-8 lg:px-8 2xl:-mx-10 2xl:px-10"
     >
       <div className="flex gap-1 py-2">
         {sections.map((s) => (

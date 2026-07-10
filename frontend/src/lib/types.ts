@@ -1,6 +1,7 @@
 // Domain types mirroring the PFIS backend API (docs/api-reference.md).
 
 export type TransactionType = 'debit' | 'credit' | 'refund';
+export type PaymentMethod = 'upi' | 'debit_card' | 'credit_card' | 'emi' | 'pay_later' | 'wallet' | 'bank_transfer' | 'other';
 
 export interface User {
   id: string;
@@ -33,7 +34,12 @@ export interface Transaction {
   amount: number;
   currency?: string;
   transaction_type: TransactionType;
+  payment_method: PaymentMethod;
+  transaction_status?: string;
+  transaction_timestamp?: string | null;
   transaction_date: string;
+  source_received_at?: string | null;
+  created_at?: string;
   account_last4?: string | null;
   reference_id?: string | null;
   confidence_score: number;
@@ -215,6 +221,8 @@ export interface TimelineEvent {
   amount: number;
   direction: 'in' | 'out';
   date: string;
+  payment_method?: PaymentMethod;
+  transaction_status?: string;
   confidence: number;
 }
 

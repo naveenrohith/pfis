@@ -33,6 +33,7 @@ export function TimelineCard({ event, currency = 'INR', className }: TimelineCar
   const Icon = meta.icon;
   const isIn = event.direction === 'in';
   const amount = `${isIn ? '+' : '-'}${formatCurrency(Math.abs(event.amount), currency)}`;
+  const methodLabel = paymentMethodLabel(event.payment_method);
 
   return (
     <div
@@ -50,6 +51,10 @@ export function TimelineCard({ event, currency = 'INR', className }: TimelineCar
           {meta.label}
           {event.category ? ` / ${event.category}` : ''} / {event.date}
         </p>
+        {methodLabel && <Badge variant="outline" className="mt-1">{methodLabel}</Badge>}
+        {event.transaction_status && event.transaction_status !== 'completed' && (
+          <Badge variant="warning" className="mt-1 ml-1">{event.transaction_status.replace('_', ' ')}</Badge>
+        )}
       </div>
       <div className="flex flex-col items-end gap-0.5">
         <span className={cn('text-sm font-bold', isIn ? 'text-success' : 'text-foreground')}>
@@ -61,4 +66,11 @@ export function TimelineCard({ event, currency = 'INR', className }: TimelineCar
       </div>
     </div>
   );
+}
+
+function paymentMethodLabel(method?: TimelineEvent['payment_method']): string | null {
+  if (method === 'upi') return 'UPI';
+  if (method === 'debit_card') return 'Debit card';
+  if (method === 'credit_card') return 'Credit card';
+  return null;
 }

@@ -35,6 +35,8 @@ class TimelineEvent(BaseModel):
     amount: float = 0.0
     direction: str = "out"  # in | out
     date: str
+    payment_method: str = "other"
+    transaction_status: str = "completed"
     confidence: float = 0.0
 
 

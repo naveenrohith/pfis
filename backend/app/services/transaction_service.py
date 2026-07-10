@@ -169,6 +169,9 @@ class TransactionService:
             amount=data.amount,
             currency=data.currency,
             transaction_type=data.transaction_type,
+            payment_method=data.payment_method,
+            transaction_status=data.transaction_status,
+            transaction_timestamp=data.transaction_timestamp,
             merchant_raw=data.merchant_raw,
             merchant_normalized=data.merchant_normalized,
             category_id=data.category_id,
@@ -207,7 +210,7 @@ class TransactionService:
         """Fetch transactions with optional filters."""
         query = (
             select(Transaction)
-            .options(selectinload(Transaction.category))
+            .options(selectinload(Transaction.category), selectinload(Transaction.source_email))
             .where(Transaction.user_id == user_id)
         )
 
@@ -230,7 +233,7 @@ class TransactionService:
         """Get a single transaction by ID."""
         result = await self.db.execute(
             select(Transaction)
-            .options(selectinload(Transaction.category))
+            .options(selectinload(Transaction.category), selectinload(Transaction.source_email))
             .where(Transaction.id == txn_id)
         )
         txn = result.scalar_one_or_none()

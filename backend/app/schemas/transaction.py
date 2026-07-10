@@ -15,6 +15,17 @@ class TransactionTypeEnum(str, Enum):
     REFUND = "refund"
 
 
+class PaymentMethodEnum(str, Enum):
+    UPI = "upi"
+    DEBIT_CARD = "debit_card"
+    CREDIT_CARD = "credit_card"
+    EMI = "emi"
+    PAY_LATER = "pay_later"
+    WALLET = "wallet"
+    BANK_TRANSFER = "bank_transfer"
+    OTHER = "other"
+
+
 # --- Request Schemas ---
 
 
@@ -24,6 +35,9 @@ class TransactionCreate(BaseModel):
     amount: float = Field(..., gt=0, description="Transaction amount")
     currency: str = Field(default="INR", max_length=3)
     transaction_type: TransactionTypeEnum
+    payment_method: PaymentMethodEnum = PaymentMethodEnum.OTHER
+    transaction_status: str = "completed"
+    transaction_timestamp: datetime | None = None
     merchant_raw: str | None = None
     merchant_normalized: str | None = None
     category_id: str | None = None
@@ -41,6 +55,8 @@ class TransactionUpdate(BaseModel):
     merchant_normalized: str | None = None
     category_id: str | None = None
     transaction_type: TransactionTypeEnum | None = None
+    payment_method: PaymentMethodEnum | None = None
+    transaction_status: str | None = None
     amount: float | None = Field(None, gt=0)
     reviewed_flag: bool | None = None
 
@@ -51,6 +67,7 @@ class BulkTransactionUpdate(BaseModel):
     transaction_ids: list[str] = Field(..., min_length=1)
     category_id: str | None = None
     transaction_type: TransactionTypeEnum | None = None
+    payment_method: PaymentMethodEnum | None = None
     reviewed_flag: bool | None = None
 
 
@@ -71,6 +88,9 @@ class TransactionResponse(BaseModel):
     amount: float
     currency: str
     transaction_type: TransactionTypeEnum
+    payment_method: PaymentMethodEnum
+    transaction_status: str
+    transaction_timestamp: datetime | None = None
     merchant_raw: str | None
     merchant_normalized: str | None
     category_id: str | None
@@ -83,6 +103,7 @@ class TransactionResponse(BaseModel):
     reviewed_at: datetime | None = None
     parser_version: int
     created_at: datetime
+    source_received_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

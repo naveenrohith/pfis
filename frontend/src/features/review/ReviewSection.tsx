@@ -13,7 +13,7 @@ import { useAuth } from '@/features/auth/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/format';
+import { formatCurrency, formatTime } from '@/lib/format';
 import type { Transaction, TransactionType } from '@/lib/types';
 import { ReviewDetail } from './ReviewDetail';
 
@@ -254,6 +254,7 @@ function ReviewRow({
           </p>
           <p className="truncate text-xs text-muted-foreground">
             {txn.category_name || 'Uncategorized'} / {txn.transaction_date}
+            {txn.source_received_at ? ` / ${formatTime(txn.source_received_at)}` : ''}
             {txn.account_last4 ? ` / **${txn.account_last4}` : ''}
           </p>
         </div>

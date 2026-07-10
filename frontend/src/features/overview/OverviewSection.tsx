@@ -22,10 +22,13 @@ import { useSync } from '@/features/workspace/SyncContext';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { useAuth } from '@/features/auth/AuthContext';
 import { formatCurrency } from '@/lib/format';
+import { useTransactions } from '@/features/workspace/queries';
+import { PaymentMethodVisuals } from './PaymentMethodVisuals';
 
 export function OverviewSection() {
   const { user } = useAuth();
   const workspace = useWorkspaceSnapshot();
+  const transactions = useTransactions();
   const { running, status, liveConnected, log, clearLog } = useSync();
   const { scrollTo } = useDashboardUi();
 
@@ -180,6 +183,7 @@ export function OverviewSection() {
           </CardContent>
         </Card>
       </div>
+      <PaymentMethodVisuals transactions={transactions.data ?? []} currency={currency} />
     </div>
   );
 }

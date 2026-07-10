@@ -7,7 +7,8 @@ import { Input, Label, Select } from '@/components/ui/Input';
 import { EmptyState } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
-import type { Category, Transaction, TransactionType } from '@/lib/types';
+import { formatCurrency, formatTime } from '@/lib/format';
+import type { Category, PaymentMethod, Transaction, TransactionType } from '@/lib/types';
 
 interface ReviewDetailProps {
   transaction: Transaction | null;
@@ -17,12 +18,13 @@ interface ReviewDetailProps {
   onNext: () => void;
 }
 
-export function ReviewDetail({ transaction, categories, onSaved, onNext }: ReviewDetailProps) {
+export function ReviewDetail({ transaction, categories, currency, onSaved, onNext }: ReviewDetailProps) {
   const { notify } = useToast();
   const [merchant, setMerchant] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<TransactionType>('debit');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('other');
 
   useEffect(() => {
     if (transaction) {
@@ -30,6 +32,7 @@ export function ReviewDetail({ transaction, categories, onSaved, onNext }: Revie
       setCategoryId(transaction.category_id ?? '');
       setAmount(String(transaction.amount));
       setType(transaction.transaction_type);
+      setPaymentMethod(transaction.payment_method ?? 'other');
     }
   }, [transaction]);
 
@@ -44,6 +47,7 @@ export function ReviewDetail({ transaction, categories, onSaved, onNext }: Revie
         category_id: categoryId || null,
         amount: value,
         transaction_type: type,
+        payment_method: paymentMethod,
         reviewed_flag: true,
       });
       return markNext;
@@ -75,6 +79,11 @@ export function ReviewDetail({ transaction, categories, onSaved, onNext }: Revie
         <div className="flex flex-wrap gap-1.5 rounded-lg border border-border bg-muted/30 p-2">
           <Badge variant="info">Confidence {Math.round(transaction.confidence_score * 100)}%</Badge>
           <Badge variant="outline">{transaction.transaction_date}</Badge>
+          <Badge variant="outline">{paymentMethodLabel(transaction.payment_method)}</Badge>
+          <Badge variant="outline">{formatCurrency(transaction.amount, currency)}</Badge>
+          <Badge variant="outline">
+            {transaction.source_received_at ? `Received ${formatTime(transaction.source_received_at)}` : 'Time unavailable'}
+          </Badge>
           {transaction.account_last4 && <Badge variant="outline">••{transaction.account_last4}</Badge>}
           {transaction.reference_id && (
             <Badge variant="outline">Ref {transaction.reference_id}</Badge>
@@ -121,6 +130,23 @@ export function ReviewDetail({ transaction, categories, onSaved, onNext }: Revie
             </Select>
           </div>
         </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="rd-payment-method">Payment method</Label>
+          <Select
+            id="rd-payment-method"
+            value={paymentMethod}
+            onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+          >
+            <option value="upi">UPI</option>
+            <option value="debit_card">Debit card</option>
+            <option value="credit_card">Credit card</option>
+            <option value="emi">EMI</option>
+            <option value="pay_later">Pay later</option>
+            <option value="wallet">Wallet</option>
+            <option value="bank_transfer">Bank transfer</option>
+            <option value="other">Other</option>
+          </Select>
+        </div>
 
         {/* Quick category chips */}
         <div className="flex flex-wrap gap-1.5">
@@ -150,4 +176,18 @@ export function ReviewDetail({ transaction, categories, onSaved, onNext }: Revie
       </CardContent>
     </Card>
   );
+}
+
+function paymentMethodLabel(method?: PaymentMethod): string {
+  const labels: Record<PaymentMethod, string> = {
+    upi: 'UPI',
+    debit_card: 'Debit card',
+    credit_card: 'Credit card',
+    emi: 'EMI',
+    pay_later: 'Pay later',
+    wallet: 'Wallet',
+    bank_transfer: 'Bank transfer',
+    other: 'Other',
+  };
+  return labels[method ?? 'other'];
 }

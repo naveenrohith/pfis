@@ -289,6 +289,82 @@ def test_email_filter_rejects_marketing_from_non_bank_senders(sender, subject, b
     assert email_type == EmailType.PROMOTION
 
 
+def test_email_filter_ignores_finance_newsletters_without_money_movement():
+    email_type, _, _ = classify_email(
+        "Groww Digest <noreply@digest.groww.in>",
+        "What is adjusted EBITDA?",
+        "Learn how a Rs. 5,000 investment can grow over time after a payment is received. Read the latest market update.",
+    )
+
+    assert email_type == EmailType.IGNORE
+
+
+def test_email_filter_keeps_investment_transactions_with_money_movement():
+    email_type, _, _ = classify_email(
+        "Groww <noreply@groww.in>",
+        "SIP investment successful",
+        "Your SIP investment of \u20b95,000 has been debited on 09-07-2026. Order ID: SIP123456.",
+    )
+
+    assert email_type == EmailType.INVESTMENT
+
+
+def test_parser_extracts_amount_with_indian_rupee_symbol():
+    result = get_parser_registry().parse_email(
+        "alerts@example-payments.test",
+        "Payment successful",
+        "\u20b91,250.50 has been debited on 09-07-2026.",
+    )
+
+    assert result.amount == 1250.50
+
+
+@pytest.mark.parametrize(
+    ("subject", "body", "expected_method"),
+    [
+        ("UPI payment", "Rs.500 has been debited via UPI on 09-07-2026.", "upi"),
+        ("Debit card alert", "Your Debit Card was used for Rs.500 on 09-07-2026.", "debit_card"),
+        ("Credit card alert", "Your Credit Card was charged Rs.500 on 09-07-2026.", "credit_card"),
+    ],
+)
+def test_parser_detects_payment_method(subject, body, expected_method):
+    result = get_parser_registry().parse_email("alerts@example-payments.test", subject, body)
+
+    assert result.payment_method == expected_method
+
+
+def test_parser_handles_live_hdfc_upi_alert_format():
+    result = get_parser_registry().parse_email(
+        "HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
+        "You have done a UPI txn. Check details!",
+        (
+            "Rs.72.00 is debited from your account ending 1441 towards VPA shop@upi "
+            "(SAMPLE MERCHANT) on 09-07-26. UPI transaction reference no.: 125997704118."
+        ),
+    )
+
+    assert result.bank == "HDFC"
+    assert result.payment_method == "upi"
+    assert result.merchant_raw == "SAMPLE MERCHANT"
+    assert result.reference_id == "125997704118"
+
+
+def test_parser_captures_card_timestamp_and_pending_reversal_status():
+    result = get_parser_registry().parse_email(
+        "HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
+        "Transaction reversal initiated",
+        (
+            "Transaction reversal of Rs.2.00 has been initiated to your HDFC Bank Credit Card "
+            "ending 4349. From Merchant: SAMPLE STORE Date Time: 20 Mar, 2026 at 14:37:13."
+        ),
+    )
+
+    assert result.payment_method == "credit_card"
+    assert result.transaction_status == "reversal_pending"
+    assert result.transaction_timestamp is not None
+    assert result.transaction_timestamp.hour == 14
+
+
 @pytest.mark.asyncio
 async def test_full_text_alias_inference_finds_known_merchant(test_session_factory):
     async with test_session_factory() as db:

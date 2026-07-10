@@ -34,7 +34,7 @@ export function DashboardLayout() {
     <DashboardUiProvider>
       <div className="min-h-screen bg-background">
         <Header />
-        <main className="mx-auto max-w-7xl px-4 pb-20 pt-3 sm:px-6 lg:pt-5">
+        <main className="w-full px-3 pb-20 pt-3 sm:px-5 lg:px-8 lg:pt-5 2xl:px-10">
           <SectionNav sections={SECTIONS} />
           <div className="grid gap-12">
             <section id="overview" className="scroll-mt-32">
