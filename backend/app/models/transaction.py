@@ -74,6 +74,9 @@ class Transaction(Base):
     source_email_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("raw_emails.id"), nullable=True
     )
+    financial_account_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("financial_accounts.id"), nullable=True, index=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
@@ -83,6 +86,7 @@ class Transaction(Base):
     user = relationship("User", back_populates="transactions")
     category = relationship("Category", back_populates="transactions")
     source_email = relationship("RawEmail", back_populates="transaction")
+    financial_account = relationship("FinancialAccount", back_populates="transactions")
     corrections = relationship("UserCorrection", back_populates="transaction", lazy="selectin")
 
     @property

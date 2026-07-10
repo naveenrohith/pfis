@@ -6,10 +6,13 @@ and parser-fallback metrics."""
 from __future__ import annotations
 
 import app.database as database_module
+from app.models.account import FinancialAccount
 from app.models.email import RawEmail
-from app.schemas.transaction import TransactionCreate, TransactionTypeEnum
+from app.models.summary import MonthlySummary
+from app.schemas.transaction import TransactionCreate, TransactionTypeEnum, TransactionUpdate
 from app.services.parser.pipeline import process_raw_emails
 from app.services.transaction_service import DuplicateTransactionError, TransactionService
+from sqlalchemy import select
 
 from tests.pytest.helpers import create_user
 
@@ -44,6 +47,65 @@ async def test_create_transaction_raises_typed_duplicate(client, test_session_fa
             pass
         else:
             raise AssertionError("expected DuplicateTransactionError on duplicate insert")
+
+
+async def test_transaction_creation_reuses_a_user_scoped_financial_account(
+    client, test_session_factory
+):
+    user = await create_user(client, "financial-account")
+    async with test_session_factory() as db:
+        service = TransactionService(db)
+        first = await service.create_transaction(
+            user["id"], _txn(account_last4="1234", reference_id="ACCOUNT-ONE")
+        )
+        second = await service.create_transaction(
+            user["id"],
+            _txn(
+                amount=251.0,
+                transaction_date="2026-02-11",
+                account_last4="1234",
+                reference_id="ACCOUNT-TWO",
+            ),
+        )
+        accounts = list(
+            (
+                await db.execute(
+                    select(FinancialAccount).where(FinancialAccount.user_id == user["id"])
+                )
+            ).scalars()
+        )
+
+    assert len(accounts) == 1
+    assert accounts[0].masked_number == "****1234"
+    assert first.financial_account_id == accounts[0].id
+    assert second.financial_account_id == accounts[0].id
+
+
+async def test_monthly_summary_cache_is_rebuilt_after_transaction_correction(
+    client, test_session_factory
+):
+    user = await create_user(client, "monthly-summary")
+    async with test_session_factory() as db:
+        service = TransactionService(db)
+        transaction = await service.create_transaction(
+            user["id"], _txn(reference_id="SUMMARY-ONE")
+        )
+
+        first_summary = await service.get_monthly_summary(user["id"], 2, 2026)
+        cached = await db.execute(
+            select(MonthlySummary).where(
+                MonthlySummary.user_id == user["id"],
+                MonthlySummary.month == 2,
+                MonthlySummary.year == 2026,
+            )
+        )
+        assert cached.scalar_one_or_none() is not None
+
+        await service.update_transaction(transaction.id, TransactionUpdate(amount=300.0))
+        refreshed_summary = await service.get_monthly_summary(user["id"], 2, 2026)
+
+    assert first_summary["total_spend"] == 250.0
+    assert refreshed_summary["total_spend"] == 300.0
 
 
 async def test_init_db_skips_create_all_in_production(monkeypatch):

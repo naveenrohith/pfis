@@ -9,11 +9,13 @@ import json
 import logging
 from datetime import UTC, date, datetime
 
-from sqlalchemy import extract, func, select
+from sqlalchemy import delete, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.account import FinancialAccount
 from app.models.category import Category, Merchant, parse_merchant_aliases
+from app.models.summary import MonthlySummary
 from app.models.sync import UserCorrection
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionUpdate
@@ -142,6 +144,16 @@ class TransactionService:
 
         invalidate_merchant_cache()
 
+    async def _invalidate_monthly_summary(self, user_id: str, transaction_date: date) -> None:
+        """Remove the affected aggregate snapshot before committing a mutation."""
+        await self.db.execute(
+            delete(MonthlySummary).where(
+                MonthlySummary.user_id == user_id,
+                MonthlySummary.month == transaction_date.month,
+                MonthlySummary.year == transaction_date.year,
+            )
+        )
+
     # --- CRUD ---
 
     async def create_transaction(self, user_id: str, data: TransactionCreate) -> Transaction:
@@ -163,6 +175,28 @@ class TransactionService:
         if existing.scalar_one_or_none():
             logger.info(f"Duplicate transaction detected: fingerprint={fingerprint[:16]}...")
             raise DuplicateTransactionError("Duplicate transaction detected")
+
+        financial_account_id = None
+        if data.account_last4:
+            masked_number = f"****{data.account_last4}"
+            account_result = await self.db.execute(
+                select(FinancialAccount).where(
+                    FinancialAccount.user_id == user_id,
+                    FinancialAccount.masked_number == masked_number,
+                )
+            )
+            account = account_result.scalar_one_or_none()
+            if account is None:
+                account = FinancialAccount(
+                    user_id=user_id,
+                    institution_name="Unknown",
+                    account_type="unknown",
+                    masked_number=masked_number,
+                    currency=data.currency,
+                )
+                self.db.add(account)
+                await self.db.flush()
+            financial_account_id = account.id
 
         txn = Transaction(
             user_id=user_id,
@@ -186,9 +220,11 @@ class TransactionService:
             ),
             source_email_id=data.source_email_id,
             fingerprint=fingerprint,
+            financial_account_id=financial_account_id,
         )
 
         self.db.add(txn)
+        await self._invalidate_monthly_summary(user_id, data.transaction_date)
         await self.db.commit()
         await self.db.refresh(txn)
 
@@ -297,6 +333,7 @@ class TransactionService:
 
         await self._record_corrections(txn.id, changed_fields)
         await self._learn_from_correction(txn, set(changed_fields))
+        await self._invalidate_monthly_summary(txn.user_id, txn.transaction_date)
 
         await self.db.commit()
         await self.db.refresh(txn)
@@ -365,6 +402,7 @@ class TransactionService:
         txn = result.scalar_one_or_none()
         if not txn:
             return False
+        await self._invalidate_monthly_summary(txn.user_id, txn.transaction_date)
         await self.db.delete(txn)
         await self.db.commit()
         logger.info(f"Transaction deleted: {txn_id}")
@@ -391,6 +429,26 @@ class TransactionService:
 
     async def get_monthly_summary(self, user_id: str, month: int, year: int) -> dict:
         """Compute monthly spending summary."""
+
+        cached = await self.db.execute(
+            select(MonthlySummary.payload_json).where(
+                MonthlySummary.user_id == user_id,
+                MonthlySummary.month == month,
+                MonthlySummary.year == year,
+            )
+        )
+        cached_payload = cached.scalar_one_or_none()
+        if cached_payload:
+            try:
+                return json.loads(cached_payload)
+            except json.JSONDecodeError:
+                await self.db.execute(
+                    delete(MonthlySummary).where(
+                        MonthlySummary.user_id == user_id,
+                        MonthlySummary.month == month,
+                        MonthlySummary.year == year,
+                    )
+                )
 
         # Total spend (debits)
         spend_result = await self.db.execute(
@@ -480,7 +538,7 @@ class TransactionService:
             for row in merchant_result.all()
         ]
 
-        return {
+        summary = {
             "total_spend": total_spend,
             "total_income": total_income,
             "net": total_income - total_spend,
@@ -489,3 +547,13 @@ class TransactionService:
             "category_breakdown": categories,
             "top_merchants": merchants,
         }
+        self.db.add(
+            MonthlySummary(
+                user_id=user_id,
+                month=month,
+                year=year,
+                payload_json=json.dumps(summary),
+            )
+        )
+        await self.db.commit()
+        return summary

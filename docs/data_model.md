@@ -10,6 +10,8 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 
 - `User`: registered user profile, currency, auth status.
 - `GmailAccount`: connected Gmail account and encrypted token references.
+- `FinancialAccount`: user-owned account identity inferred from connector metadata.
+- `MonthlySummary`: persisted dashboard/report aggregate cache for one user and month.
 - `RawEmail`: stored email subject/body/sender/received timestamp for traceability.
 - `Transaction`: parsed financial transaction with confidence, parser version, fingerprint, and optional source email.
 - `Category`: category hierarchy for spending groups.
@@ -20,6 +22,16 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 - `UserCorrection`: feedback loop for corrected merchant/category/amount fields.
 - `BackgroundJob`: async job tracking.
 - `OAuthState`: persisted OAuth state with expiry.
+
+Transactions may reference a `FinancialAccount` through the nullable
+`financial_account_id` field. Migration `009_financial_accounts` backfills
+accounts from existing four-digit account metadata; new ingestion reuses the
+user-scoped account record and never stores full account numbers.
+
+`MonthlySummary` is invalidated within the same transaction-service commit as
+transaction creation, correction, or deletion. The next dashboard or report
+read recomputes and persists the snapshot, keeping request-time aggregations
+bounded without introducing a worker or broker.
 
 ## Operational access paths
 

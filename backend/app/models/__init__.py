@@ -4,8 +4,10 @@ Import all models here so SQLAlchemy's Base.metadata knows about them
 when create_all() is called. Order matters for foreign key resolution.
 """
 
+from app.models.account import FinancialAccount
 from app.models.category import Category, Merchant
 from app.models.email import GmailAccount, RawEmail
+from app.models.summary import MonthlySummary
 from app.models.sync import (
     BackgroundJob,
     Budget,
@@ -22,10 +24,12 @@ from app.models.user import User
 
 __all__ = [
     "User",
+    "FinancialAccount",
     "Category",
     "Merchant",
     "RawEmail",
     "GmailAccount",
+    "MonthlySummary",
     "Transaction",
     "SyncRun",
     "Budget",

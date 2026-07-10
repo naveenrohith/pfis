@@ -104,6 +104,7 @@ class TransactionResponse(BaseModel):
     parser_version: int
     created_at: datetime
     source_received_at: datetime | None = None
+    financial_account_id: str | None = None
 
     model_config = {"from_attributes": True}
 

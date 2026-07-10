@@ -10,9 +10,9 @@ PLANNER -> CODE -> TEST -> QUALITY -> REVIEW -> FIX
 
 ## Current Phase
 
-Phase 9: Financial Event Processing Engine.
+Phase 10: Financial domain and read-performance foundation.
 
-Status: implementation pass in progress. Phase 9 evolves the parser pipeline without replacing the existing parser registry or introducing external queue infrastructure.
+Status: implementation pass in progress. Phase 9 evolves the parser pipeline without replacing the existing parser registry or introducing external queue infrastructure. Phase 10 adds account identity and cached monthly aggregates without changing the local/demo operating model.
 
 Goal: keep modernization work phased, tested, and reversible while preserving the local/demo developer path.
 
@@ -36,6 +36,7 @@ Goal: keep modernization work phased, tested, and reversible while preserving th
 | 5 | Production hardening | Production config validation and deployment runbook complete |
 | 6 | Connector platform expansion | SourceRecord contract complete |
 | 9 | Parser pipeline observability and replay | Active |
+| 10 | Financial accounts and cached monthly summaries | Active |
 
 ## Phase 0 Scope
 
@@ -121,6 +122,15 @@ Remaining Phase 1 follow-up:
 - Production database provider and backup tooling.
 - Svelte dashboard promotion and static dashboard retirement.
 - Hosted observability stack and alert routing.
+
+## Phase 10 Acceptance Criteria
+
+- Financial account records contain only masked account metadata and remain user-scoped.
+- Existing transactions backfill to a nullable `financial_account_id` without reconstructing full account numbers.
+- New transactions reuse the inferred financial account from their existing last-four metadata.
+- Monthly dashboard/report summaries persist after their first calculation and are invalidated by transaction mutations.
+- Dashboard feature sections load as users approach them, keeping the overview bundle small.
+- A durable queue remains deferred: cached aggregates and local background-job records are sufficient until a production deployment target is selected.
 
 ## Phase 9 Acceptance Criteria
 

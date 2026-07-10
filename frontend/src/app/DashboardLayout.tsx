@@ -1,18 +1,20 @@
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type LazyExoticComponent } from 'react';
 import { Header } from './Header';
 import { SectionNav, type NavSection } from './SectionNav';
 import { DashboardUiProvider } from './DashboardUiContext';
 import { OverviewSection } from '@/features/overview/OverviewSection';
-import { TimelineSection } from '@/features/timeline/TimelineSection';
-import { RecommendationsSection } from '@/features/recommendations/RecommendationsSection';
-import { InboxSection } from '@/features/inbox/InboxSection';
-import { InsightsSection } from '@/features/insights/InsightsSection';
-import { BudgetsSection } from '@/features/budgets/BudgetsSection';
-import { ReviewSection } from '@/features/review/ReviewSection';
-import { TransactionsSection } from '@/features/transactions/TransactionsSection';
-import { MerchantIntelligenceSection } from '@/features/merchants/MerchantIntelligenceSection';
-import { CategoryIntelligenceSection } from '@/features/categories/CategoryIntelligenceSection';
-import { AnalyticsSection } from '@/features/analytics/AnalyticsSection';
-import { PipelineHealthSection } from '@/features/pipeline/PipelineHealthSection';
+
+const TimelineSection = lazy(() => import('@/features/timeline/TimelineSection').then((module) => ({ default: module.TimelineSection })));
+const InsightsSection = lazy(() => import('@/features/insights/InsightsSection').then((module) => ({ default: module.InsightsSection })));
+const MerchantIntelligenceSection = lazy(() => import('@/features/merchants/MerchantIntelligenceSection').then((module) => ({ default: module.MerchantIntelligenceSection })));
+const CategoryIntelligenceSection = lazy(() => import('@/features/categories/CategoryIntelligenceSection').then((module) => ({ default: module.CategoryIntelligenceSection })));
+const RecommendationsSection = lazy(() => import('@/features/recommendations/RecommendationsSection').then((module) => ({ default: module.RecommendationsSection })));
+const AnalyticsSection = lazy(() => import('@/features/analytics/AnalyticsSection').then((module) => ({ default: module.AnalyticsSection })));
+const PipelineHealthSection = lazy(() => import('@/features/pipeline/PipelineHealthSection').then((module) => ({ default: module.PipelineHealthSection })));
+const BudgetsSection = lazy(() => import('@/features/budgets/BudgetsSection').then((module) => ({ default: module.BudgetsSection })));
+const ReviewSection = lazy(() => import('@/features/review/ReviewSection').then((module) => ({ default: module.ReviewSection })));
+const TransactionsSection = lazy(() => import('@/features/transactions/TransactionsSection').then((module) => ({ default: module.TransactionsSection })));
+const InboxSection = lazy(() => import('@/features/inbox/InboxSection').then((module) => ({ default: module.InboxSection })));
 
 const SECTIONS: NavSection[] = [
   { id: 'overview', label: 'Overview' },
@@ -29,6 +31,46 @@ const SECTIONS: NavSection[] = [
   { id: 'inbox', label: 'Inbox / Connectors' },
 ];
 
+function DeferredSection({
+  id,
+  component: Component,
+}: {
+  id: string;
+  component: LazyExoticComponent<ComponentType>;
+}) {
+  const sectionRef = useRef<HTMLElement>(null);
+  const [shouldLoad, setShouldLoad] = useState(() => window.location.hash === `#${id}`);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || shouldLoad) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '800px 0px' },
+    );
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, [shouldLoad]);
+
+  return (
+    <section ref={sectionRef} id={id} className="scroll-mt-32">
+      {shouldLoad ? (
+        <Suspense fallback={<div className="h-32 animate-pulse rounded-xl bg-muted" aria-label={`Loading ${id}`} />}>
+          <Component />
+        </Suspense>
+      ) : (
+        <div className="h-32 rounded-xl bg-muted/40" aria-label={`${id} loads when nearby`} />
+      )}
+    </section>
+  );
+}
+
 export function DashboardLayout() {
   return (
     <DashboardUiProvider>
@@ -40,39 +82,17 @@ export function DashboardLayout() {
             <section id="overview" className="scroll-mt-32">
               <OverviewSection />
             </section>
-            <section id="timeline" className="scroll-mt-32">
-              <TimelineSection />
-            </section>
-            <section id="insights" className="scroll-mt-32">
-              <InsightsSection />
-            </section>
-            <section id="merchants" className="scroll-mt-32">
-              <MerchantIntelligenceSection />
-            </section>
-            <section id="categories" className="scroll-mt-32">
-              <CategoryIntelligenceSection />
-            </section>
-            <section id="recommendations" className="scroll-mt-32">
-              <RecommendationsSection />
-            </section>
-            <section id="analytics" className="scroll-mt-32">
-              <AnalyticsSection />
-            </section>
-            <section id="pipeline" className="scroll-mt-32">
-              <PipelineHealthSection />
-            </section>
-            <section id="budgets" className="scroll-mt-32">
-              <BudgetsSection />
-            </section>
-            <section id="review" className="scroll-mt-32">
-              <ReviewSection />
-            </section>
-            <section id="transactions" className="scroll-mt-32">
-              <TransactionsSection />
-            </section>
-            <section id="inbox" className="scroll-mt-32">
-              <InboxSection />
-            </section>
+            <DeferredSection id="timeline" component={TimelineSection} />
+            <DeferredSection id="insights" component={InsightsSection} />
+            <DeferredSection id="merchants" component={MerchantIntelligenceSection} />
+            <DeferredSection id="categories" component={CategoryIntelligenceSection} />
+            <DeferredSection id="recommendations" component={RecommendationsSection} />
+            <DeferredSection id="analytics" component={AnalyticsSection} />
+            <DeferredSection id="pipeline" component={PipelineHealthSection} />
+            <DeferredSection id="budgets" component={BudgetsSection} />
+            <DeferredSection id="review" component={ReviewSection} />
+            <DeferredSection id="transactions" component={TransactionsSection} />
+            <DeferredSection id="inbox" component={InboxSection} />
           </div>
         </main>
       </div>
