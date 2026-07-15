@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PFIS visual direction study</title>
+    <style>
+      * { box-sizing: border-box; }
+      :root {
+        color-scheme: light;
+        font-family: Manrope, "Segoe UI Variable", "Segoe UI", sans-serif;
+        font-synthesis: none;
+      }
+      body { margin: 0; background: #e8e8e4; color: #17201f; }
+      button { font: inherit; }
+      .study-header {
+        display: flex; justify-content: space-between; gap: 24px; align-items: end;
+        max-width: 1480px; margin: 0 auto; padding: 36px 32px 24px;
+      }
+      .study-header p { max-width: 720px; margin: 8px 0 0; color: #5f6865; line-height: 1.6; }
+      .study-header h1 { margin: 0; font-size: clamp(28px, 4vw, 48px); letter-spacing: -.04em; }
+      .status { padding: 8px 12px; border-radius: 999px; background: #d7eadf; color: #18583d; font-size: 13px; font-weight: 700; white-space: nowrap; }
+      .direction { max-width: 1480px; margin: 0 auto 36px; padding: 0 32px; }
+      .direction-label { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
+      .direction-label h2 { margin: 0; font-size: 18px; }
+      .direction-label p { margin: 0; color: #626c69; font-size: 14px; }
+      .app { min-height: 780px; overflow: hidden; border-radius: 28px; box-shadow: 0 24px 80px rgba(25, 38, 34, .12); }
+      .shell { display: grid; grid-template-columns: 80px minmax(0, 1fr); min-height: 780px; }
+      .rail { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 24px 12px; }
+      .brand { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; font-weight: 800; }
+      .rail nav { display: flex; flex: 1; flex-direction: column; gap: 8px; margin-top: 28px; }
+      .nav-item { width: 48px; height: 48px; border: 0; border-radius: 14px; background: transparent; display: grid; place-items: center; color: inherit; position: relative; }
+      .nav-item svg { width: 20px; height: 20px; }
+      .nav-item span { position: absolute; left: 60px; opacity: 0; pointer-events: none; }
+      .main { min-width: 0; }
+      .topbar { min-height: 72px; display: flex; align-items: center; justify-content: space-between; padding: 0 34px; }
+      .period { display: flex; gap: 8px; align-items: center; font-size: 14px; font-weight: 700; }
+      .top-actions { display: flex; gap: 10px; align-items: center; }
+      .icon-button, .avatar { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; border: 0; }
+      .avatar { font-size: 12px; font-weight: 800; }
+      .content { max-width: 1210px; margin: 0 auto; padding: 54px 46px 72px; }
+      .eyebrow { margin: 0 0 10px; font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+      .intro h3 { margin: 0; max-width: 780px; font-size: clamp(34px, 4.8vw, 66px); line-height: 1.02; letter-spacing: -.055em; font-weight: 650; }
+      .intro-copy { max-width: 650px; margin: 18px 0 0; font-size: 17px; line-height: 1.6; }
+      .horizon { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, .65fr); gap: 28px; margin-top: 46px; align-items: stretch; }
+      .instrument { min-width: 0; padding: 28px 30px 24px; border-radius: 22px; }
+      .instrument-head { display: flex; justify-content: space-between; gap: 20px; align-items: start; }
+      .metric-label { font-size: 13px; }
+      .metric { margin: 5px 0 0; font-size: clamp(36px, 5vw, 62px); font-weight: 760; letter-spacing: -.06em; font-variant-numeric: tabular-nums; }
+      .delta { margin-top: 8px; font-size: 14px; }
+      .health { text-align: right; }
+      .health strong { display: block; font-size: 28px; font-variant-numeric: tabular-nums; }
+      .chart { width: 100%; height: 190px; margin-top: 24px; overflow: visible; }
+      .chart text { font: 11px Manrope, "Segoe UI", sans-serif; }
+      .priority { display: flex; flex-direction: column; padding: 28px; border-radius: 22px; }
+      .priority-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; font-size: 18px; }
+      .priority h4 { margin: 42px 0 10px; font-size: 24px; line-height: 1.15; letter-spacing: -.03em; }
+      .priority p { margin: 0; line-height: 1.55; font-size: 14px; }
+      .priority button { margin-top: auto; padding: 12px 16px; border: 0; border-radius: 12px; text-align: left; font-weight: 800; }
+      .pulse { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin-top: 34px; }
+      .pulse-item { padding: 10px 26px; }
+      .pulse-item:first-child { padding-left: 0; }
+      .pulse-item span { display: block; font-size: 12px; margin-bottom: 8px; }
+      .pulse-item strong { font-size: 21px; font-variant-numeric: tabular-nums; }
+      .evidence { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 40px; padding-top: 22px; font-size: 13px; }
+      .evidence p { margin: 0; }
+      .evidence button { border: 0; background: none; color: inherit; font-weight: 800; }
+
+      /* A — Quiet Horizon */
+      .quiet { background: #f4f2ec; color: #15211f; }
+      .quiet .shell { background: #f7f5ef; }
+      .quiet .rail { background: #ecebe4; border-right: 1px solid #deded5; }
+      .quiet .brand { color: #f4fbf7; background: #164f3c; }
+      .quiet .nav-item { color: #6b7672; }
+      .quiet .nav-item.active { background: #dbe8e0; color: #174d3c; }
+      .quiet .nav-item.active::after { content: ""; position: absolute; left: -12px; width: 3px; height: 20px; border-radius: 3px; background: #1c7253; }
+      .quiet .topbar { border-bottom: 1px solid #e2e1da; }
+      .quiet .icon-button, .quiet .avatar { background: #ebeae3; color: #35423e; }
+      .quiet .eyebrow { color: #5c6b66; }
+      .quiet .intro h3 em { color: #b64f42; font-style: normal; }
+      .quiet .intro-copy { color: #67716e; }
+      .quiet .instrument { background: #e4ece7; }
+      .quiet .metric-label, .quiet .delta { color: #53645e; }
+      .quiet .metric { color: #183c31; }
+      .quiet .health span { color: #68756f; font-size: 12px; }
+      .quiet .health strong { color: #286d52; }
+      .quiet .priority { background: #1b2630; color: #f6f3eb; }
+      .quiet .priority-icon { background: #2c3943; color: #c5b8ff; }
+      .quiet .priority p { color: #c5cbd0; }
+      .quiet .priority button { background: #d9cfaa; color: #21251f; }
+      .quiet .pulse-item + .pulse-item { border-left: 1px solid #d6d6ce; }
+      .quiet .pulse-item span { color: #747c79; }
+      .quiet .evidence { border-top: 1px solid #dfded6; color: #6b7471; }
+      .quiet .evidence button { color: #215d47; }
+
+      /* B — Midnight Treasury */
+      .midnight { background: #080c12; color: #f0f5f3; }
+      .midnight .shell { background: #0b1017; }
+      .midnight .rail { background: #070a0f; border-right: 1px solid #1c2530; }
+      .midnight .brand { color: #07110c; background: #7be0a8; }
+      .midnight .nav-item { color: #73808c; }
+      .midnight .nav-item.active { color: #9ff1bf; background: #13241d; }
+      .midnight .topbar { border-bottom: 1px solid #1a242e; }
+      .midnight .icon-button, .midnight .avatar { color: #dce7e2; background: #17202a; }
+      .midnight .eyebrow { color: #7be0a8; }
+      .midnight .intro h3 em { color: #ff8e7d; font-style: normal; }
+      .midnight .intro-copy, .midnight .metric-label, .midnight .delta { color: #8f9aa4; }
+      .midnight .instrument { background: #101821; border: 1px solid #26313c; }
+      .midnight .health span { color: #84909a; font-size: 12px; }
+      .midnight .health strong { color: #86e8ad; }
+      .midnight .priority { background: #16231d; border: 1px solid #2d493a; }
+      .midnight .priority-icon { color: #0a1210; background: #8bebb2; }
+      .midnight .priority p { color: #aebdb5; }
+      .midnight .priority button { color: #07110c; background: #7be0a8; }
+      .midnight .pulse-item + .pulse-item { border-left: 1px solid #26313c; }
+      .midnight .pulse-item span, .midnight .evidence { color: #7f8b95; }
+      .midnight .evidence { border-top: 1px solid #1c2630; }
+      .midnight .evidence button { color: #8bebb2; }
+
+      /* C — Intelligence Canvas */
+      .canvas { background: #f6f7fb; color: #181a28; }
+      .canvas .shell { background: #f8f9fc; }
+      .canvas .rail { background: white; border-right: 1px solid #e3e5ef; }
+      .canvas .brand { color: white; background: #6657d9; }
+      .canvas .nav-item { color: #82869b; }
+      .canvas .nav-item.active { color: #5545c9; background: #efedff; }
+      .canvas .topbar { background: rgba(255,255,255,.72); border-bottom: 1px solid #e6e7ef; }
+      .canvas .icon-button, .canvas .avatar { color: #4f5265; background: #edeef4; }
+      .canvas .eyebrow { color: #6657d9; }
+      .canvas .intro h3 em { color: #f06068; font-style: normal; }
+      .canvas .intro-copy, .canvas .metric-label, .canvas .delta { color: #6f7283; }
+      .canvas .instrument { background: white; box-shadow: 0 18px 50px rgba(49, 46, 95, .08); }
+      .canvas .health span { color: #7d8090; font-size: 12px; }
+      .canvas .health strong { color: #5d51c9; }
+      .canvas .priority { color: #231e46; background: #ebe8ff; }
+      .canvas .priority-icon { color: white; background: #6657d9; }
+      .canvas .priority p { color: #69647f; }
+      .canvas .priority button { color: white; background: #5a4bcf; }
+      .canvas .pulse-item + .pulse-item { border-left: 1px solid #dfe1ea; }
+      .canvas .pulse-item span, .canvas .evidence { color: #787b8b; }
+      .canvas .evidence { border-top: 1px solid #e1e3ea; }
+      .canvas .evidence button { color: #5849c9; }
+
+      @media (max-width: 800px) {
+        .study-header { align-items: start; flex-direction: column; padding-inline: 18px; }
+        .direction { padding-inline: 12px; }
+        .app, .shell { min-height: 900px; }
+        .shell { display: block; padding-bottom: 66px; position: relative; }
+        .rail { position: absolute; inset: auto 0 0; height: 66px; z-index: 2; flex-direction: row; padding: 8px 12px; border: 0 !important; border-top: 1px solid currentColor !important; }
+        .brand { display: none; }
+        .rail nav { flex: 1; flex-direction: row; margin: 0; justify-content: space-around; }
+        .nav-item { width: 46px; height: 46px; }
+        .nav-item.active::after { display: none; }
+        .topbar { min-height: 62px; padding: 0 18px; }
+        .top-actions .icon-button:nth-child(-n+2) { display: none; }
+        .content { padding: 34px 20px 48px; }
+        .intro h3 { font-size: 40px; }
+        .horizon { grid-template-columns: 1fr; margin-top: 34px; }
+        .instrument { padding-inline: 20px; }
+        .priority h4 { margin-top: 24px; }
+        .priority button { margin-top: 28px; }
+        .pulse { grid-template-columns: 1fr; }
+        .pulse-item { padding: 18px 0; }
+        .pulse-item + .pulse-item { border-left: 0 !important; border-top: 1px solid currentColor; }
+        .evidence { align-items: start; flex-direction: column; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="study-header">
+      <div>
+        <h1>PFIS visual direction study</h1>
+        <p>Same financial story, three visual systems. Direction A is selected because it feels like a calm personal instrument, not a trading terminal or a generic AI dashboard.</p>
+      </div>
+      <span class="status">Direction A selected</span>
+    </header>
+
+    <main id="studies"></main>
+
+    <script>
+      const directions = [
+        { key: 'quiet', title: 'A. Quiet Horizon', note: 'Selected — calm, financial, distinctive' },
+        { key: 'midnight', title: 'B. Midnight Treasury', note: 'Rejected as default — too urgent and trading-oriented' },
+        { key: 'canvas', title: 'C. Intelligence Canvas', note: 'Rejected as default — too close to generic AI SaaS' },
+      ];
+      const navIcons = [
+        '<path d="M4 13h6V4H4v9Zm0 7h6v-3H4v3Zm10 0h6v-9h-6v9Zm0-16v3h6V4h-6Z"/>',
+        '<path d="M4 18V9m5 9V5m5 13v-7m5 7V3"/>',
+        '<path d="M3 12h18M12 3v18"/>',
+        '<path d="m4 17 5-5 4 4 7-9"/><path d="M15 7h5v5"/>',
+        '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.36a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.64 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15 4.64a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9 1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/>',
+      ];
+      function directionMarkup(direction) {
+        const nav = navIcons.map((path, index) => `<button class="nav-item ${index === 0 ? 'active' : ''}" aria-label="${['Today','Activity','Plan','Insights','Data and settings'][index]}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">${path}</svg></button>`).join('');
+        return `
+          <section class="direction">
+            <div class="direction-label"><h2>${direction.title}</h2><p>${direction.note}</p></div>
+            <div class="app ${direction.key}">
+              <div class="shell">
+                <aside class="rail"><div class="brand">P</div><nav>${nav}</nav></aside>
+                <div class="main">
+                  <header class="topbar"><div class="period">July 2026 <span>⌄</span></div><div class="top-actions"><button class="icon-button" aria-label="Search">⌕</button><button class="icon-button" aria-label="Ask PFIS">✦</button><div class="avatar">NR</div></div></header>
+                  <div class="content">
+                    <div class="intro"><p class="eyebrow">Thursday · Financial brief</p><h3>Good morning, Naveen.<br>Your spending is <em>running ahead.</em></h3><p class="intro-copy">You have spent ₹20,604 more than you earned this month. One recurring-cost review can improve the outlook without changing your daily routine.</p></div>
+                    <div class="horizon">
+                      <section class="instrument" aria-label="Financial horizon"><div class="instrument-head"><div><span class="metric-label">Net cash flow</span><div class="metric">−₹20,604</div><div class="delta">₹7,800 better than this point last month</div></div><div class="health"><span>Financial health</span><strong>45</strong></div></div>
+                        <svg class="chart" viewBox="0 0 720 190" role="img" aria-label="Cash flow fell early in the month, recovered, then declined after a spending spike">
+                          <path d="M12 145 C80 130 104 64 165 82 S240 152 302 119 S381 50 444 72 S530 145 596 118 S662 92 708 103" fill="none" stroke="currentColor" stroke-opacity=".22" stroke-width="14" stroke-linecap="round"/>
+                          <path d="M12 145 C80 130 104 64 165 82 S240 152 302 119 S381 50 444 72 S530 145 596 118 S662 92 708 103" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                          <circle cx="444" cy="72" r="6" fill="#bd5748"/><line x1="444" y1="72" x2="444" y2="25" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="3 4"/><text x="456" y="28" fill="currentColor">₹25k spending spike</text>
+                          <text x="12" y="182" fill="currentColor" opacity=".55">1 Jul</text><text x="660" y="182" fill="currentColor" opacity=".55">15 Jul</text>
+                        </svg>
+                      </section>
+                      <aside class="priority"><div class="priority-icon">✦</div><h4>Review four recurring charges</h4><p>₹20,585 repeats monthly. PFIS found commitments that may no longer be useful.</p><button>Review commitments →</button></aside>
+                    </div>
+                    <section class="pulse" aria-label="Financial pulse"><div class="pulse-item"><span>Spent this month</span><strong>₹63,804</strong></div><div class="pulse-item"><span>Projected month end</span><strong>−₹88,662</strong></div><div class="pulse-item"><span>Recurring burden</span><strong>47.7%</strong></div></section>
+                    <footer class="evidence"><p>Based on activity through 15 July · 22 transactions · Synced 6 min ago</p><button>See how PFIS reached this →</button></footer>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>`;
+      }
+      document.getElementById('studies').innerHTML = directions.map(directionMarkup).join('');
+    </script>
+  </body>
+</html>
