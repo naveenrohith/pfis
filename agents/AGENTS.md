@@ -5,6 +5,8 @@ PFIS uses an agent-based workflow so Copilot and coding agents make changes in a
 ## Execution Order
 
 Before starting any non-trivial task, read [CONTEXT.md](CONTEXT.md) and the relevant files in `docs/`.
+For React shell, navigation, component, accessibility, or visual-system work, also read
+[UI_UX.md](UI_UX.md) and `docs/ui-ux-masterplan.md`.
 
 | # | Agent | File | Responsibility |
 |---|-------|------|----------------|
@@ -30,7 +32,7 @@ If REVIEW finds no issues, FIX may be skipped. TEST and QUALITY must still run f
 - Database: async SQLAlchemy models with `AsyncSession`; SQLite in local development, PostgreSQL-compatible design for production.
 - API: routers under `backend/app/api/routes`, mounted with `/api`.
 - Services: Gmail sync, parser pipeline, transaction service, insights, jobs, seed data.
-- Frontend: static dashboard served by FastAPI from `backend/app/static`.
+- Frontend: canonical React/Vite app under `frontend/`, with a legacy static no-build fallback.
 - Tests: pytest suite under `tests/pytest` with `pytest.ini` pointing there.
 - Core pipeline: Gmail/raw email -> classify -> parse -> normalize -> categorize -> deduplicate -> store transaction -> insights/reports/dashboard.
 

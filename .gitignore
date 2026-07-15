@@ -24,7 +24,8 @@ env/
 .env
 
 # IDE
-.vscode/
+.vscode/*
+!.vscode/mcp.json
 .idea/
 *.swp
 *.swo
@@ -53,3 +54,5 @@ coverage.xml
 node_modules/
 .next/
 *.tsbuildinfo
+frontend/test-results/
+frontend/playwright-report/

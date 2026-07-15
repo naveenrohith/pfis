@@ -21,7 +21,7 @@ Skip FIX only when REVIEW finds no issues.
 - Database: async SQLAlchemy models and `AsyncSession`.
 - API routes: `backend/app/api/routes`, mounted under `/api`.
 - Services: Gmail sync, parser pipeline, transaction service, insights, jobs, reports.
-- Frontend: static dashboard served from `backend/app/static`.
+- Frontend: canonical React/Vite app under `frontend/`; `backend/app/static` is a no-build fallback.
 - Tests: pytest under `tests/pytest`.
 - Core pipeline: raw email -> classify -> parse -> normalize -> categorize -> deduplicate -> store -> insights/dashboard/reports.
 
@@ -51,6 +51,9 @@ If a detail is not in docs or existing code, do not invent it. State the missing
 - Do not add new dependencies without a clear reason.
 - Do not copy Java/Spring/vendor-invoice rules into PFIS.
 - Run QUALITY checks for redundant code, dead files, stale imports, and copied project references before REVIEW.
+- For UI/UX work, read `agents/UI_UX.md` and `docs/ui-ux-masterplan.md`.
+- Use the official shadcn MCP registry for component discovery, then apply PFIS accessibility,
+  dependency, performance, and privacy gates before adopting registry output.
 
 ## Required Response Shape For Non-Trivial Work
 
