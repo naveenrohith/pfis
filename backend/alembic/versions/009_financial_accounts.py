@@ -22,6 +22,20 @@ def upgrade() -> None:
     inspector = inspect(bind)
     tables = inspector.get_table_names()
 
+    # SQLite batch operations can leave an empty temporary table when a prior
+    # migration attempt is interrupted. Recover only the provably empty case;
+    # a populated table requires manual inspection to avoid data loss.
+    if "_alembic_tmp_transactions" in tables:
+        temp_rows = bind.execute(
+            sa.text("SELECT COUNT(*) FROM _alembic_tmp_transactions")
+        ).scalar_one()
+        if temp_rows:
+            raise RuntimeError(
+                "Refusing to remove populated _alembic_tmp_transactions; inspect it manually"
+            )
+        op.drop_table("_alembic_tmp_transactions")
+        tables = inspect(bind).get_table_names()
+
     if "financial_accounts" not in tables:
         op.create_table(
             "financial_accounts",
@@ -34,7 +48,9 @@ def upgrade() -> None:
             sa.Column("connector_account_id", sa.String(36), nullable=True),
             sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
-            sa.UniqueConstraint("user_id", "masked_number", name="uq_financial_accounts_user_masked"),
+            sa.UniqueConstraint(
+                "user_id", "masked_number", name="uq_financial_accounts_user_masked"
+            ),
         )
 
     indexes = {index["name"] for index in inspect(bind).get_indexes("financial_accounts")}
@@ -91,8 +107,8 @@ def upgrade() -> None:
                 sa.text(
                     """
                     INSERT INTO financial_accounts
-                    (id, user_id, institution_name, account_type, masked_number, currency, is_active)
-                    VALUES (:id, :user_id, 'Unknown', 'unknown', :masked_number, :currency, :is_active)
+                    (id, user_id, institution_name, account_type, masked_number, currency, is_active, created_at)
+                    VALUES (:id, :user_id, 'Unknown', 'unknown', :masked_number, :currency, :is_active, CURRENT_TIMESTAMP)
                     """
                 ),
                 {
@@ -125,7 +141,9 @@ def downgrade() -> None:
     inspector = inspect(bind)
     if "transactions" in inspector.get_table_names():
         indexes = {index["name"] for index in inspector.get_indexes("transactions")}
-        if "financial_account_id" in {column["name"] for column in inspector.get_columns("transactions")}:
+        if "financial_account_id" in {
+            column["name"] for column in inspector.get_columns("transactions")
+        }:
             with op.batch_alter_table("transactions") as batch_op:
                 if "ix_transactions_financial_account_id" in indexes:
                     batch_op.drop_index("ix_transactions_financial_account_id")

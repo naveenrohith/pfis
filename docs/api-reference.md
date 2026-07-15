@@ -131,12 +131,46 @@ JSON body:
 | Method | Path | Body | Query / Path | Success | Errors | Returns |
 | --- | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/transactions/` | `TransactionCreate` | — | `201` | `409` | `TransactionResponse` (auto-dedup) |
-| `GET` | `/api/transactions/` | — | `user_id`, `month?` (1–12), `year?` (2020–2030), `category_id?`, `limit` (1–200, def 50), `offset` (≥0) | `200` | — | `list[TransactionResponse]`; header `X-Total-Count` |
+| `GET` | `/api/transactions/` | — | `user_id`; optional `month`, `year`, `category_id`, `text`/`q`, `type`/`transaction_type`, `payment_method`, `review_state`/`reviewed`, `date_from`, `date_to`, `amount_min`, `amount_max`, `sort_field`/`sort`, `sort_direction`/`direction`; `limit`, `offset` | `200` | — | `list[TransactionResponse]`; header `X-Total-Count` |
 | `GET` | `/api/transactions/summary` | — | `user_id`, `month` (1–12), `year` (2020–2030) | `200` | — | `TransactionSummary` |
 | `PATCH` | `/api/transactions/bulk-update` | `BulkTransactionUpdate` | `user_id` | `200` | — | `BulkTransactionUpdateResponse` |
 | `GET` | `/api/transactions/{txn_id}` | — | `txn_id` | `200` | `404` | `TransactionResponse` |
 | `PATCH` | `/api/transactions/{txn_id}` | `TransactionUpdate` | `txn_id` | `200` | `404,409` | `TransactionResponse` (correction learning) |
 | `DELETE` | `/api/transactions/{txn_id}` | — | `txn_id` | `204` | `404` | — |
+
+`TransactionCreate` also accepts an optional owned `financial_account_id`. Transfer
+legs include `transfer_group_id` and `is_transfer=true`; they remain visible in the
+ledger but are excluded from income, spending, budget, guidance, forecast, and
+report aggregates.
+
+## Guidance and Dashboard Preferences
+
+| Method | Path | Query / Body | Returns |
+| --- | --- | --- | --- |
+| `GET` | `/api/guidance/brief` | `user_id`, `period=daily|weekly|monthly`, optional `month`, `year` | `GuidanceBrief` with ruleset version, freshness, health changes, and ranked recommendations |
+| `POST` | `/api/guidance/query` | `user_id`, `GuidanceQueryRequest` | `GuidanceQueryResult`; unsupported intents return examples instead of a generated answer |
+| `PATCH` | `/api/guidance/{recommendation_id}/state` | `user_id`, state `active|dismissed|snoozed`, optional `snoozed_until` | Persisted recommendation state |
+| `GET` | `/api/preferences/dashboard` | `user_id` | Versioned `DashboardPreferences`; deterministic defaults when missing |
+| `PATCH` | `/api/preferences/dashboard` | `user_id`, partial preferences | Validated, user-owned preferences |
+| `DELETE` | `/api/preferences/dashboard` | `user_id` | Reset defaults |
+
+Guidance is deterministic and allowlisted. Supported intents cover period totals,
+merchant/category spend, comparisons, recurring charges, and budget status. Raw
+queries are neither persisted nor logged by the guidance service.
+
+## Accounts, Balances, Net Worth, and Transfers
+
+| Method | Path | Query / Body | Returns |
+| --- | --- | --- | --- |
+| `GET` | `/api/accounts` | `user_id` | `list[FinancialAccount]` |
+| `POST` | `/api/accounts` | `user_id`, `FinancialAccountCreate` | Created account |
+| `PATCH` | `/api/accounts/{account_id}` | `user_id`, `FinancialAccountUpdate` | Updated owned account |
+| `POST` | `/api/accounts/{account_id}/balances` | `user_id`, `BalanceSnapshotCreate` | Append-only balance snapshot; duplicate account/date returns `409` |
+| `GET` | `/api/net-worth` | `user_id`, optional `as_of` | `NetWorthSeries`, calculated as latest assets minus latest liabilities |
+| `POST` | `/api/transfers` | `user_id`, `TransferCreate` | Atomic debit/credit pair sharing a transfer identifier |
+
+All account and preference routes resolve the authenticated user scope. Cross-user
+resource access returns no data, and cross-currency transfers are rejected.
 
 ## Categories
 

@@ -34,6 +34,7 @@ from app.schemas.dashboard import (
     WorkspaceSnapshot,
 )
 from app.services.insights_service import InsightsService
+from app.services.recommendation_utils import recommendation_id
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,13 @@ class WorkspaceService:
             review=review,
             insights=insights_payload.get("insights", []),
         )
+        for index, recommendation in enumerate(recommendations):
+            recommendation.id = recommendation_id(
+                recommendation.type, recommendation.target, recommendation.title
+            )
+            recommendation.priority = max(10, 100 - index * 10)
+            recommendation.reason_codes = [recommendation.type, recommendation.severity]
+            recommendation.expected_impact = self._expected_impact(recommendation.type)
 
         return WorkspaceResponse(
             month=month,
@@ -174,6 +182,7 @@ class WorkspaceService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -246,6 +255,8 @@ class WorkspaceService:
     def _classify_event(
         txn: Transaction, category_name: str | None, recurring_merchants: set[str]
     ) -> str:
+        if txn.is_transfer:
+            return "transfer"
         if txn.transaction_type == TransactionType.REFUND:
             return "refund"
         if txn.transaction_type == TransactionType.CREDIT:
@@ -398,3 +409,13 @@ class WorkspaceService:
                 )
 
         return recs
+
+    @staticmethod
+    def _expected_impact(kind: str) -> str:
+        return {
+            "budget": "Reduce the risk of exceeding a monthly category limit.",
+            "recurring": "Identify avoidable monthly commitments.",
+            "review": "Improve the reliability of financial totals.",
+            "anomaly": "Confirm whether unusual activity is expected.",
+            "savings": "Improve projected monthly savings.",
+        }.get(kind, "Improve the quality of the selected financial decision.")

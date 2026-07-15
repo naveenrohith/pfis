@@ -280,6 +280,7 @@ class InsightsService:
                 func.avg(Transaction.confidence_score).label("avg_confidence"),
             ).where(
                 Transaction.user_id == user_id,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -305,6 +306,7 @@ class InsightsService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -331,6 +333,7 @@ class InsightsService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -358,6 +361,7 @@ class InsightsService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -407,6 +411,7 @@ class InsightsService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 Transaction.merchant_normalized.isnot(None),
             )
             .group_by(Transaction.merchant_normalized)

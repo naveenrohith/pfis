@@ -41,17 +41,20 @@ from app.api.error_responses import (
     request_validation_exception_handler,
 )
 from app.api.routes import (
+    accounts,
     ai,
     analytics,
     auth,
     budgets,
     categories,
     dashboard,
+    guidance,
     health,
     insights,
     jobs,
     merchants,
     pipeline,
+    preferences,
     reports,
     transactions,
     users,
@@ -205,6 +208,9 @@ app.include_router(merchants.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
 app.include_router(analytics.goals_router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
+app.include_router(guidance.router, prefix="/api")
+app.include_router(preferences.router, prefix="/api")
+app.include_router(accounts.router, prefix="/api")
 
 # Phase 6: Budget + Reports routes
 app.include_router(budgets.router, prefix="/api")

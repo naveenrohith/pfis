@@ -83,6 +83,13 @@ class CashFlowProjection(BaseModel):
     daily_spend_rate: float = 0.0
     days_elapsed: int = 0
     days_in_month: int = 0
+    recurring_commitments: float = 0.0
+    budgeted_remaining: float = 0.0
+    projected_range_low: float = 0.0
+    projected_range_high: float = 0.0
+    assumptions: list[str] = Field(default_factory=list)
+    data_through: date | None = None
+    ruleset_version: str = "pfis-cash-flow-2"
 
 
 class MonthComparison(BaseModel):

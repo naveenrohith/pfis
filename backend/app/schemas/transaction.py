@@ -47,6 +47,7 @@ class TransactionCreate(BaseModel):
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
     parser_version: int = Field(default=1, ge=1)
     source_email_id: str | None = None
+    financial_account_id: str | None = None
 
 
 class TransactionUpdate(BaseModel):
@@ -105,6 +106,8 @@ class TransactionResponse(BaseModel):
     created_at: datetime
     source_received_at: datetime | None = None
     financial_account_id: str | None = None
+    transfer_group_id: str | None = None
+    is_transfer: bool = False
 
     model_config = {"from_attributes": True}
 

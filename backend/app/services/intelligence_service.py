@@ -74,6 +74,7 @@ class IntelligenceService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -194,6 +195,7 @@ class IntelligenceService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -265,6 +267,17 @@ class IntelligenceService:
         else:
             days_elapsed = days_in_month
             projected_spend = spend
+        recurring = (await InsightsService(self.db).generate_insights(user_id, month, year)).get(
+            "recurring_payments", []
+        )
+        recurring_commitments = sum(float(item.get("avg_amount", 0)) for item in recurring)
+        category_spend = await self._category_spend_map(user_id, month, year)
+        budgets_result = await self.db.execute(select(Budget).where(Budget.user_id == user_id))
+        budgeted_remaining = sum(
+            max(float(budget.monthly_limit) - category_spend.get(budget.category_id, 0.0), 0.0)
+            for budget in budgets_result.scalars().all()
+        )
+        range_width = projected_spend * 0.1
         return CashFlowProjection(
             month=month,
             year=year,
@@ -276,6 +289,20 @@ class IntelligenceService:
             daily_spend_rate=round(spend / days_elapsed, 2) if days_elapsed else 0.0,
             days_elapsed=days_elapsed,
             days_in_month=days_in_month,
+            recurring_commitments=round(recurring_commitments, 2),
+            budgeted_remaining=round(budgeted_remaining, 2),
+            projected_range_low=round(max(projected_spend - range_width, 0.0), 2),
+            projected_range_high=round(projected_spend + range_width, 2),
+            assumptions=[
+                "Current daily spend rate continues through month end.",
+                "Recurring charges are detected from historical merchant repetition.",
+                "The range is a deterministic 10% band, not a guarantee.",
+            ],
+            data_through=(
+                today
+                if today.year == year and today.month == month
+                else date(year, month, days_in_month)
+            ),
         )
 
     async def month_comparison(self, user_id: str, month: int, year: int) -> MonthComparison:
@@ -483,6 +510,7 @@ class IntelligenceService:
                 ).label("spend"),
             ).where(
                 Transaction.user_id == user_id,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -501,6 +529,7 @@ class IntelligenceService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -521,6 +550,7 @@ class IntelligenceService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -540,6 +570,7 @@ class IntelligenceService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -562,6 +593,7 @@ class IntelligenceService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -633,6 +665,7 @@ class IntelligenceService:
         conditions = [
             Transaction.user_id == user_id,
             Transaction.transaction_type == TransactionType.DEBIT,
+            Transaction.is_transfer.is_(False),
             extract("month", Transaction.transaction_date) == month,
             extract("year", Transaction.transaction_date) == year,
         ]

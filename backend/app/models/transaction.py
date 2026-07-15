@@ -8,7 +8,7 @@ import enum
 import uuid
 from datetime import UTC, date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -79,6 +79,8 @@ class Transaction(Base):
     financial_account_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("financial_accounts.id"), nullable=True, index=True
     )
+    transfer_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    is_transfer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)

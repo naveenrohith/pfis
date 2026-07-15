@@ -28,7 +28,7 @@ class WorkspaceSnapshot(BaseModel):
 class TimelineEvent(BaseModel):
     """A single financial movement rendered on the timeline."""
 
-    type: str  # income | subscription | bill | shopping | refund | spending
+    type: str  # income | subscription | bill | shopping | refund | spending | transfer
     label: str
     merchant: str | None = None
     category: str | None = None
@@ -59,6 +59,11 @@ class WorkspaceRecommendation(BaseModel):
     description: str
     action_label: str
     target: str  # frontend section id to route to
+    id: str = ""
+    priority: int = 50
+    reason_codes: list[str] = Field(default_factory=list)
+    evidence: list[dict[str, str]] = Field(default_factory=list)
+    expected_impact: str | None = None
 
 
 class ReviewSummary(BaseModel):

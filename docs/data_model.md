@@ -11,6 +11,9 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 - `User`: registered user profile, currency, auth status.
 - `GmailAccount`: connected Gmail account and encrypted token references.
 - `FinancialAccount`: user-owned account identity inferred from connector metadata.
+- `AccountBalanceSnapshot`: append-only dated balance for an asset or liability account.
+- `DashboardPreference`: versioned, user-owned widget layout, theme, density, favorites, and onboarding goal.
+- `RecommendationState`: user-owned dismissal or snooze state keyed by stable recommendation id.
 - `MonthlySummary`: persisted dashboard/report aggregate cache for one user and month.
 - `RawEmail`: stored email subject/body/sender/received timestamp for traceability.
 - `Transaction`: parsed financial transaction with confidence, parser version, fingerprint, and optional source email.
@@ -27,6 +30,16 @@ Transactions may reference a `FinancialAccount` through the nullable
 `financial_account_id` field. Migration `009_financial_accounts` backfills
 accounts from existing four-digit account metadata; new ingestion reuses the
 user-scoped account record and never stores full account numbers.
+
+Migration `011_premium_workspace` adds asset/liability classification, balance
+snapshots, dashboard preferences, recommendation state, and linked transfer
+metadata. Balance snapshots are immutable after creation and unique per account
+and date. Net worth carries forward each account's most recent snapshot and
+calculates assets minus liabilities. It does not infer balances from cash flow.
+
+An atomic transfer creates debit and credit transactions with one
+`transfer_group_id`. Both rows have `is_transfer=true`, remain auditable in the
+transaction ledger, and are excluded from income/spend aggregates.
 
 `MonthlySummary` is invalidated within the same transaction-service commit as
 transaction creation, correction, or deletion. The next dashboard or report
@@ -48,6 +61,8 @@ users' records. The indexes are managed by Alembic migration
 - Tokens and OAuth secrets must be encrypted before storage.
 - Raw emails are retained to support reprocessing.
 - Transaction `fingerprint` protects deduplication.
+- Transfer legs must be created together and excluded from financial aggregates.
+- Dashboard preferences, recommendation state, accounts, and balances are always user scoped.
 - Parser changes must preserve `parser_version` traceability.
 - Model changes require tests and migration review.
 - Local/demo startup may create tables automatically for convenience, but shared or production environments must use Alembic migrations as the schema control path.
