@@ -27,12 +27,12 @@ function confidenceVariant(score: number) {
   return 'danger' as const;
 }
 
-export function ReviewSection() {
+export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
   const transactions = useTransactions();
   const categories = useCategories();
   const { notify } = useToast();
-  const { focusedReviewId, focusReview } = useDashboardUi();
+  const { focusedReviewId, focusReview, scrollTo } = useDashboardUi();
   const queryClient = useQueryClient();
   const currency = user?.currency ?? 'INR';
 
@@ -106,20 +106,36 @@ export function ReviewSection() {
 
   return (
     <div>
-      <SectionTitle
-        eyebrow="Review"
-        title="Review queue"
-        description="Confirm or correct transactions that need a second look."
-        action={
+      {!embedded ? (
+        <SectionTitle
+          eyebrow="Review"
+          title="Review queue"
+          description="Confirm or correct transactions that need a second look."
+          action={
+            <Badge variant={pendingCount > 0 ? 'warning' : 'success'}>
+              {pendingCount > 0 ? `${pendingCount} pending` : 'Queue clear'}
+            </Badge>
+          }
+        />
+      ) : null}
+
+      {embedded ? (
+        <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+          <div>
+            <p className="text-xs font-bold text-muted-foreground">Focused review</p>
+            <h2 className="mt-1 text-2xl font-extrabold tracking-[-0.035em]">
+              {pendingCount > 0 ? 'Resolve uncertain activity' : 'Everything is ready'}
+            </h2>
+          </div>
           <Badge variant={pendingCount > 0 ? 'warning' : 'success'}>
             {pendingCount > 0 ? `${pendingCount} pending` : 'Queue clear'}
           </Badge>
-        }
-      />
+        </div>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Queue */}
-        <Card className="lg:col-span-2">
+        <Card className={items.length === 0 ? 'lg:col-span-3' : 'lg:col-span-2'}>
           <CardContent className="p-4 sm:p-5">
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
               <Segmented
@@ -168,7 +184,11 @@ export function ReviewSection() {
                   <option value="credit">Credit</option>
                   <option value="refund">Refund</option>
                 </Select>
-                <Button size="sm" onClick={() => bulkMutation.mutate()} disabled={bulkMutation.isPending}>
+                <Button
+                  size="sm"
+                  onClick={() => bulkMutation.mutate()}
+                  disabled={bulkMutation.isPending}
+                >
                   Apply &amp; mark reviewed
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
@@ -184,9 +204,18 @@ export function ReviewSection() {
                 ))}
               </div>
             ) : items.length === 0 ? (
-              <EmptyState icon={<CheckCircle2 />} title="Nothing to review" description="This queue is clear." />
+              <EmptyState
+                icon={<CheckCircle2 />}
+                title="Everything is ready"
+                description="PFIS found no uncertain transactions in this period. You can return here whenever a new item needs confirmation."
+                action={
+                  <Button variant="outline" onClick={() => scrollTo('transactions')}>
+                    Browse the ledger
+                  </Button>
+                }
+              />
             ) : (
-              <div className="grid max-h-[34rem] gap-2 overflow-y-auto pr-1">
+              <div className="max-h-[34rem] divide-y divide-border/70 overflow-y-auto rounded-xl bg-secondary/35 px-2">
                 {items.map((t) => (
                   <ReviewRow
                     key={t.id}
@@ -204,13 +233,15 @@ export function ReviewSection() {
         </Card>
 
         {/* Detail */}
-        <ReviewDetail
-          transaction={focused}
-          categories={categories.data ?? []}
-          currency={currency}
-          onSaved={() => invalidate()}
-          onNext={nextPending}
-        />
+        {items.length > 0 ? (
+          <ReviewDetail
+            transaction={focused}
+            categories={categories.data ?? []}
+            currency={currency}
+            onSaved={() => invalidate()}
+            onNext={nextPending}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -233,8 +264,8 @@ function ReviewRow({
 }) {
   return (
     <div
-      className={`flex items-center gap-3 rounded-lg border p-3 transition-colors ${
-        active ? 'border-primary bg-primary/5' : 'border-border bg-card hover:bg-muted/35'
+      className={`flex items-center gap-3 px-2 py-3 transition-colors ${
+        active ? 'bg-primary/10' : 'hover:bg-muted/45'
       }`}
     >
       <input
