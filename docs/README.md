@@ -13,7 +13,9 @@ This directory is the source of truth for PFIS agent and Copilot work.
 - [testing.md](testing.md) - pytest strategy and validation commands
 - [modernization-plan.md](modernization-plan.md) - phased modernization implementation tracker
 - [deployment.md](deployment.md) - production-candidate deployment, backup, and health runbook
-- [frontend.md](frontend.md) - static dashboard and Svelte migration ownership
+- [frontend.md](frontend.md) - canonical React/Vite workspace ownership and release gates
+- [ui-ux-masterplan.md](ui-ux-masterplan.md) - workspace navigation, MCP component research, and UI/UX delivery gates
+- [privacy-review-premium-workspace.md](privacy-review-premium-workspace.md) - premium workspace data-use and privacy approval
 
 ## Domain Docs
 

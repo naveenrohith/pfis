@@ -21,6 +21,9 @@ Production startup intentionally fails when these values are unsafe.
 - Do not rely on `Base.metadata.create_all` outside local/demo mode.
 - Run `tests/pytest/test_migration_discipline.py` after model or migration changes.
 - Take a database backup before applying migrations to shared environments.
+- Migration 009 safely removes an empty `_alembic_tmp_transactions` table left by an interrupted
+  local SQLite batch migration, but refuses to remove it when it contains rows. Backfill inserts
+  always populate `financial_accounts.created_at` for compatibility with ORM-initialized databases.
 
 ## Backup And Restore
 

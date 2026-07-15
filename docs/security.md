@@ -32,6 +32,14 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 - Do not inject raw email content into dashboard HTML.
 - Avoid unsafe `innerHTML` unless the inserted fields are explicitly escaped.
 
+## Financial Guidance and Workspace Privacy
+
+- Guidance is deterministic and allowlisted; unsupported questions return supported examples.
+- Do not persist or log raw coach queries, merchant-level telemetry, email bodies, tokens, or secrets.
+- Recommendation state and dashboard preferences store only stable identifiers and validated settings.
+- Account, balance, net-worth, transfer, preference, and guidance-state operations must resolve user ownership.
+- Balance snapshots are append-only; corrections require a new dated snapshot rather than silent history edits.
+
 ## API Safety
 
 - Preserve rate limiting for sensitive endpoints.

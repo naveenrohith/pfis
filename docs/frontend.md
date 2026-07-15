@@ -22,6 +22,24 @@ removed.
   labelled controls, and visible focus states.
 - `npm run build`, `npm run test`, and `npm run lint` must pass; CI enforces all
   three (`.github/workflows/ci.yml`, `frontend` job).
+- Group product features through the workspace model in `docs/ui-ux-masterplan.md`.
+- Preserve existing section hashes when reorganizing navigation or cross-feature actions.
+- Use the official shadcn MCP server for component research, but retain existing PFIS primitives
+  when they already meet accessibility and interaction requirements.
+- Keep the initial route below 100 KB gzip and each lazy feature chunk below 130 KB gzip.
+- Use the persisted dashboard preference contract for widget order, visibility, supported sizes,
+  density, theme, onboarding, and dismissed deterministic guidance.
+
+## Premium Workspace Stack
+
+The canonical UI retains React, Vite, Tailwind 3, React Query, Recharts, Lucide,
+PFIS theme/toast providers, and the existing primitives. Approved additions are
+Inter variable font, Motion, cmdk, React Hook Form, Zod/resolvers, TanStack
+Table, and dnd-kit. Feature-heavy dialogs and workspaces are lazy loaded.
+
+Run `npm run test:e2e` for Playwright and axe checks after the full app is
+available. Coverage targets 360 px, 768 px, and desktop widths in light and dark
+themes; update snapshots intentionally with `npm run test:e2e:update`.
 
 ## Serving & Cutover
 
