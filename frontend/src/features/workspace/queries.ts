@@ -21,6 +21,10 @@ export const queryKeys = {
   monthComparison: (u: string, m: number, y: number) => ['monthComparison', u, m, y] as const,
   financialHealth: (u: string, m: number, y: number) => ['financialHealth', u, m, y] as const,
   goals: (u: string, m: number, y: number) => ['goals', u, m, y] as const,
+  guidanceBrief: (u: string, m: number, y: number) => ['guidanceBrief', u, m, y] as const,
+  dashboardPreferences: (u: string) => ['dashboardPreferences', u] as const,
+  accounts: (u: string) => ['accounts', u] as const,
+  netWorth: (u: string) => ['netWorth', u] as const,
   pipelineMetrics: (u: string, m: number, y: number) => ['pipelineMetrics', u, m, y] as const,
   pipelineFailures: (u: string, resolved: boolean) => ['pipelineFailures', u, resolved] as const,
 };
@@ -186,6 +190,50 @@ export function useGoals() {
     queryFn: () => api.goals(userId, month, year),
     enabled: !!userId,
     refetchInterval: 30_000,
+  });
+}
+
+export function useGuidanceBrief() {
+  const userId = useUserId();
+  const { month, year } = useWorkspace();
+  const asOf = `${year}-${String(month).padStart(2, '0')}-${String(
+    month === new Date().getMonth() + 1 && year === new Date().getFullYear()
+      ? new Date().getDate()
+      : new Date(year, month, 0).getDate(),
+  ).padStart(2, '0')}`;
+  return useQuery({
+    queryKey: queryKeys.guidanceBrief(userId, month, year),
+    queryFn: () => api.guidanceBrief(userId, 'daily', asOf),
+    enabled: !!userId,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useDashboardPreferences() {
+  const userId = useUserId();
+  return useQuery({
+    queryKey: queryKeys.dashboardPreferences(userId),
+    queryFn: () => api.dashboardPreferences(userId),
+    enabled: !!userId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAccounts() {
+  const userId = useUserId();
+  return useQuery({
+    queryKey: queryKeys.accounts(userId),
+    queryFn: () => api.accounts(userId),
+    enabled: !!userId,
+  });
+}
+
+export function useNetWorth() {
+  const userId = useUserId();
+  return useQuery({
+    queryKey: queryKeys.netWorth(userId),
+    queryFn: () => api.netWorth(userId),
+    enabled: !!userId,
   });
 }
 

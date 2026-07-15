@@ -8,9 +8,13 @@ import type {
   Category,
   CategoryIntelligenceResponse,
   EmailsResponse,
+  FinancialAccount,
   ExplainPayload,
   ExplainResponse,
   FinancialHealthScore,
+  GuidanceBrief,
+  GuidancePeriod,
+  GuidanceQueryResult,
   Goal,
   GoalCreatePayload,
   InsightsResponse,
@@ -25,10 +29,15 @@ import type {
   PipelineRetryResponse,
   SyncStatusResponse,
   Transaction,
+  TransactionCreatePayload,
   TransactionSummary,
   TransactionType,
   PaymentMethod,
   User,
+  DashboardPreferences,
+  BalanceSnapshot,
+  NetWorthSeries,
+  Transfer,
   WorkspaceResponse,
 } from './types';
 
@@ -157,7 +166,19 @@ export const api = {
     }),
   transactions: (
     userId: string,
-    params: { month?: number; year?: number; categoryId?: string; limit?: number; offset?: number },
+    params: {
+      month?: number;
+      year?: number;
+      categoryId?: string;
+      limit?: number;
+      offset?: number;
+      q?: string;
+      transactionType?: TransactionType;
+      paymentMethod?: PaymentMethod;
+      reviewed?: boolean;
+      sort?: 'transaction_date' | 'amount' | 'merchant' | 'created_at';
+      direction?: 'asc' | 'desc';
+    },
   ) =>
     request<Transaction[]>('/transactions/', {
       query: {
@@ -167,7 +188,19 @@ export const api = {
         category_id: params.categoryId,
         limit: params.limit ?? 200,
         offset: params.offset,
+        q: params.q,
+        transaction_type: params.transactionType,
+        payment_method: params.paymentMethod,
+        reviewed: params.reviewed,
+        sort: params.sort,
+        direction: params.direction,
       },
+    }),
+  createTransaction: (userId: string, payload: TransactionCreatePayload) =>
+    request<Transaction>('/transactions/', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: payload,
     }),
   updateTransaction: (id: string, payload: TransactionUpdatePayload) =>
     request<Transaction>(`/transactions/${id}`, { method: 'PATCH', body: payload }),
@@ -236,6 +269,69 @@ export const api = {
     request<Goal>('/goals/', { method: 'POST', query: { user_id: userId }, body: payload }),
   explain: (payload: ExplainPayload) =>
     request<ExplainResponse>('/ai/explain', { method: 'POST', body: payload }),
+  guidanceBrief: (userId: string, period: GuidancePeriod, asOf: string) =>
+    request<GuidanceBrief>('/guidance/brief', {
+      query: { user_id: userId, period, as_of: asOf },
+    }),
+  guidanceQuery: (userId: string, query: string, month: number, year: number) =>
+    request<GuidanceQueryResult>('/guidance/query', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: { query, month, year },
+    }),
+  setGuidanceState: (
+    userId: string,
+    recommendationId: string,
+    state: 'active' | 'dismissed' | 'snoozed',
+    snoozedUntil?: string,
+  ) =>
+    request(`/guidance/${encodeURIComponent(recommendationId)}/state`, {
+      method: 'PATCH',
+      query: { user_id: userId },
+      body: { state, snoozed_until: snoozedUntil },
+    }),
+
+  // Personalization
+  dashboardPreferences: (userId: string) =>
+    request<DashboardPreferences>('/preferences/dashboard', { query: { user_id: userId } }),
+  updateDashboardPreferences: (userId: string, payload: Partial<DashboardPreferences>) =>
+    request<DashboardPreferences>('/preferences/dashboard', {
+      method: 'PATCH',
+      query: { user_id: userId },
+      body: payload,
+    }),
+  resetDashboardPreferences: (userId: string) =>
+    request<DashboardPreferences>('/preferences/dashboard', {
+      method: 'DELETE',
+      query: { user_id: userId },
+    }),
+
+  // Accounts, balances, net worth, and transfers
+  accounts: (userId: string) =>
+    request<FinancialAccount[]>('/accounts', { query: { user_id: userId } }),
+  createAccount: (
+    userId: string,
+    payload: Pick<FinancialAccount, 'institution_name' | 'account_type' | 'balance_kind' | 'masked_number' | 'currency'>,
+  ) => request<FinancialAccount>('/accounts', { method: 'POST', query: { user_id: userId }, body: payload }),
+  addBalance: (userId: string, accountId: string, amount: number, asOf: string) =>
+    request<BalanceSnapshot>(`/accounts/${accountId}/balances`, {
+      method: 'POST',
+      query: { user_id: userId },
+      body: { amount, as_of: asOf },
+    }),
+  netWorth: (userId: string) =>
+    request<NetWorthSeries>('/net-worth', { query: { user_id: userId } }),
+  createTransfer: (
+    userId: string,
+    payload: {
+      from_account_id: string;
+      to_account_id: string;
+      amount: number;
+      currency: string;
+      transaction_date: string;
+      description?: string;
+    },
+  ) => request<Transfer>('/transfers', { method: 'POST', query: { user_id: userId }, body: payload }),
 
   // Parser pipeline operations
   pipelineMetrics: (userId: string, month: number, year: number) =>

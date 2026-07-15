@@ -44,6 +44,24 @@ export interface Transaction {
   reference_id?: string | null;
   confidence_score: number;
   reviewed_flag: boolean;
+  financial_account_id?: string | null;
+  transfer_group_id?: string | null;
+  is_transfer?: boolean;
+}
+
+export interface TransactionCreatePayload {
+  amount: number;
+  currency: string;
+  transaction_type: TransactionType;
+  payment_method: PaymentMethod;
+  transaction_date: string;
+  merchant_raw?: string | null;
+  merchant_normalized?: string | null;
+  category_id?: string | null;
+  account_last4?: string | null;
+  reference_id?: string | null;
+  confidence_score?: number;
+  financial_account_id?: string | null;
 }
 
 export interface CategoryBreakdown {
@@ -211,6 +229,7 @@ export type TimelineEventType =
   | 'bill'
   | 'shopping'
   | 'refund'
+  | 'transfer'
   | 'spending';
 
 export interface TimelineEvent {
@@ -243,6 +262,11 @@ export interface WorkspaceRecommendation {
   description: string;
   action_label: string;
   target: string;
+  id: string;
+  priority: number;
+  reason_codes: string[];
+  evidence: Array<{ label: string; value: string }>;
+  expected_impact?: string | null;
 }
 
 export interface ReviewSummary {
@@ -336,6 +360,13 @@ export interface CashFlowProjection {
   daily_spend_rate: number;
   days_elapsed: number;
   days_in_month: number;
+  recurring_commitments: number;
+  budgeted_remaining: number;
+  projected_range_low: number;
+  projected_range_high: number;
+  assumptions: string[];
+  data_through?: string | null;
+  ruleset_version: string;
 }
 
 export interface MonthComparison {
@@ -408,6 +439,112 @@ export interface ExplainResponse {
   drivers: string[];
   next_actions: string[];
   safety_note: string;
+}
+
+export type GuidancePeriod = 'daily' | 'weekly' | 'monthly';
+
+export interface GuidanceAction {
+  id: string;
+  type: string;
+  priority: number;
+  title: string;
+  description: string;
+  action_label: string;
+  target: string;
+  reason_codes: string[];
+  evidence: Array<{ label: string; value: string }>;
+  expected_impact?: string | null;
+}
+
+export interface GuidanceBrief {
+  period: GuidancePeriod;
+  as_of: string;
+  headline: string;
+  summary: string;
+  health_score: number;
+  status: string;
+  changes: string[];
+  actions: GuidanceAction[];
+  data_through: string;
+  ruleset_version: string;
+}
+
+export interface GuidanceQueryResult {
+  supported: boolean;
+  intent?: string | null;
+  answer: string;
+  metrics: Array<{ label: string; value: string }>;
+  filters: Record<string, string | number | boolean | null>;
+  suggested_actions: string[];
+  supported_examples: string[];
+  ruleset_version: string;
+}
+
+export type WidgetSize = 'small' | 'medium' | 'large';
+export interface DashboardWidget {
+  id: string;
+  visible: boolean;
+  size: WidgetSize;
+}
+
+export interface DashboardPreferences {
+  user_id: string;
+  layout_version: number;
+  widgets: DashboardWidget[];
+  theme: 'system' | 'light' | 'dark';
+  density: 'comfortable' | 'compact';
+  favorites: string[];
+  onboarding_goal?: 'budgeting' | 'saving' | 'recurring_reduction' | 'cleanup' | null;
+  updated_at?: string | null;
+}
+
+export interface FinancialAccount {
+  id: string;
+  user_id: string;
+  institution_name: string;
+  account_type: string;
+  balance_kind: 'asset' | 'liability';
+  masked_number: string;
+  currency: string;
+  is_active: boolean;
+  latest_balance?: number | null;
+  balance_as_of?: string | null;
+  created_at: string;
+}
+
+export interface BalanceSnapshot {
+  id: string;
+  financial_account_id: string;
+  amount: number;
+  currency: string;
+  as_of: string;
+  source: string;
+  created_at: string;
+}
+
+export interface NetWorthPoint {
+  date: string;
+  assets: number;
+  liabilities: number;
+  net_worth: number;
+}
+
+export interface NetWorthSeries {
+  currency: string;
+  as_of?: string | null;
+  assets: number;
+  liabilities: number;
+  net_worth: number;
+  points: NetWorthPoint[];
+}
+
+export interface Transfer {
+  transfer_group_id: string;
+  debit_transaction_id: string;
+  credit_transaction_id: string;
+  amount: number;
+  currency: string;
+  transaction_date: string;
 }
 
 export interface PipelineMetrics {

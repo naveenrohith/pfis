@@ -1,101 +1,114 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type LazyExoticComponent } from 'react';
+import { lazy, Suspense } from 'react';
 import { Header } from './Header';
-import { SectionNav, type NavSection } from './SectionNav';
-import { DashboardUiProvider } from './DashboardUiContext';
-import { OverviewSection } from '@/features/overview/OverviewSection';
+import { SectionNav } from './SectionNav';
+import { DashboardUiProvider, useDashboardUi } from './DashboardUiContext';
+import { TodayExperience } from '@/features/today/TodayExperience';
+import { useDashboardPreferences } from '@/features/workspace/queries';
+import { cn } from '@/lib/utils';
 
-const TimelineSection = lazy(() => import('@/features/timeline/TimelineSection').then((module) => ({ default: module.TimelineSection })));
-const InsightsSection = lazy(() => import('@/features/insights/InsightsSection').then((module) => ({ default: module.InsightsSection })));
-const MerchantIntelligenceSection = lazy(() => import('@/features/merchants/MerchantIntelligenceSection').then((module) => ({ default: module.MerchantIntelligenceSection })));
-const CategoryIntelligenceSection = lazy(() => import('@/features/categories/CategoryIntelligenceSection').then((module) => ({ default: module.CategoryIntelligenceSection })));
-const RecommendationsSection = lazy(() => import('@/features/recommendations/RecommendationsSection').then((module) => ({ default: module.RecommendationsSection })));
-const AnalyticsSection = lazy(() => import('@/features/analytics/AnalyticsSection').then((module) => ({ default: module.AnalyticsSection })));
-const PipelineHealthSection = lazy(() => import('@/features/pipeline/PipelineHealthSection').then((module) => ({ default: module.PipelineHealthSection })));
-const BudgetsSection = lazy(() => import('@/features/budgets/BudgetsSection').then((module) => ({ default: module.BudgetsSection })));
-const ReviewSection = lazy(() => import('@/features/review/ReviewSection').then((module) => ({ default: module.ReviewSection })));
-const TransactionsSection = lazy(() => import('@/features/transactions/TransactionsSection').then((module) => ({ default: module.TransactionsSection })));
-const InboxSection = lazy(() => import('@/features/inbox/InboxSection').then((module) => ({ default: module.InboxSection })));
-
-const SECTIONS: NavSection[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'timeline', label: 'Timeline' },
-  { id: 'insights', label: 'Insights' },
-  { id: 'merchants', label: 'Merchants' },
-  { id: 'categories', label: 'Categories' },
-  { id: 'recommendations', label: 'Recommendations' },
-  { id: 'analytics', label: 'Analytics' },
-  { id: 'pipeline', label: 'Pipeline Health' },
-  { id: 'budgets', label: 'Budgets' },
-  { id: 'review', label: 'Review' },
-  { id: 'transactions', label: 'Transactions' },
-  { id: 'inbox', label: 'Inbox / Connectors' },
-];
-
-function DeferredSection({
-  id,
-  component: Component,
-}: {
-  id: string;
-  component: LazyExoticComponent<ComponentType>;
-}) {
-  const sectionRef = useRef<HTMLElement>(null);
-  const [shouldLoad, setShouldLoad] = useState(() => window.location.hash === `#${id}`);
-
-  useEffect(() => {
-    const section = sectionRef.current;
-    if (!section || shouldLoad) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setShouldLoad(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '800px 0px' },
-    );
-    observer.observe(section);
-    return () => observer.disconnect();
-  }, [shouldLoad]);
+const QuickAddDialog = lazy(() =>
+  import('@/features/transactions/QuickAddDialog').then((module) => ({
+    default: module.QuickAddDialog,
+  })),
+);
+const ActivityExperience = lazy(() =>
+  import('@/features/activity/ActivityExperience').then((module) => ({
+    default: module.ActivityExperience,
+  })),
+);
+const PlanExperience = lazy(() =>
+  import('@/features/plan/PlanExperience').then((module) => ({
+    default: module.PlanExperience,
+  })),
+);
+const InsightsExperience = lazy(() =>
+  import('@/features/insights/InsightsExperience').then((module) => ({
+    default: module.InsightsExperience,
+  })),
+);
+const DataExperience = lazy(() =>
+  import('@/features/data/DataExperience').then((module) => ({
+    default: module.DataExperience,
+  })),
+);
+const CustomizeDashboardDialog = lazy(() =>
+  import('@/features/personalization/CustomizeDashboardDialog').then((module) => ({
+    default: module.CustomizeDashboardDialog,
+  })),
+);
+function DashboardWorkspace() {
+  const { activeWorkspace, quickAddOpen, setQuickAddOpen, customizeOpen, setCustomizeOpen } =
+    useDashboardUi();
+  const preferences = useDashboardPreferences();
 
   return (
-    <section ref={sectionRef} id={id} className="scroll-mt-32">
-      {shouldLoad ? (
-        <Suspense fallback={<div className="h-32 animate-pulse rounded-xl bg-muted" aria-label={`Loading ${id}`} />}>
-          <Component />
-        </Suspense>
-      ) : (
-        <div className="h-32 rounded-xl bg-muted/40" aria-label={`${id} loads when nearby`} />
+    <div
+      className={cn(
+        'grid min-h-screen bg-background lg:grid-cols-[88px_minmax(0,1fr)]',
+        preferences.data?.density === 'compact' && 'dashboard-compact',
       )}
-    </section>
+    >
+      <a
+        href="#workspace-content"
+        className="sr-only z-50 rounded-md bg-primary px-4 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
+      >
+        Skip to workspace content
+      </a>
+      <SectionNav />
+      <div className="min-w-0 pb-24 lg:pb-0">
+        <Header />
+        <main
+          id="workspace-content"
+          tabIndex={-1}
+          className="mx-auto w-full max-w-[1320px] px-4 py-8 sm:px-6 lg:px-10 lg:py-12"
+        >
+          {activeWorkspace === 'today' ? (
+            <section id="overview" className="animate-fade-in scroll-mt-24">
+              <TodayExperience />
+            </section>
+          ) : activeWorkspace === 'activity' ? (
+            <Suspense
+              fallback={
+                <div
+                  role="status"
+                  aria-label="Loading Activity"
+                  className="h-96 animate-soft-pulse rounded-xl bg-muted"
+                />
+              }
+            >
+              <ActivityExperience />
+            </Suspense>
+          ) : (
+            <Suspense
+              fallback={
+                <div
+                  role="status"
+                  aria-label={`Loading ${activeWorkspace}`}
+                  className="h-96 animate-soft-pulse rounded-xl bg-muted"
+                />
+              }
+            >
+              {activeWorkspace === 'plan' ? <PlanExperience /> : null}
+              {activeWorkspace === 'insights' ? <InsightsExperience /> : null}
+              {activeWorkspace === 'data' ? <DataExperience /> : null}
+            </Suspense>
+          )}
+        </main>
+      </div>
+      <Suspense fallback={null}>
+        {quickAddOpen ? <QuickAddDialog open onClose={() => setQuickAddOpen(false)} /> : null}
+        {customizeOpen ? (
+          <CustomizeDashboardDialog open onClose={() => setCustomizeOpen(false)} />
+        ) : null}
+      </Suspense>
+    </div>
   );
 }
 
 export function DashboardLayout() {
   return (
     <DashboardUiProvider>
-      <div className="min-h-screen bg-background">
-        <Header />
-        <main className="w-full px-3 pb-20 pt-3 sm:px-5 lg:px-8 lg:pt-5 2xl:px-10">
-          <SectionNav sections={SECTIONS} />
-          <div className="grid gap-12">
-            <section id="overview" className="scroll-mt-32">
-              <OverviewSection />
-            </section>
-            <DeferredSection id="timeline" component={TimelineSection} />
-            <DeferredSection id="insights" component={InsightsSection} />
-            <DeferredSection id="merchants" component={MerchantIntelligenceSection} />
-            <DeferredSection id="categories" component={CategoryIntelligenceSection} />
-            <DeferredSection id="recommendations" component={RecommendationsSection} />
-            <DeferredSection id="analytics" component={AnalyticsSection} />
-            <DeferredSection id="pipeline" component={PipelineHealthSection} />
-            <DeferredSection id="budgets" component={BudgetsSection} />
-            <DeferredSection id="review" component={ReviewSection} />
-            <DeferredSection id="transactions" component={TransactionsSection} />
-            <DeferredSection id="inbox" component={InboxSection} />
-          </div>
-        </main>
-      </div>
+      <DashboardWorkspace />
     </DashboardUiProvider>
   );
 }
