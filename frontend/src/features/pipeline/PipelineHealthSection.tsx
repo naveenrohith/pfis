@@ -8,15 +8,11 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
-import {
-  queryKeys,
-  usePipelineFailures,
-  usePipelineMetrics,
-} from '@/features/workspace/queries';
+import { queryKeys, usePipelineFailures, usePipelineMetrics } from '@/features/workspace/queries';
 import { api } from '@/lib/api';
 import type { PipelineFailure, PipelineMetrics } from '@/lib/types';
 
-export function PipelineHealthSection() {
+export function PipelineHealthSection({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const { month, year } = useWorkspace();
   const metrics = usePipelineMetrics();
@@ -44,7 +40,10 @@ export function PipelineHealthSection() {
   const replay = useMutation({
     mutationFn: () => api.reprocessPipeline(userId, { dry_run: true, limit: 50 }),
     onSuccess: (result) => {
-      notify(`Replay dry run compared ${result.email_count} email${result.email_count === 1 ? '' : 's'}`, 'success');
+      notify(
+        `Replay dry run compared ${result.email_count} email${result.email_count === 1 ? '' : 's'}`,
+        'success',
+      );
       invalidatePipeline();
     },
     onError: (err) => notify((err as Error).message, 'error'),
@@ -52,11 +51,29 @@ export function PipelineHealthSection() {
 
   return (
     <div>
-      <SectionTitle
-        eyebrow="Pipeline"
-        title="Parser health"
-        description="Operational view of parser quality, failure queue, duplicate detection, and replay readiness."
-        action={
+      {!embedded ? (
+        <SectionTitle
+          eyebrow="Pipeline"
+          title="Parser health"
+          description="Operational view of parser quality, failure queue, duplicate detection, and replay readiness."
+          action={
+            <Button
+              variant="secondary"
+              onClick={() => replay.mutate()}
+              disabled={!userId || replay.isPending}
+            >
+              <RotateCcw className="h-4 w-4" /> Dry-run replay
+            </Button>
+          }
+        />
+      ) : (
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-xl font-extrabold tracking-[-0.025em]">Processing diagnostics</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Parser quality, failures, duplicate protection, and recovery tools.
+            </p>
+          </div>
           <Button
             variant="secondary"
             onClick={() => replay.mutate()}
@@ -64,8 +81,8 @@ export function PipelineHealthSection() {
           >
             <RotateCcw className="h-4 w-4" /> Dry-run replay
           </Button>
-        }
-      />
+        </div>
+      )}
 
       {metrics.isLoading ? (
         <Skeleton className="h-44" />
@@ -90,7 +107,11 @@ export function PipelineHealthSection() {
                 Failed parser items with retry metadata and non-secret diagnostics.
               </p>
             </div>
-            {failures.data && <Badge variant={failures.data.total > 0 ? 'warning' : 'success'}>{failures.data.total} open</Badge>}
+            {failures.data && (
+              <Badge variant={failures.data.total > 0 ? 'warning' : 'success'}>
+                {failures.data.total} open
+              </Badge>
+            )}
           </div>
 
           {failures.isLoading ? (
@@ -122,12 +143,32 @@ export function PipelineHealthSection() {
 
 function MetricsGrid({ metrics }: { metrics: PipelineMetrics }) {
   const items = [
-    { label: 'Success', value: `${metrics.parse_success_rate}%`, tone: metrics.parse_success_rate >= 90 ? 'success' : 'warning' },
-    { label: 'Avg confidence', value: `${Math.round(metrics.average_confidence * 100)}%`, tone: metrics.average_confidence >= 0.85 ? 'success' : 'warning' },
-    { label: 'Fallback', value: `${metrics.fallback_rate}%`, tone: metrics.fallback_rate <= 20 ? 'info' : 'warning' },
-    { label: 'Unknown merchant', value: `${metrics.unknown_merchant_rate}%`, tone: metrics.unknown_merchant_rate <= 25 ? 'info' : 'warning' },
+    {
+      label: 'Success',
+      value: `${metrics.parse_success_rate}%`,
+      tone: metrics.parse_success_rate >= 90 ? 'success' : 'warning',
+    },
+    {
+      label: 'Avg confidence',
+      value: `${Math.round(metrics.average_confidence * 100)}%`,
+      tone: metrics.average_confidence >= 0.85 ? 'success' : 'warning',
+    },
+    {
+      label: 'Fallback',
+      value: `${metrics.fallback_rate}%`,
+      tone: metrics.fallback_rate <= 20 ? 'info' : 'warning',
+    },
+    {
+      label: 'Unknown merchant',
+      value: `${metrics.unknown_merchant_rate}%`,
+      tone: metrics.unknown_merchant_rate <= 25 ? 'info' : 'warning',
+    },
     { label: 'Duplicate', value: `${metrics.duplicate_rate}%`, tone: 'info' },
-    { label: 'DLQ size', value: String(metrics.dlq_size), tone: metrics.dlq_size === 0 ? 'success' : 'danger' },
+    {
+      label: 'DLQ size',
+      value: String(metrics.dlq_size),
+      tone: metrics.dlq_size === 0 ? 'success' : 'danger',
+    },
     { label: 'Retries', value: String(metrics.retry_count), tone: 'info' },
     { label: 'Parse time', value: `${metrics.average_parse_time_ms} ms`, tone: 'info' },
   ] as const;

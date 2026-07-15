@@ -27,7 +27,7 @@ const RING_COLOR: Record<string, string> = {
   over: 'hsl(var(--danger))',
 };
 
-export function BudgetsSection() {
+export function BudgetsSection({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const budgets = useBudgets();
   const categories = useCategories();
@@ -52,11 +52,31 @@ export function BudgetsSection() {
 
   return (
     <div>
-      <SectionTitle
-        eyebrow="Budgets"
-        title="Budget board"
-        description="Track spending against your monthly limits."
-        action={
+      {!embedded ? (
+        <SectionTitle
+          eyebrow="Budgets"
+          title="Budget board"
+          description="Track spending against your monthly limits."
+          action={
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditing(null);
+                setModalOpen(true);
+              }}
+            >
+              <Plus className="mr-1 h-4 w-4" /> Create budget
+            </Button>
+          }
+        />
+      ) : (
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-xl font-extrabold tracking-[-0.025em]">Monthly guardrails</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Set limits that help you decide before the month is over.
+            </p>
+          </div>
           <Button
             size="sm"
             onClick={() => {
@@ -66,8 +86,8 @@ export function BudgetsSection() {
           >
             <Plus className="mr-1 h-4 w-4" /> Create budget
           </Button>
-        }
-      />
+        </div>
+      )}
 
       {budgets.isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2">
@@ -141,11 +161,7 @@ export function BudgetsSection() {
                     >
                       <Pencil className="mr-1 h-3 w-3" /> Edit
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => deleteMutation.mutate(b.id)}
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => deleteMutation.mutate(b.id)}>
                       <Trash2 className="mr-1 h-3 w-3" /> Delete
                     </Button>
                     <Button

@@ -9,7 +9,7 @@ import { useDashboardUi } from '@/app/DashboardUiContext';
 import { ExplainAction } from '@/features/ai/ExplainAction';
 import { formatCurrency } from '@/lib/format';
 
-export function CategoryIntelligenceSection() {
+export function CategoryIntelligenceSection({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const categories = useCategoryIntelligence();
   const { setCategoryDrill, scrollTo } = useDashboardUi();
@@ -18,12 +18,16 @@ export function CategoryIntelligenceSection() {
 
   return (
     <div>
-      <SectionTitle
-        eyebrow="Categories"
-        title="Category intelligence"
-        description="Budget usage, month-over-month movement, hierarchy, and the merchants driving each category."
-        action={items.length > 0 ? <Badge variant="info">{items.length} categories</Badge> : undefined}
-      />
+      {!embedded ? (
+        <SectionTitle
+          eyebrow="Categories"
+          title="Category intelligence"
+          description="Budget usage, month-over-month movement, hierarchy, and the merchants driving each category."
+          action={
+            items.length > 0 ? <Badge variant="info">{items.length} categories</Badge> : undefined
+          }
+        />
+      ) : null}
 
       {categories.isLoading ? (
         <div className="grid gap-3 lg:grid-cols-2">

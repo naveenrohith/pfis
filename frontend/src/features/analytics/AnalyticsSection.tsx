@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, Plus, Target, TrendingDown, TrendingUp } from 'lucide-react';
+import { Activity, Plus, Target, TrendingUp } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -9,39 +9,40 @@ import { EmptyState, Skeleton } from '@/components/ui/Skeleton';
 import { SectionTitle } from '@/components/SectionTitle';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
-import {
-  queryKeys,
-  useCashFlow,
-  useFinancialHealth,
-  useGoals,
-  useMonthComparison,
-} from '@/features/workspace/queries';
+import { queryKeys, useCashFlow, useFinancialHealth, useGoals } from '@/features/workspace/queries';
 import { useToast } from '@/components/ui/Toast';
 import { ExplainAction } from '@/features/ai/ExplainAction';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import type { Goal, GoalType } from '@/lib/types';
 
-export function AnalyticsSection() {
+export function AnalyticsSection({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const { month, year } = useWorkspace();
   const cashFlow = useCashFlow();
-  const comparison = useMonthComparison();
   const health = useFinancialHealth();
   const goals = useGoals();
   const currency = user?.currency ?? 'INR';
 
   return (
     <div>
-      <SectionTitle
-        eyebrow="Analytics"
-        title="Forecasts and goals"
-        description="Forward-looking cash flow, month comparison, financial health, and goal tracking."
-        action={health.data ? <Badge variant={health.data.score >= 70 ? 'success' : 'warning'}>Health {health.data.score}</Badge> : undefined}
-      />
+      {!embedded ? (
+        <SectionTitle
+          eyebrow="Analytics"
+          title="Outlook and goals"
+          description="Forward-looking cash flow, financial health, and progress toward the outcomes you set."
+          action={
+            health.data ? (
+              <Badge variant={health.data.score >= 70 ? 'success' : 'warning'}>
+                Health {health.data.score}
+              </Badge>
+            ) : undefined
+          }
+        />
+      ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
           <CardContent className="grid gap-3 p-4 sm:p-5">
             <h3 className="flex items-center gap-2 font-bold">
               <TrendingUp className="h-4 w-4 text-info" /> Cash-flow projection
@@ -51,10 +52,36 @@ export function AnalyticsSection() {
             ) : cashFlow.data ? (
               <>
                 <div className="grid grid-cols-2 gap-2">
-                  <Metric label="Net to date" value={formatCurrency(cashFlow.data.net_to_date, currency)} />
-                  <Metric label="Projected net" value={formatCurrency(cashFlow.data.projected_net, currency)} />
-                  <Metric label="Spend/day" value={formatCurrency(cashFlow.data.daily_spend_rate, currency)} />
-                  <Metric label="Projected spend" value={formatCurrency(cashFlow.data.projected_spend, currency)} />
+                  <Metric
+                    label="Net to date"
+                    value={formatCurrency(cashFlow.data.net_to_date, currency)}
+                  />
+                  <Metric
+                    label="Projected net"
+                    value={formatCurrency(cashFlow.data.projected_net, currency)}
+                  />
+                  <Metric
+                    label="Spend/day"
+                    value={formatCurrency(cashFlow.data.daily_spend_rate, currency)}
+                  />
+                  <Metric
+                    label="Projected spend"
+                    value={formatCurrency(cashFlow.data.projected_spend, currency)}
+                  />
+                  <Metric
+                    label="Recurring commitments"
+                    value={formatCurrency(cashFlow.data.recurring_commitments, currency)}
+                  />
+                  <Metric
+                    label="Budget remaining"
+                    value={formatCurrency(cashFlow.data.budgeted_remaining, currency)}
+                  />
+                </div>
+                <div className="rounded-xl border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                  Expected spend range:{' '}
+                  {formatCurrency(cashFlow.data.projected_range_low, currency)}–
+                  {formatCurrency(cashFlow.data.projected_range_high, currency)}.{' '}
+                  {cashFlow.data.assumptions[2]}
                 </div>
                 <ExplainAction
                   payload={{
@@ -67,48 +94,6 @@ export function AnalyticsSection() {
                     },
                   }}
                 />
-              </>
-            ) : null}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="grid gap-3 p-4 sm:p-5">
-            <h3 className="flex items-center gap-2 font-bold">
-              <TrendingDown className="h-4 w-4 text-warning" /> Month comparison
-            </h3>
-            {comparison.isLoading ? (
-              <Skeleton className="h-36" />
-            ) : comparison.data ? (
-              <>
-                <div className="grid grid-cols-2 gap-2">
-                  <Metric label="Spend" value={formatCurrency(comparison.data.spend, currency)} />
-                  <Metric
-                    label="Spend change"
-                    value={
-                      comparison.data.spend_change_pct == null
-                        ? 'New'
-                        : `${comparison.data.spend_change_pct > 0 ? '+' : ''}${comparison.data.spend_change_pct}%`
-                    }
-                  />
-                  <Metric label="Income" value={formatCurrency(comparison.data.income, currency)} />
-                  <Metric
-                    label="Income change"
-                    value={
-                      comparison.data.income_change_pct == null
-                        ? 'New'
-                        : `${comparison.data.income_change_pct > 0 ? '+' : ''}${comparison.data.income_change_pct}%`
-                    }
-                  />
-                </div>
-                <div className="grid gap-1">
-                  {comparison.data.category_deltas.slice(0, 3).map((delta) => (
-                    <div key={delta.category} className="flex justify-between text-xs text-muted-foreground">
-                      <span>{delta.category}</span>
-                      <span>{delta.change_pct == null ? 'New' : `${delta.change_pct}%`}</span>
-                    </div>
-                  ))}
-                </div>
               </>
             ) : null}
           </CardContent>
@@ -265,15 +250,27 @@ function GoalBoard({
                       {goal.goal_type.replace('_', ' ')}
                     </p>
                   </div>
-                  <Badge variant={goal.status === 'achieved' ? 'success' : goal.status === 'at_risk' ? 'warning' : 'info'}>
+                  <Badge
+                    variant={
+                      goal.status === 'achieved'
+                        ? 'success'
+                        : goal.status === 'at_risk'
+                          ? 'warning'
+                          : 'info'
+                    }
+                  >
                     {goal.status}
                   </Badge>
                 </div>
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-primary" style={{ width: `${goal.progress_pct}%` }} />
+                  <div
+                    className="h-full rounded-full bg-primary"
+                    style={{ width: `${goal.progress_pct}%` }}
+                  />
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  {formatCurrency(goal.current_amount, currency)} / {formatCurrency(goal.target_amount, currency)}
+                  {formatCurrency(goal.current_amount, currency)} /{' '}
+                  {formatCurrency(goal.target_amount, currency)}
                 </p>
               </div>
             ))}

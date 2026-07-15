@@ -9,7 +9,7 @@ import { useDashboardUi } from '@/app/DashboardUiContext';
 import { ExplainAction } from '@/features/ai/ExplainAction';
 import { formatCurrency } from '@/lib/format';
 
-export function MerchantIntelligenceSection() {
+export function MerchantIntelligenceSection({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const merchants = useMerchants();
   const { setExplorerSearch, scrollTo } = useDashboardUi();
@@ -18,12 +18,16 @@ export function MerchantIntelligenceSection() {
 
   return (
     <div>
-      <SectionTitle
-        eyebrow="Merchants"
-        title="Merchant intelligence"
-        description="Repeat spend, average ticket size, category defaults, and recurrence signals."
-        action={top.length > 0 ? <Badge variant="info">{top.length} merchant(s)</Badge> : undefined}
-      />
+      {!embedded ? (
+        <SectionTitle
+          eyebrow="Merchants"
+          title="Merchant intelligence"
+          description="Repeat spend, average ticket size, category defaults, and recurrence signals."
+          action={
+            top.length > 0 ? <Badge variant="info">{top.length} merchant(s)</Badge> : undefined
+          }
+        />
+      ) : null}
 
       {merchants.isLoading ? (
         <div className="grid gap-3 lg:grid-cols-3">
