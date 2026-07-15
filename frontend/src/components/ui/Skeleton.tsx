@@ -3,11 +3,9 @@ import { cn } from '@/lib/utils';
 export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn('relative overflow-hidden rounded-lg border border-border/60 bg-muted', className)}
+      className={cn('relative animate-soft-pulse overflow-hidden rounded-lg bg-muted', className)}
       {...props}
-    >
-      <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-foreground/5 to-transparent" />
-    </div>
+    />
   );
 }
 
@@ -15,23 +13,30 @@ export function EmptyState({
   icon,
   title,
   description,
+  action,
   className,
 }: {
   icon?: React.ReactNode;
   title: string;
   description?: string;
+  action?: React.ReactNode;
   className?: string;
 }) {
   return (
     <div
       className={cn(
-        'flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/25 px-6 py-10 text-center',
+        'flex flex-col items-center justify-center gap-3 rounded-xl bg-muted/45 px-6 py-9 text-center',
         className,
       )}
     >
-      {icon && <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-card text-2xl text-muted-foreground shadow-sm">{icon}</div>}
-      <p className="font-semibold">{title}</p>
+      {icon && (
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-card text-xl text-muted-foreground">
+          {icon}
+        </div>
+      )}
+      <p className="font-extrabold tracking-[-0.015em]">{title}</p>
       {description && <p className="max-w-sm text-sm text-muted-foreground">{description}</p>}
+      {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );
 }

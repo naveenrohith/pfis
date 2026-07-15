@@ -5,6 +5,7 @@ import {
   ShoppingBag,
   Undo2,
   CreditCard,
+  ArrowLeftRight,
   type LucideIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
@@ -19,6 +20,7 @@ const EVENT_META: Record<TimelineEventType, { icon: LucideIcon; label: string; t
   shopping: { icon: ShoppingBag, label: 'Shopping', tone: 'text-foreground' },
   refund: { icon: Undo2, label: 'Refund', tone: 'text-success' },
   spending: { icon: CreditCard, label: 'Spending', tone: 'text-foreground' },
+  transfer: { icon: ArrowLeftRight, label: 'Transfer', tone: 'text-info' },
 };
 
 export interface TimelineCardProps {

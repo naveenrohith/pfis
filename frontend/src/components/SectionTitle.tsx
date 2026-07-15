@@ -16,18 +16,20 @@ export function SectionTitle({
   return (
     <div
       className={cn(
-        'mb-4 flex flex-col gap-3 border-b border-border/80 pb-3 sm:flex-row sm:items-end sm:justify-between',
+        'mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between',
         className,
       )}
     >
       <div className="min-w-0">
         {eyebrow && (
-          <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            {eyebrow}
-          </p>
+          <p className="text-xs font-bold tracking-wide text-muted-foreground">{eyebrow}</p>
         )}
-        <h2 className="mt-1 text-xl font-bold leading-tight sm:text-2xl">{title}</h2>
-        {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+        <h2 className="mt-1 text-xl font-extrabold leading-tight tracking-[-0.03em] sm:text-2xl">
+          {title}
+        </h2>
+        {description && (
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
+        )}
       </div>
       {action && <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div>}
     </div>

@@ -4,6 +4,7 @@ type Theme = 'light' | 'dark';
 
 interface ThemeContextValue {
   theme: Theme;
+  setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
 }
 
@@ -18,7 +19,7 @@ function getInitialTheme(): Theme {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [theme, updateTheme] = useState<Theme>(getInitialTheme);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -26,9 +27,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(STORAGE_KEY, theme);
   }, [theme]);
 
-  const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  const setTheme = (nextTheme: Theme) => updateTheme(nextTheme);
+  const toggleTheme = () => updateTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
 
-  return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;
+  return <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>{children}</ThemeContext.Provider>;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
