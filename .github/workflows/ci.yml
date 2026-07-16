@@ -77,9 +77,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Enforce bundle budgets
+        run: npm run quality:bundle
+
       - name: Upload dashboard build
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
           path: frontend/dist
-
