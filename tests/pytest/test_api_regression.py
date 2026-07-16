@@ -6,11 +6,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.models.category import Merchant
+from app.models.category import Merchant, UserMerchantRule
 from app.models.email import RawEmail
 from app.models.sync import ParseFailure, UserCorrection
 from app.models.transaction import Transaction
-from app.services.parser.normalizer import normalize_merchant
+from app.services.parser.normalizer import resolve_merchant
 from app.services.parser.pipeline import retry_parse_failures
 from sqlalchemy import select
 
@@ -47,6 +47,7 @@ async def test_gmail_email_counts_respect_filters(client):
 
 async def test_correction_learning_updates_alias_and_history(client, test_session_factory):
     user = await create_user(client, "learning")
+    other_user = await create_user(client, "learning-other")
     categories_response = await client.get("/api/categories/")
     categories_response.raise_for_status()
     categories = categories_response.json()
@@ -64,10 +65,16 @@ async def test_correction_learning_updates_alias_and_history(client, test_sessio
             "account_last4": "1234",
             "reference_id": "LCB245",
             "confidence_score": 0.72,
+            "merchant_resolution_source": "user_rule",
+            "merchant_resolution_confidence": 1.0,
+            "merchant_rule_id": "forged-rule-id",
         },
     )
     create_response.raise_for_status()
     transaction = create_response.json()
+    assert transaction["merchant_resolution_source"] == "manual"
+    assert transaction["merchant_resolution_confidence"] == 1.0
+    assert transaction["merchant_rule_id"] is None
 
     correction_response = await client.patch(
         f"/api/transactions/{transaction['id']}",
@@ -83,6 +90,9 @@ async def test_correction_learning_updates_alias_and_history(client, test_sessio
     assert corrected["amount"] == 250.0
     assert corrected["reviewed_flag"] is True
     assert corrected["reviewed_at"] is not None
+    assert corrected["merchant_resolution_source"] == "user_rule"
+    assert corrected["merchant_resolution_confidence"] == 1.0
+    assert corrected["merchant_rule_id"] is not None
 
     async with test_session_factory() as db:
         correction_rows = await db.execute(
@@ -94,12 +104,26 @@ async def test_correction_learning_updates_alias_and_history(client, test_sessio
         merchant_result = await db.execute(
             select(Merchant).where(Merchant.normalized_name == "Cafe Nero")
         )
-        merchant = merchant_result.scalar_one()
-        assert "LOCAL CAFE BLR" in merchant.aliases
+        assert merchant_result.scalar_one_or_none() is None
 
-        normalized_name, category_id = await normalize_merchant(db, "LOCAL CAFE BLR")
-        assert normalized_name == "Cafe Nero"
-        assert category_id == food["id"]
+        rule_result = await db.execute(
+            select(UserMerchantRule).where(UserMerchantRule.user_id == user["id"])
+        )
+        rule = rule_result.scalar_one()
+        assert rule.raw_descriptor == "LOCAL CAFE BLR"
+        assert rule.normalized_name == "Cafe Nero"
+        assert rule.category_id == food["id"]
+
+        own_resolution = await resolve_merchant(db, "LOCAL CAFE BLR", user_id=user["id"])
+        assert own_resolution.normalized_name == "Cafe Nero"
+        assert own_resolution.category_id == food["id"]
+        assert own_resolution.source == "user_rule"
+        assert own_resolution.rule_id == rule.id
+
+        other_resolution = await resolve_merchant(db, "LOCAL CAFE BLR", user_id=other_user["id"])
+        assert other_resolution.normalized_name == "Local Cafe Blr"
+        assert other_resolution.category_id is None
+        assert other_resolution.source == "cleaned_fallback"
 
 
 async def test_pipeline_dedup_remains_user_scoped(client):

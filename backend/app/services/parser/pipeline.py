@@ -27,9 +27,10 @@ from app.services.parser.base_parser import BaseParser, ParseResult
 from app.services.parser.confidence import score_parse_result
 from app.services.parser.identity import build_identity
 from app.services.parser.normalizer import (
+    MerchantResolution,
     get_default_category_id,
     infer_merchant_from_text,
-    normalize_merchant,
+    resolve_merchant,
 )
 from app.services.parser.registry import get_parser_registry
 from app.services.parser.validation import (
@@ -218,24 +219,32 @@ def _legacy_validation_error_message(
 
 async def _resolve_transaction_category(
     db: AsyncSession,
+    user_id: str,
     parse_result: ParseResult,
     inferred_category_id: str | None,
     default_category_id: str | None,
-) -> tuple[str, str | None]:
+) -> MerchantResolution:
     """Resolve normalized merchant and category for a parsed transaction."""
-    merchant_normalized, category_id = await normalize_merchant(db, parse_result.merchant_raw or "")
+    resolution = await resolve_merchant(db, parse_result.merchant_raw or "", user_id=user_id)
+    category_id = resolution.category_id
     if not category_id and inferred_category_id:
         category_id = inferred_category_id
     if not category_id:
         category_id = default_category_id
-    return merchant_normalized, category_id
+    return MerchantResolution(
+        normalized_name=resolution.normalized_name,
+        category_id=category_id,
+        source=resolution.source,
+        confidence=resolution.confidence,
+        rule_id=resolution.rule_id,
+        resolver_version=resolution.resolver_version,
+    )
 
 
 def _build_transaction_create(
     email: RawEmail,
     parse_result: ParseResult,
-    merchant_normalized: str,
-    category_id: str | None,
+    resolution: MerchantResolution,
 ) -> TransactionCreate:
     """Build the transaction create schema from a valid parse result."""
     if parse_result.amount is None or parse_result.transaction_type is None:
@@ -251,13 +260,17 @@ def _build_transaction_create(
         transaction_status=parse_result.transaction_status,
         transaction_timestamp=parse_result.transaction_timestamp,
         merchant_raw=parse_result.merchant_raw,
-        merchant_normalized=merchant_normalized,
-        category_id=category_id,
+        merchant_normalized=resolution.normalized_name,
+        category_id=resolution.category_id,
         transaction_date=parse_result.date,
         account_last4=parse_result.account_last4,
         reference_id=parse_result.reference_id,
         confidence_score=parse_result.confidence_score,
         parser_version=parse_result.parser_version,
+        merchant_resolution_source=resolution.source,
+        merchant_resolution_confidence=resolution.confidence,
+        merchant_rule_id=resolution.rule_id,
+        merchant_resolver_version=resolution.resolver_version,
         source_email_id=email.id,
     )
 
@@ -466,15 +479,20 @@ async def _process_email_batch(
             if email_result.get("parser_fallback"):
                 stats["fallback_parsed"] += 1
 
-            merchant_normalized, category_id = await _resolve_transaction_category(
+            resolution = await _resolve_transaction_category(
                 db,
+                user_id,
                 parse_result,
                 inferred_category_id,
                 default_category_id,
             )
+            merchant_normalized = resolution.normalized_name
+            category_id = resolution.category_id
 
             email_result["merchant_normalized"] = merchant_normalized
             email_result["category_id"] = category_id
+            email_result["merchant_resolution_source"] = resolution.source
+            email_result["merchant_resolution_confidence"] = resolution.confidence
             email_result["confidence"] = parse_result.confidence_score
             identity = build_identity(
                 user_id=user_id,
@@ -499,14 +517,16 @@ async def _process_email_batch(
                     "identity_level": identity.level,
                     "reference_present": bool(identity.reference_key),
                     "fuzzy_ready": bool(identity.fuzzy_key),
+                    "merchant_resolution_source": resolution.source,
+                    "merchant_resolution_confidence": resolution.confidence,
+                    "merchant_resolver_version": resolution.resolver_version,
                 },
             )
 
             txn_data = _build_transaction_create(
                 email,
                 parse_result,
-                merchant_normalized,
-                category_id,
+                resolution,
             )
 
             try:

@@ -46,6 +46,10 @@ class TransactionCreate(BaseModel):
     reference_id: str | None = None
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
     parser_version: int = Field(default=1, ge=1)
+    merchant_resolution_source: str = Field(default="manual", max_length=32)
+    merchant_resolution_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    merchant_rule_id: str | None = Field(default=None, max_length=36)
+    merchant_resolver_version: int = Field(default=1, ge=1)
     source_email_id: str | None = None
     financial_account_id: str | None = None
 
@@ -103,6 +107,10 @@ class TransactionResponse(BaseModel):
     reviewed_flag: bool = False
     reviewed_at: datetime | None = None
     parser_version: int
+    merchant_resolution_source: str = "legacy"
+    merchant_resolution_confidence: float | None = None
+    merchant_rule_id: str | None = None
+    merchant_resolver_version: int = 1
     created_at: datetime
     source_received_at: datetime | None = None
     financial_account_id: str | None = None

@@ -18,7 +18,10 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 - `RawEmail`: stored email subject/body/sender/received timestamp for traceability.
 - `Transaction`: parsed financial transaction with confidence, parser version, fingerprint, and optional source email.
 - `Category`: category hierarchy for spending groups.
-- `Merchant`: normalized merchant name, aliases, and default category.
+- `Merchant`: curated shared merchant name, aliases, and default category. User workflows do not
+  mutate this global catalog.
+- `UserMerchantRule`: exact, user-owned mapping from an imported merchant descriptor to the user's
+  preferred normalized name and category.
 - `Budget`: user/category monthly budget limit.
 - `SyncRun`: Gmail sync observability record.
 - `ParseFailure`: dead-letter queue for failed parser attempts.
@@ -69,6 +72,9 @@ users' records. The indexes are managed by Alembic migration
 - Transfer legs must be created together and excluded from financial aggregates.
 - Dashboard preferences, recommendation state, accounts, and balances are always user scoped.
 - Parser changes must preserve `parser_version` traceability.
+- Merchant corrections must remain user scoped. They create or update `UserMerchantRule` rows;
+  they must not promote aliases or category preferences into the global `Merchant` catalog.
+- Transactions preserve merchant-resolution source, confidence, rule id, and resolver version.
 - Model changes require tests and migration review.
 - Local/demo startup may create tables automatically for convenience, but shared or production environments must use Alembic migrations as the schema control path.
 

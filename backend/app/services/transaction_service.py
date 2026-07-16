@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.account import FinancialAccount
-from app.models.category import Category, Merchant, parse_merchant_aliases
+from app.models.category import Category, UserMerchantRule
 from app.models.summary import MonthlySummary
 from app.models.sync import UserCorrection
 from app.models.transaction import Transaction, TransactionType
@@ -93,56 +93,88 @@ class TransactionService:
                 )
             )
 
+    async def upsert_user_merchant_rule(
+        self,
+        *,
+        user_id: str,
+        raw_descriptor: str,
+        normalized_name: str,
+        category_id: str | None,
+        source: str,
+        source_transaction_id: str | None = None,
+    ) -> UserMerchantRule | None:
+        """Create or refresh an exact user-owned merchant normalization rule."""
+        from app.services.parser.normalizer import (
+            invalidate_user_merchant_rule_cache,
+            normalize_descriptor_key,
+        )
+
+        raw_descriptor = raw_descriptor.strip()
+        normalized_name = normalized_name.strip()
+        descriptor_key = normalize_descriptor_key(raw_descriptor)
+        if not descriptor_key or not normalized_name:
+            return None
+
+        result = await self.db.execute(
+            select(UserMerchantRule).where(
+                UserMerchantRule.user_id == user_id,
+                UserMerchantRule.descriptor_key == descriptor_key,
+            )
+        )
+        rule = result.scalar_one_or_none()
+        now = datetime.now(UTC)
+        if rule is None:
+            rule = UserMerchantRule(
+                user_id=user_id,
+                raw_descriptor=raw_descriptor,
+                descriptor_key=descriptor_key,
+                normalized_name=normalized_name,
+                category_id=category_id,
+                source=source,
+                confidence=1.0,
+                source_transaction_id=source_transaction_id,
+                created_at=now,
+                updated_at=now,
+            )
+            self.db.add(rule)
+        else:
+            rule.raw_descriptor = raw_descriptor
+            rule.normalized_name = normalized_name
+            rule.category_id = category_id
+            rule.source = source
+            rule.confidence = 1.0
+            if source_transaction_id is not None:
+                rule.source_transaction_id = source_transaction_id
+            rule.updated_at = now
+
+        await self.db.flush()
+        invalidate_user_merchant_rule_cache(user_id)
+        return rule
+
     async def _learn_from_correction(
         self,
         txn: Transaction,
         changed_fields: set[str],
-    ) -> None:
-        """Feed merchant/category corrections back into normalization defaults."""
+    ) -> UserMerchantRule | None:
+        """Feed merchant/category corrections into an exact user-owned rule."""
         if not ({"merchant_normalized", "category_id"} & changed_fields):
-            return
+            return None
 
         normalized_name = (txn.merchant_normalized or "").strip()
         if not normalized_name:
-            return
-
-        result = await self.db.execute(
-            select(Merchant).where(func.lower(Merchant.normalized_name) == normalized_name.lower())
-        )
-        merchant = result.scalar_one_or_none()
+            return None
 
         raw_alias = (txn.merchant_raw or "").strip()
-        if merchant is None:
-            aliases = [raw_alias] if raw_alias else []
-            self.db.add(
-                Merchant(
-                    normalized_name=normalized_name,
-                    aliases=json.dumps(aliases),
-                    category_default_id=txn.category_id,
-                )
-            )
-            return
-
-        aliases = parse_merchant_aliases(merchant.aliases)
-
-        alias_keys = {
-            alias.strip().upper() for alias in aliases if isinstance(alias, str) and alias.strip()
-        }
-        if (
-            raw_alias
-            and raw_alias.upper() not in alias_keys
-            and raw_alias.upper() != merchant.normalized_name.upper()
-        ):
-            aliases.append(raw_alias)
-            merchant.aliases = json.dumps(aliases)
-
-        if txn.category_id:
-            merchant.category_default_id = txn.category_id
-
-        # Invalidate normalizer cache since we mutated merchant data
-        from app.services.parser.normalizer import invalidate_merchant_cache
-
-        invalidate_merchant_cache()
+        if not raw_alias:
+            return None
+        return await self.upsert_user_merchant_rule(
+            user_id=txn.user_id,
+            raw_descriptor=raw_alias,
+            normalized_name=normalized_name,
+            category_id=txn.category_id,
+            source="transaction_correction",
+            source_transaction_id=txn.id,
+        )
 
     async def _invalidate_monthly_summary(self, user_id: str, transaction_date: date) -> None:
         """Remove the affected aggregate snapshot before committing a mutation."""
@@ -223,6 +255,10 @@ class TransactionService:
             reference_id=data.reference_id,
             confidence_score=data.confidence_score,
             parser_version=data.parser_version,
+            merchant_resolution_source=data.merchant_resolution_source,
+            merchant_resolution_confidence=data.merchant_resolution_confidence,
+            merchant_rule_id=data.merchant_rule_id,
+            merchant_resolver_version=data.merchant_resolver_version,
             reviewed_flag=data.confidence_score >= AUTO_REVIEW_THRESHOLD,
             reviewed_at=(
                 datetime.now(UTC) if data.confidence_score >= AUTO_REVIEW_THRESHOLD else None
@@ -369,7 +405,12 @@ class TransactionService:
                 txn.fingerprint = new_fingerprint
 
         await self._record_corrections(txn.id, changed_fields)
-        await self._learn_from_correction(txn, set(changed_fields))
+        learned_rule = await self._learn_from_correction(txn, set(changed_fields))
+        if learned_rule is not None:
+            txn.merchant_resolution_source = "user_rule"
+            txn.merchant_resolution_confidence = learned_rule.confidence
+            txn.merchant_rule_id = learned_rule.id
+            txn.merchant_resolver_version = 1
         await self._invalidate_monthly_summary(txn.user_id, txn.transaction_date)
 
         await self.db.commit()
@@ -379,6 +420,134 @@ class TransactionService:
         txn.category_name = txn.category.name if txn.category else None
         logger.info(f"Transaction updated: {txn_id} fields={list(changed_fields.keys())}")
         return txn
+
+    async def bulk_correct_merchant(
+        self,
+        *,
+        user_id: str,
+        current_name: str,
+        normalized_name: str,
+        category_id: str | None,
+        rule_category_id: str | None,
+        aliases: list[str],
+        apply_existing: bool,
+    ) -> int:
+        """Apply a user-scoped merchant correction atomically and preserve ledger invariants."""
+        normalized_name = normalized_name.strip()
+        if not normalized_name:
+            raise ValueError("Normalized merchant name is required")
+        if rule_category_id is not None:
+            category_result = await self.db.execute(
+                select(Category.id).where(Category.id == rule_category_id)
+            )
+            if category_result.scalar_one_or_none() is None:
+                raise ValueError("Category not found")
+
+        transactions: list[Transaction] = []
+        if apply_existing:
+            result = await self.db.execute(
+                select(Transaction).where(
+                    Transaction.user_id == user_id,
+                    or_(
+                        func.lower(Transaction.merchant_normalized) == current_name.lower(),
+                        func.lower(Transaction.merchant_raw) == current_name.lower(),
+                    ),
+                )
+            )
+            transactions = list(result.scalars().all())
+
+        planned_fingerprints: dict[str, str] = {}
+        for txn in transactions:
+            if txn.merchant_normalized == normalized_name:
+                continue
+            fingerprint = self.compute_fingerprint(
+                user_id=txn.user_id,
+                amount=txn.amount,
+                transaction_date=txn.transaction_date,
+                merchant=normalized_name,
+                reference_id=txn.reference_id,
+                account_last4=txn.account_last4,
+            )
+            owner = planned_fingerprints.get(fingerprint)
+            if owner is not None and owner != txn.id:
+                raise DuplicateTransactionError(
+                    "Merchant correction would create duplicate transactions"
+                )
+            planned_fingerprints[fingerprint] = txn.id
+
+        if planned_fingerprints:
+            existing = await self.db.execute(
+                select(Transaction.id, Transaction.fingerprint).where(
+                    Transaction.fingerprint.in_(planned_fingerprints),
+                    Transaction.id.not_in([txn.id for txn in transactions]),
+                )
+            )
+            if existing.first() is not None:
+                raise DuplicateTransactionError(
+                    "Merchant correction would create a duplicate transaction"
+                )
+
+        affected_periods: set[tuple[int, int]] = set()
+        for txn in transactions:
+            changes: dict[str, tuple[object, object]] = {}
+            if txn.merchant_normalized != normalized_name:
+                changes["merchant_normalized"] = (txn.merchant_normalized, normalized_name)
+                txn.merchant_normalized = normalized_name
+                txn.fingerprint = self.compute_fingerprint(
+                    user_id=txn.user_id,
+                    amount=txn.amount,
+                    transaction_date=txn.transaction_date,
+                    merchant=normalized_name,
+                    reference_id=txn.reference_id,
+                    account_last4=txn.account_last4,
+                )
+            if category_id is not None and txn.category_id != category_id:
+                changes["category_id"] = (txn.category_id, category_id)
+                txn.category_id = category_id
+            if not changes:
+                continue
+
+            if not txn.reviewed_flag:
+                changes["reviewed_flag"] = (False, True)
+                txn.reviewed_flag = True
+                txn.reviewed_at = datetime.now(UTC)
+            await self._record_corrections(txn.id, changes)
+            rule = await self.upsert_user_merchant_rule(
+                user_id=user_id,
+                raw_descriptor=txn.merchant_raw or current_name,
+                normalized_name=normalized_name,
+                category_id=txn.category_id,
+                source="merchant_edit",
+                source_transaction_id=txn.id,
+            )
+            if rule is not None:
+                txn.merchant_resolution_source = "user_rule"
+                txn.merchant_resolution_confidence = rule.confidence
+                txn.merchant_rule_id = rule.id
+                txn.merchant_resolver_version = 1
+            affected_periods.add((txn.transaction_date.month, txn.transaction_date.year))
+
+        rule_inputs = {current_name, *aliases}
+        for raw_descriptor in sorted(value.strip() for value in rule_inputs if value.strip()):
+            await self.upsert_user_merchant_rule(
+                user_id=user_id,
+                raw_descriptor=raw_descriptor,
+                normalized_name=normalized_name,
+                category_id=rule_category_id,
+                source="merchant_edit",
+            )
+
+        for month, year in affected_periods:
+            await self.db.execute(
+                delete(MonthlySummary).where(
+                    MonthlySummary.user_id == user_id,
+                    MonthlySummary.month == month,
+                    MonthlySummary.year == year,
+                )
+            )
+
+        await self.db.commit()
+        return len(transactions)
 
     async def bulk_update_transactions(
         self,

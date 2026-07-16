@@ -72,6 +72,12 @@ class Transaction(Base):
     reviewed_flag: Mapped[bool] = mapped_column(default=False, index=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     parser_version: Mapped[int] = mapped_column(Integer, default=1)
+    merchant_resolution_source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="manual"
+    )
+    merchant_resolution_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    merchant_rule_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    merchant_resolver_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     fingerprint: Mapped[str] = mapped_column(String(64), unique=True, nullable=True, index=True)
     source_email_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("raw_emails.id"), nullable=True

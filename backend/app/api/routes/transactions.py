@@ -35,6 +35,16 @@ async def create_transaction(
     """Create a new transaction with automatic dedup."""
     service = TransactionService(db)
     user_id = resolve_user_scope(user_id, current_user)
+    data = data.model_copy(
+        update={
+            "merchant_resolution_source": "manual",
+            "merchant_resolution_confidence": (
+                1.0 if data.merchant_normalized or data.merchant_raw else None
+            ),
+            "merchant_rule_id": None,
+            "merchant_resolver_version": 1,
+        }
+    )
     try:
         txn = await service.create_transaction(user_id, data)
         return txn
