@@ -21,6 +21,7 @@ import type {
   GoalCreatePayload,
   InsightsResponse,
   Job,
+  LearnedMerchantRule,
   MerchantDetail,
   MerchantSummary,
   MonthComparison,
@@ -248,6 +249,13 @@ export const api = {
   // Merchant and category intelligence
   merchants: (userId: string, month: number, year: number) =>
     request<MerchantSummary[]>('/merchants/', { query: { user_id: userId, month, year } }),
+  learnedMerchantRules: (userId: string) =>
+    request<LearnedMerchantRule[]>('/merchants/learned-rules', { query: { user_id: userId } }),
+  deleteLearnedMerchantRule: (userId: string, ruleId: string) =>
+    request<void>(`/merchants/learned-rules/${ruleId}`, {
+      method: 'DELETE',
+      query: { user_id: userId },
+    }),
   merchant: (userId: string, merchantKey: string, month: number, year: number) =>
     request<MerchantDetail>(`/merchants/${encodeURIComponent(merchantKey)}`, {
       query: { user_id: userId, month, year },

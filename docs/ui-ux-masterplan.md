@@ -62,6 +62,9 @@ performance, privacy, and maintenance review before adoption. Never copy a block
 - [x] Phase 10: ship the evidence-labelled Money Horizon.
 - [x] Phase 11: ship the deterministic, non-mutating Scenario Studio.
 - [x] Phase 12: persist the user's in-app financial briefing rhythm.
+- [x] Centralize recurring knowledge with cadence, lifecycle, confidence, evidence, and rulesets.
+- [x] Split Monthly Stability from Data Confidence and consolidate the Today briefing response.
+- [x] Add visible merchant pattern evidence and a user-controlled Learned Rules ledger.
 - [ ] Phase 13 gate: complete privacy, provider, consent, and cost review before connected accounts or analytics.
 
 The locked scope, research evidence, exit criteria, and phase sequencing are documented in

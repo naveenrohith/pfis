@@ -16,7 +16,7 @@ import { Skeleton, EmptyState } from '@/components/ui/Skeleton';
 import { SectionTitle } from '@/components/SectionTitle';
 import { ChartCard } from '@/components/cards/ChartCard';
 import { InsightCard } from '@/components/cards/InsightCard';
-import { useInsights, useMonthComparison, useSummary } from '@/features/workspace/queries';
+import { useInsights, useSummary, useWorkspaceSnapshot } from '@/features/workspace/queries';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { useAuth } from '@/features/auth/AuthContext';
 import { formatCurrency, formatCompact } from '@/lib/format';
@@ -26,7 +26,8 @@ export function InsightsSection({ embedded = false }: { embedded?: boolean } = {
   const { user } = useAuth();
   const insights = useInsights();
   const summary = useSummary();
-  const comparison = useMonthComparison();
+  const workspace = useWorkspaceSnapshot();
+  const comparison = workspace.data?.month_comparison;
   const { setCategoryDrill, scrollTo } = useDashboardUi();
   const currency = user?.currency ?? 'INR';
 
@@ -235,10 +236,13 @@ export function InsightsSection({ embedded = false }: { embedded?: boolean } = {
         </ChartCard>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-        <Card>
-          <CardContent className="grid gap-2 p-4 sm:p-5">
-            <h3 className="flex items-center gap-2 font-bold">
+      <section
+        aria-label="Monthly insight summaries"
+        className="mt-4 grid items-start gap-4 lg:grid-cols-2 xl:grid-cols-4"
+      >
+        <Card className="min-w-0 overflow-hidden">
+          <CardContent className="grid min-w-0 gap-2 p-4 sm:p-5">
+            <h3 className="flex min-w-0 items-center gap-2 text-pretty font-bold">
               <Lightbulb className="h-4 w-4 text-warning" /> Smart insights
             </h3>
             {insights.isLoading ? (
@@ -259,41 +263,43 @@ export function InsightsSection({ embedded = false }: { embedded?: boolean } = {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="grid gap-3 p-4 sm:p-5">
-            <h3 className="flex items-center gap-2 font-bold">
+        <Card className="min-w-0 overflow-hidden">
+          <CardContent className="grid min-w-0 gap-3 p-4 sm:p-5">
+            <h3 className="flex min-w-0 items-center gap-2 text-pretty font-bold">
               <TrendingDown className="h-4 w-4 text-warning" /> Month over month
             </h3>
-            {comparison.isLoading ? (
+            {workspace.isLoading ? (
               <Skeleton className="h-36" />
-            ) : comparison.data ? (
+            ) : comparison ? (
               <>
                 <div className="grid grid-cols-2 gap-2">
                   <ComparisonMetric
                     label="Spend"
-                    value={formatCurrency(comparison.data.spend, currency)}
+                    value={formatCurrency(comparison.spend, currency)}
                   />
                   <ComparisonMetric
                     label="Spend change"
-                    value={formatChange(comparison.data.spend_change_pct)}
+                    value={formatChange(comparison.spend_change_pct)}
                   />
                   <ComparisonMetric
                     label="Income"
-                    value={formatCurrency(comparison.data.income, currency)}
+                    value={formatCurrency(comparison.income, currency)}
                   />
                   <ComparisonMetric
                     label="Income change"
-                    value={formatChange(comparison.data.income_change_pct)}
+                    value={formatChange(comparison.income_change_pct)}
                   />
                 </div>
                 <div className="grid gap-1">
-                  {comparison.data.category_deltas.slice(0, 3).map((delta) => (
+                  {comparison.category_deltas.slice(0, 3).map((delta) => (
                     <div
                       key={delta.category}
-                      className="flex justify-between text-xs text-muted-foreground"
+                      className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-3 text-xs text-muted-foreground"
                     >
-                      <span>{delta.category}</span>
-                      <span>{formatChange(delta.change_pct)}</span>
+                      <span className="truncate">{delta.category}</span>
+                      <span className="whitespace-nowrap text-right tabular-nums">
+                        {formatChange(delta.change_pct)}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -304,9 +310,9 @@ export function InsightsSection({ embedded = false }: { embedded?: boolean } = {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="grid gap-2 p-4 sm:p-5">
-            <h3 className="flex items-center gap-2 font-bold">
+        <Card className="min-w-0 overflow-hidden">
+          <CardContent className="grid min-w-0 gap-2 p-4 sm:p-5">
+            <h3 className="flex min-w-0 items-center gap-2 text-pretty font-bold">
               <Store className="h-4 w-4 text-info" /> Top merchants
             </h3>
             {merchants.length === 0 ? (
@@ -315,15 +321,13 @@ export function InsightsSection({ embedded = false }: { embedded?: boolean } = {
               merchants.slice(0, 6).map((m, i) => (
                 <div
                   key={m.name}
-                  className="dashboard-row flex items-center justify-between gap-2 text-sm"
+                  className="dashboard-row grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 text-sm"
                 >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent text-xs font-bold text-accent-foreground">
-                      {i + 1}
-                    </span>
-                    <span className="truncate">{m.name}</span>
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent text-xs font-bold text-accent-foreground">
+                    {i + 1}
                   </span>
-                  <span className="shrink-0 font-semibold">
+                  <span className="min-w-0 truncate">{m.name}</span>
+                  <span className="whitespace-nowrap text-right font-semibold tabular-nums">
                     {formatCurrency(m.total, currency)}{' '}
                     <span className="text-xs text-muted-foreground">/ {m.count}x</span>
                   </span>
@@ -333,9 +337,9 @@ export function InsightsSection({ embedded = false }: { embedded?: boolean } = {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="grid gap-2 p-4 sm:p-5">
-            <h3 className="flex items-center gap-2 font-bold">
+        <Card className="min-w-0 overflow-hidden">
+          <CardContent className="grid min-w-0 gap-2 p-4 sm:p-5">
+            <h3 className="flex min-w-0 items-center gap-2 text-pretty font-bold">
               <Repeat className="h-4 w-4 text-primary" /> Recurring charges
             </h3>
             {recurring.length === 0 ? (
@@ -344,28 +348,36 @@ export function InsightsSection({ embedded = false }: { embedded?: boolean } = {
               recurring.slice(0, 6).map((r) => (
                 <div
                   key={r.merchant}
-                  className="dashboard-row flex items-center justify-between gap-2 text-sm"
+                  className="dashboard-row grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm"
                 >
-                  <span className="min-w-0 truncate">{r.merchant}</span>
-                  <span className="shrink-0 font-semibold">
-                    {formatCurrency(r.avg_amount, currency)}{' '}
-                    <span className="text-xs text-muted-foreground">/ {r.occurrences}x</span>
+                  <span className="min-w-0">
+                    <span className="block truncate">{r.merchant}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {recurrenceLabel(r.status, r.cadence)} · {Math.round(r.confidence * 100)}%
+                      confidence
+                    </span>
+                  </span>
+                  <span className="whitespace-nowrap text-right font-semibold tabular-nums">
+                    {formatCurrency(r.monthly_equivalent, currency)}{' '}
+                    <span className="text-xs text-muted-foreground">/ month</span>
                   </span>
                 </div>
               ))
             )}
           </CardContent>
         </Card>
-      </div>
+      </section>
     </div>
   );
 }
 
 function ComparisonMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border bg-muted/35 p-2.5">
+    <div className="min-w-0 rounded-lg border border-border bg-muted/35 p-2.5">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 font-bold">{value}</p>
+      <p className="mt-1 truncate font-bold tabular-nums" title={value}>
+        {value}
+      </p>
     </div>
   );
 }
@@ -373,4 +385,10 @@ function ComparisonMetric({ label, value }: { label: string; value: string }) {
 function formatChange(value: number | null | undefined): string {
   if (value == null) return 'New';
   return `${value > 0 ? '+' : ''}${value}%`;
+}
+
+function recurrenceLabel(status: string, cadence?: string | null): string {
+  const maturity =
+    status === 'mature' ? 'Confirmed' : status === 'missed' ? 'Possibly missed' : 'Early';
+  return cadence ? `${maturity} · ${cadence}` : maturity;
 }

@@ -5,7 +5,7 @@ import { PageIntro } from '@/components/system';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Tabs } from '@/components/ui/Tabs';
-import { useFinancialHealth } from '@/features/workspace/queries';
+import { useWorkspaceSnapshot } from '@/features/workspace/queries';
 
 const AnalyticsSection = lazy(() =>
   import('@/features/analytics/AnalyticsSection').then((module) => ({
@@ -27,7 +27,8 @@ type PlanView = 'analytics' | 'networth' | 'budgets';
 
 export function PlanExperience() {
   const { activeSection, scrollTo, setQuickAddOpen } = useDashboardUi();
-  const health = useFinancialHealth();
+  const workspace = useWorkspaceSnapshot();
+  const health = workspace.data?.financial_health;
   const view: PlanView =
     activeSection === 'networth' || activeSection === 'budgets' ? activeSection : 'analytics';
 
@@ -39,9 +40,9 @@ export function PlanExperience() {
         description="Turn your current position into a practical outlook, guardrails, and goals you can act on."
         action={
           <div className="flex flex-wrap items-center gap-2">
-            {health.data ? (
-              <Badge variant={health.data.score >= 70 ? 'success' : 'warning'}>
-                <HeartPulse className="h-3.5 w-3.5" /> Health {health.data.score}
+            {health ? (
+              <Badge variant={health.monthly_stability >= 70 ? 'success' : 'warning'}>
+                <HeartPulse className="h-3.5 w-3.5" /> Stability {health.monthly_stability}
               </Badge>
             ) : null}
             <Button variant="outline" onClick={() => setQuickAddOpen(true)}>

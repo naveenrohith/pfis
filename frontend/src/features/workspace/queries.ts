@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
@@ -15,11 +15,9 @@ export const queryKeys = {
   budgets: (u: string, m: number, y: number) => ['budgets', u, m, y] as const,
   workspace: (u: string, m: number, y: number) => ['workspace', u, m, y] as const,
   merchants: (u: string, m: number, y: number) => ['merchants', u, m, y] as const,
+  learnedMerchantRules: (u: string) => ['learnedMerchantRules', u] as const,
   categoryIntelligence: (u: string, m: number, y: number) =>
     ['categoryIntelligence', u, m, y] as const,
-  cashFlow: (u: string, m: number, y: number) => ['cashFlow', u, m, y] as const,
-  monthComparison: (u: string, m: number, y: number) => ['monthComparison', u, m, y] as const,
-  financialHealth: (u: string, m: number, y: number) => ['financialHealth', u, m, y] as const,
   goals: (u: string, m: number, y: number) => ['goals', u, m, y] as const,
   guidanceBrief: (u: string, m: number, y: number, cadence?: string) =>
     cadence
@@ -141,45 +139,32 @@ export function useMerchants() {
   });
 }
 
+export function useLearnedMerchantRules() {
+  const userId = useUserId();
+  return useQuery({
+    queryKey: queryKeys.learnedMerchantRules(userId),
+    queryFn: () => api.learnedMerchantRules(userId),
+    enabled: !!userId,
+  });
+}
+
+export function useDeleteLearnedMerchantRule() {
+  const userId = useUserId();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ruleId: string) => api.deleteLearnedMerchantRule(userId, ruleId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.learnedMerchantRules(userId) });
+    },
+  });
+}
+
 export function useCategoryIntelligence() {
   const userId = useUserId();
   const { month, year } = useWorkspace();
   return useQuery({
     queryKey: queryKeys.categoryIntelligence(userId, month, year),
     queryFn: () => api.categoryIntelligence(userId, month, year),
-    enabled: !!userId,
-    refetchInterval: 30_000,
-  });
-}
-
-export function useCashFlow() {
-  const userId = useUserId();
-  const { month, year } = useWorkspace();
-  return useQuery({
-    queryKey: queryKeys.cashFlow(userId, month, year),
-    queryFn: () => api.cashFlow(userId, month, year),
-    enabled: !!userId,
-    refetchInterval: 30_000,
-  });
-}
-
-export function useMonthComparison() {
-  const userId = useUserId();
-  const { month, year } = useWorkspace();
-  return useQuery({
-    queryKey: queryKeys.monthComparison(userId, month, year),
-    queryFn: () => api.monthComparison(userId, month, year),
-    enabled: !!userId,
-    refetchInterval: 30_000,
-  });
-}
-
-export function useFinancialHealth() {
-  const userId = useUserId();
-  const { month, year } = useWorkspace();
-  return useQuery({
-    queryKey: queryKeys.financialHealth(userId, month, year),
-    queryFn: () => api.financialHealth(userId, month, year),
     enabled: !!userId,
     refetchInterval: 30_000,
   });
