@@ -1,7 +1,7 @@
 # PFIS Visual Direction and UI Stack Decision
 
 Status: selected for implementation
-Related prototype: `docs/prototypes/visual-directions.html`
+Related archived visual exploration: `docs/archive/prototypes/visual-directions.html`
 
 ## 1. Research frame
 

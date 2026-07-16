@@ -28,6 +28,10 @@ This directory is the source of truth for PFIS agent and Copilot work.
 - [extending.md](extending.md) - how to add parsers, routes, services, and UI features
 - [adding-a-vendor.md](adding-a-vendor.md) - PFIS-compatible source/parser onboarding
 
+## Archive
+
+- [archive/prototypes/](archive/prototypes/) - approved pre-production visual baselines retained for design history; not an executable frontend
+
 ## Not In Scope
 
 PFIS does not use browser automation, captcha solving, DOM extraction, locator resolution, or automated MFA. Agents must not introduce those concepts unless the product scope changes.

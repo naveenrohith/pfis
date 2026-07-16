@@ -1,9 +1,12 @@
 # PFIS Responsive Prototype Specification
 
-Status: validated and ready for production implementation
-Prototype entry: `frontend/prototype.html`
-Implementation: `frontend/src/prototypes/PrototypeApp.tsx`
-Captured baselines: `docs/prototypes/experience/`
+Status: historical design-validation record
+
+The temporary React prototype and its capture scripts were retired after the
+production workspace superseded them. The approved visual baselines remain in
+[`docs/archive/prototypes/experience/`](archive/prototypes/experience/) as a
+durable design record; production coverage now lives in
+`frontend/e2e/premium-workspace.spec.ts`.
 
 ## Prototype coverage
 
@@ -57,11 +60,9 @@ The visual prototype shows representative populated states. Production screens m
 - Healthy, stale, syncing, recoverable failure, blocked source, and no source connected.
 - Parser-level diagnostics remain behind an explicit technical disclosure.
 
-## Validation
+## Historical validation
 
-`frontend/scripts/capture-prototypes.mjs` produces repeatable desktop and mobile baselines for all six experiences.
-
-`frontend/scripts/validate-prototypes.mjs` validates all six experiences at 1440 × 1000 and 390 × 844 for:
+The retired prototype was validated at 1440 × 1000 and 390 × 844 for:
 
 - serious and critical axe accessibility violations;
 - accidental horizontal page overflow;
@@ -69,9 +70,9 @@ The visual prototype shows representative populated states. Production screens m
 
 The final Phase 4 run passed all 12 screen/viewport combinations. Earlier failures led to design-system fixes for semantic contrast, ARIA list semantics, responsive min-width handling, and mobile navigation contrast.
 
-## Phase 4 exit gate
+## Archived Phase 4 exit gate
 
-- [x] Today, Activity, Review, Plan, Insights, and Data & settings prototypes exist in React.
+- [x] Today, Activity, Review, Plan, Insights, and Data & settings prototypes were validated in React.
 - [x] Desktop and mobile baselines are captured.
 - [x] Reading order and responsive composition are explicit.
 - [x] Important empty, loading, stale, and failure states are specified.
