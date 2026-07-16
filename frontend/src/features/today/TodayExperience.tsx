@@ -22,7 +22,7 @@ import {
 } from '@/features/workspace/queries';
 import { useSync } from '@/features/workspace/SyncContext';
 import { formatCurrency, formatTime } from '@/lib/format';
-import type { TimelineEvent } from '@/lib/types';
+import type { CashFlowProjection } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 export function TodayExperience() {
@@ -180,7 +180,7 @@ export function TodayExperience() {
               </div>
             ) : null}
           </div>
-          <HorizonChart events={data?.timeline ?? []} currency={currency} net={netCashFlow} />
+          <MoneyHorizon projection={projection} currency={currency} net={netCashFlow} />
         </FinancialHero>
 
         <ActionSurface
@@ -335,138 +335,134 @@ function TodaySkeleton() {
   );
 }
 
-function HorizonChart({
-  events,
+function MoneyHorizon({
+  projection,
   currency,
   net,
 }: {
-  events: TimelineEvent[];
+  projection?: CashFlowProjection;
   currency: string;
   net: number;
 }) {
-  const points = buildHorizonPoints(events, net);
-  const values = points.map((point) => point.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = Math.max(max - min, 1);
-  const coordinates = points.map((point, index) => ({
-    ...point,
-    x: 12 + (index / Math.max(points.length - 1, 1)) * 696,
-    y: 168 - ((point.value - min) / range) * 128,
-  }));
-  const path = coordinates
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
-    .join(' ');
-  const notable = coordinates.reduce((largest, point) =>
-    Math.abs(point.delta) > Math.abs(largest.delta) ? point : largest,
-  );
+  const observed = projection?.net_to_date ?? net;
+  const projected = projection?.projected_net;
+  const daysRemaining = projection
+    ? Math.max(projection.days_in_month - projection.days_elapsed, 0)
+    : null;
+  const horizonItems = [
+    {
+      label: 'Position today',
+      evidence: 'Observed',
+      value: formatCurrency(observed, currency),
+      detail: 'Income less tracked spend',
+    },
+    {
+      label: 'Daily pace',
+      evidence: 'Calculated',
+      value: projection ? formatCurrency(projection.daily_spend_rate, currency) : 'Preparing',
+      detail: 'Average tracked spend per day',
+    },
+    {
+      label: 'Recurring reserve',
+      evidence: 'Calculated',
+      value: projection ? formatCurrency(projection.recurring_commitments, currency) : 'Preparing',
+      detail: 'Monthly commitments, not exact due dates',
+    },
+    {
+      label: 'Month end',
+      evidence: 'Forecast',
+      value: projected === undefined ? 'Preparing' : formatCurrency(projected, currency),
+      detail: projection
+        ? `${formatCurrency(projection.income - projection.projected_range_high, currency)} to ${formatCurrency(
+            projection.income - projection.projected_range_low,
+            currency,
+          )}`
+        : 'Waiting for projection evidence',
+    },
+  ];
 
   return (
-    <figure className="mt-8">
-      <figcaption className="sr-only">
-        Cumulative cash-flow horizon for the selected month. The largest daily movement was{' '}
-        {formatCurrency(notable.delta, currency)} on {notable.label}.
-      </figcaption>
-      <svg
-        className="h-52 w-full overflow-visible text-primary"
-        viewBox="0 0 720 200"
-        aria-hidden="true"
-      >
-        <path
-          d={path}
-          fill="none"
-          stroke="currentColor"
-          strokeOpacity=".15"
-          strokeWidth="15"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+    <figure className="mt-8" aria-labelledby="money-horizon-title">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-primary/15 pb-4">
+        <div>
+          <p className="text-[0.68rem] font-extrabold uppercase tracking-[0.18em] text-foreground">
+            Money horizon
+          </p>
+          <h2 id="money-horizon-title" className="mt-1 text-lg font-extrabold tracking-tight">
+            {projected === undefined
+              ? 'Preparing your month-end runway'
+              : projected >= 0
+                ? `A ${formatCurrency(projected, currency)} buffer is in view`
+                : `${formatCurrency(Math.abs(projected), currency)} needs covering`}
+          </h2>
+        </div>
+        <Badge variant={projected !== undefined && projected < 0 ? 'warning' : 'outline'}>
+          Forecast {daysRemaining === null ? 'pending' : `· ${daysRemaining} days`}
+        </Badge>
+      </div>
+
+      <dl className="relative mt-6 grid gap-x-5 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
+        <div
+          className="absolute left-4 right-4 top-2 hidden h-px bg-gradient-to-r from-primary/45 via-settlement/45 to-intelligence/45 lg:block"
+          aria-hidden="true"
         />
-        <path
-          d={path}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <circle cx={notable.x} cy={notable.y} r="6" className="fill-coral" />
-        <line
-          x1={notable.x}
-          y1={notable.y}
-          x2={notable.x}
-          y2="24"
-          stroke="currentColor"
-          strokeOpacity=".32"
-          strokeDasharray="3 4"
-        />
-        <text x={Math.min(notable.x + 10, 560)} y="20" fill="currentColor" fontSize="11">
-          {formatCurrency(Math.abs(notable.delta), currency)} movement
-        </text>
-        <text x="12" y="194" fill="currentColor" opacity=".58" fontSize="11">
-          {coordinates[0]?.label}
-        </text>
-        <text x="660" y="194" fill="currentColor" opacity=".58" fontSize="11">
-          {coordinates[coordinates.length - 1]?.label}
-        </text>
-      </svg>
+        {horizonItems.map((item, index) => (
+          <div key={item.label} className="relative min-w-0">
+            <span
+              className={cn(
+                'mb-4 hidden h-4 w-4 rounded-full border-[3px] border-background shadow-[0_0_0_1px_hsl(var(--primary)/.35)] lg:block',
+                index === horizonItems.length - 1 ? 'bg-intelligence' : 'bg-primary',
+              )}
+              aria-hidden="true"
+            />
+            <dt className="text-xs font-bold text-muted-foreground">{item.label}</dt>
+            <dd
+              className={cn(
+                'money-value mt-1 truncate text-xl',
+                index === horizonItems.length - 1 && projected !== undefined && projected < 0
+                  ? 'text-danger'
+                  : '',
+              )}
+            >
+              {item.value}
+            </dd>
+            <dd className="mt-1 text-[0.68rem] font-extrabold uppercase tracking-[0.12em] text-foreground">
+              {item.evidence}
+            </dd>
+            <dd className="mt-1 text-xs leading-5 text-muted-foreground">{item.detail}</dd>
+          </div>
+        ))}
+      </dl>
+
       <details className="border-t border-primary/15 pt-2 text-sm">
         <summary className="focus-ring cursor-pointer rounded-md py-2 font-bold text-muted-foreground hover:text-foreground">
-          View horizon data
+          Evidence and forecast assumptions
         </summary>
-        <div className="mt-2 overflow-x-auto">
-          <table className="w-full min-w-96 text-left text-xs">
-            <thead>
-              <tr className="text-muted-foreground">
-                <th className="py-2">Date</th>
-                <th className="py-2 text-right">Daily movement</th>
-                <th className="py-2 text-right">Running cash flow</th>
-              </tr>
-            </thead>
-            <tbody>
-              {points.map((point) => (
-                <tr key={point.label} className="border-t border-primary/10">
-                  <td className="py-2">{point.label}</td>
-                  <td className="money-value py-2 text-right">
-                    {formatCurrency(point.delta, currency)}
-                  </td>
-                  <td className="money-value py-2 text-right">
-                    {formatCurrency(point.value, currency)}
-                  </td>
-                </tr>
+        {projection ? (
+          <div className="mt-2 grid gap-4 pb-2 text-xs leading-5 text-muted-foreground sm:grid-cols-[.7fr_1.3fr]">
+            <p>
+              Data through{' '}
+              <strong className="text-foreground">
+                {projection.data_through || 'the selected period'}
+              </strong>
+              <br />
+              Ruleset <strong className="text-foreground">{projection.ruleset_version}</strong>
+            </p>
+            <ul className="list-disc space-y-1 pl-4">
+              {projection.assumptions.map((assumption) => (
+                <li key={assumption}>{assumption}</li>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </ul>
+          </div>
+        ) : (
+          <p className="pb-2 text-xs text-muted-foreground">
+            PFIS will show the source period and deterministic assumptions when projection data is
+            ready.
+          </p>
+        )}
       </details>
     </figure>
   );
-}
-
-function buildHorizonPoints(events: TimelineEvent[], fallbackNet: number) {
-  const daily = new Map<string, number>();
-  for (const event of [...events].sort((left, right) => left.date.localeCompare(right.date))) {
-    const day = event.date.slice(0, 10);
-    const signed = event.direction === 'in' ? Math.abs(event.amount) : -Math.abs(event.amount);
-    daily.set(day, (daily.get(day) ?? 0) + signed);
-  }
-
-  if (!daily.size) {
-    return [
-      { label: 'Start', delta: 0, value: 0 },
-      { label: 'Now', delta: fallbackNet, value: fallbackNet },
-    ];
-  }
-
-  let running = 0;
-  return [...daily.entries()].map(([date, delta]) => {
-    running += delta;
-    const parsed = new Date(`${date}T00:00:00`);
-    return {
-      label: parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
-      delta,
-      value: running,
-    };
-  });
 }
 
 function Pulse({
