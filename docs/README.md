@@ -14,6 +14,7 @@ This directory is the source of truth for PFIS agent and Copilot work.
 - [modernization-plan.md](modernization-plan.md) - phased modernization implementation tracker
 - [deployment.md](deployment.md) - production-candidate deployment, backup, and health runbook
 - [frontend.md](frontend.md) - canonical React/Vite workspace ownership and release gates
+- [repository-standards.md](repository-standards.md) - source ownership, placement rules, and generated-file policy
 - [ui-ux-masterplan.md](ui-ux-masterplan.md) - workspace navigation, MCP component research, and UI/UX delivery gates
 - [privacy-review-premium-workspace.md](privacy-review-premium-workspace.md) - premium workspace data-use and privacy approval
 
