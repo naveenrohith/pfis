@@ -143,6 +143,11 @@ legs include `transfer_group_id` and `is_transfer=true`; they remain visible in 
 ledger but are excluded from income, spending, budget, guidance, forecast, and
 report aggregates.
 
+`TransactionResponse` includes additive merchant provenance fields:
+`merchant_resolution_source`, `merchant_resolution_confidence`,
+`merchant_rule_id`, and `merchant_resolver_version`. Direct transaction-create
+requests are recorded as `manual`; client-supplied provenance values are ignored.
+
 ## Guidance and Dashboard Preferences
 
 | Method | Path | Query / Body | Returns |
@@ -192,7 +197,7 @@ resource access returns no data, and cross-currency transfers are rejected.
 
 | Method | Path | Query | Success | Returns |
 | --- | --- | --- | --- | --- |
-| `GET` | `/api/insights/` | `user_id`, `month?` (1–12, def current), `year?` (2020–2030, def current) | `200` | `{meta, insights, daily_trend, recurring}` |
+| `GET` | `/api/insights/` | `user_id`, `month?` (1–12, def current), `year?` (2020–2030, def current) | `200` | `{meta, insights, daily_trend, recurring_payments}`; recurring items include cadence, lifecycle, confidence, monthly equivalent, expected date, evidence, and ruleset |
 
 ## Dashboard
 
@@ -223,9 +228,19 @@ gmail status). It never contains raw email bodies, tokens, or secrets.
       "title": "…", "description": "…", "action_label": "Open review queue", "target": "review" }
   ],
   "review_summary": { "pending_count": 0, "low_confidence_count": 0, "avg_confidence": null },
-  "sync_summary": { "latest_status": null, "last_synced_at": null, "processed_total": 0, "unprocessed_total": 0 }
+  "sync_summary": { "latest_status": null, "last_synced_at": null, "processed_total": 0, "unprocessed_total": 0 },
+  "projection": { "projected_net": 0, "confidence": 0.35, "data_sufficiency": "low", "evidence": [] },
+  "month_comparison": { "spend_change_pct": null, "category_deltas": [] },
+  "financial_health": { "monthly_stability": 0, "data_confidence": 0, "data_sufficiency": "low" },
+  "recurring_commitments": []
 }
 ```
+
+The workspace endpoint is the authoritative Today briefing contract. Projection ranges use
+historical variation when enough months exist, treat only mature recurring streams as confirmed
+commitments, and label forecast confidence and assumptions. `financial_health.score` is retained
+as a compatibility alias for `monthly_stability`; data quality is reported separately as
+`data_confidence`. Missing budgets return `budget_adherence: null` and do not inflate stability.
 
 ## Merchant, Category, Analytics, Goals, and AI-ready Explanations
 
@@ -235,18 +250,31 @@ bodies, tokens, passwords, or connector secrets.
 
 | Method | Path | Query / Body | Success | Returns |
 | --- | --- | --- | --- | --- |
-| `GET` | `/api/merchants/` | `user_id`, `month`, `year` | `200` | `list[MerchantSummary]` with spend, count, average, trend, category, recurrence likelihood |
+| `GET` | `/api/merchants/` | `user_id`, `month`, `year` | `200` | `list[MerchantSummary]` with spend, trend, category, recurrence lifecycle/cadence/confidence, expected date, and data sufficiency |
+| `GET` | `/api/merchants/learned-rules` | `user_id` | `200` | User-owned exact merchant mappings learned from explicit corrections |
+| `DELETE` | `/api/merchants/learned-rules/{rule_id}` | `user_id` | `204` | Forget one user-owned learned mapping; another user's id returns `404` |
 | `GET` | `/api/merchants/{merchant_key}` | `user_id`, `month`, `year` | `200` | `MerchantDetail` with aliases, default category, latest transactions |
 | `PATCH` | `/api/merchants/{merchant_key}` | `user_id`, `month`, `year`, `MerchantUpdate` | `200` | Updated `MerchantDetail`; can apply normalized name/category to existing transactions |
 | `GET` | `/api/categories/intelligence` | `user_id`, `month`, `year` | `200` | `CategoryIntelligenceResponse` with hierarchy, budget usage, MoM change, top merchants |
-| `GET` | `/api/analytics/cash-flow` | `user_id`, `month`, `year` | `200` | `CashFlowProjection` |
+| `GET` | `/api/analytics/cash-flow` | `user_id`, `month`, `year` | `200` | Evidence-labelled projection with expected income, confirmed commitments, flexible spend, historical range, confidence, sufficiency, assumptions, and ruleset |
 | `POST` | `/api/analytics/scenario` | `user_id`, `ScenarioRequest` | `200` | Non-mutating `ScenarioResponse` with baseline, adjusted outcome, effective capped adjustments, assumptions, freshness, and ruleset |
 | `GET` | `/api/analytics/month-comparison` | `user_id`, `month`, `year` | `200` | `MonthComparison` with category deltas |
-| `GET` | `/api/analytics/financial-health` | `user_id`, `month`, `year` | `200` | `FinancialHealthScore` |
+| `GET` | `/api/analytics/financial-health` | `user_id`, `month`, `year` | `200` | Monthly Stability and separate Data Confidence; retains `score` as a stability compatibility alias |
 | `GET` | `/api/goals/` | `user_id`, `month`, `year` | `200` | `list[GoalResponse]` |
 | `POST` | `/api/goals/` | `user_id`, `GoalCreate` | `201` | Created `GoalResponse` |
 | `PATCH` | `/api/goals/{goal_id}` | `user_id`, `month`, `year`, `GoalUpdate` | `200` | Updated `GoalResponse` |
 | `POST` | `/api/ai/explain` | `ExplainRequest` | `200` | `ExplainResponse` with summary, drivers, next actions, safety note |
+
+Merchant edits are user scoped. `PATCH /api/merchants/{merchant_key}` creates
+exact `UserMerchantRule` mappings for the selected user and, when
+`apply_existing=true`, updates matching historical transactions atomically with
+correction history, duplicate protection, and monthly-summary invalidation. It
+does not mutate the shared `Merchant` catalog.
+
+Two similar purchases are not sufficient evidence of recurrence. PFIS requires a recognizable
+weekly, fortnightly, monthly, quarterly, or annual interval; 2 supported occurrences are `early`,
+3 or more high-confidence occurrences can become `mature`, and late streams become `missed` or
+`inactive`. Amount consistency contributes confidence but is not used as a cadence substitute.
 
 `ScenarioRequest` accepts `month`, `year`, `flexible_spend_reduction`,
 `recurring_reduction`, and `additional_income`. All adjustment amounts are

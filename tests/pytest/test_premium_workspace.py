@@ -61,7 +61,7 @@ async def test_transaction_filters_and_deterministic_guidance(client):
         f"/api/guidance/brief?user_id={user['id']}&period=daily&as_of={today.isoformat()}"
     )
     assert brief.status_code == 200
-    assert brief.json()["ruleset_version"] == "pfis-guidance-1"
+    assert brief.json()["ruleset_version"] == "pfis-guidance-2"
 
     supported = await client.post(
         f"/api/guidance/query?user_id={user['id']}",

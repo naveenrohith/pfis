@@ -1,12 +1,18 @@
 """Schemas for merchant, category, analytics, goals, and explanations."""
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
 Severity = Literal["info", "success", "warning", "danger"]
 GoalType = Literal["savings", "category_reduction", "recurring_reduction"]
+DataSufficiency = Literal["low", "medium", "high"]
+
+
+class EvidenceItem(BaseModel):
+    label: str
+    value: str
 
 
 class TransactionPreview(BaseModel):
@@ -30,6 +36,11 @@ class MerchantSummary(BaseModel):
     category: str | None = None
     category_id: str | None = None
     recurrence_likelihood: float = 0.0
+    recurrence_status: str = "candidate"
+    recurrence_cadence: str | None = None
+    recurrence_confidence: float = 0.0
+    next_expected_date: date | None = None
+    data_sufficiency: DataSufficiency = "low"
     latest_transaction_date: date | None = None
 
 
@@ -42,8 +53,22 @@ class MerchantDetail(MerchantSummary):
 class MerchantUpdate(BaseModel):
     normalized_name: str | None = Field(None, min_length=1, max_length=255)
     default_category_id: str | None = None
-    aliases: list[str] | None = None
+    aliases: list[Annotated[str, Field(min_length=1, max_length=255)]] | None = Field(
+        None, max_length=100
+    )
     apply_existing: bool = True
+
+
+class LearnedMerchantRule(BaseModel):
+    id: str
+    raw_descriptor: str
+    normalized_name: str
+    category_id: str | None = None
+    source: str
+    confidence: float
+    source_transaction_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class CategoryTopMerchant(BaseModel):
@@ -84,12 +109,19 @@ class CashFlowProjection(BaseModel):
     days_elapsed: int = 0
     days_in_month: int = 0
     recurring_commitments: float = 0.0
+    confirmed_commitments: float = 0.0
+    expected_income: float = 0.0
+    flexible_spend_projection: float = 0.0
     budgeted_remaining: float = 0.0
     projected_range_low: float = 0.0
     projected_range_high: float = 0.0
     assumptions: list[str] = Field(default_factory=list)
+    evidence: list[EvidenceItem] = Field(default_factory=list)
+    confidence: float = 0.0
+    data_sufficiency: DataSufficiency = "low"
+    historical_months: int = 0
     data_through: date | None = None
-    ruleset_version: str = "pfis-cash-flow-2"
+    ruleset_version: str = "pfis-cash-flow-3"
 
 
 class ScenarioRequest(BaseModel):
@@ -135,10 +167,15 @@ class MonthComparison(BaseModel):
 
 class FinancialHealthScore(BaseModel):
     score: int
+    monthly_stability: int = 0
+    data_confidence: int = 0
+    data_sufficiency: DataSufficiency = "low"
     savings_rate: float = 0.0
-    budget_adherence: float = 100.0
+    budget_adherence: float | None = None
     recurring_burden: float = 0.0
     review_cleanliness: float = 100.0
+    spending_volatility: float = 0.0
+    ruleset_version: str = "pfis-stability-1"
     signals: list[dict] = Field(default_factory=list)
 
 

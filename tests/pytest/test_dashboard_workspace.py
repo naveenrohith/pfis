@@ -47,6 +47,10 @@ async def test_workspace_empty_month_returns_stable_shape(client: AsyncClient):
         "recommendations",
         "review_summary",
         "sync_summary",
+        "projection",
+        "month_comparison",
+        "financial_health",
+        "recurring_commitments",
     ):
         assert key in data
 
@@ -59,6 +63,9 @@ async def test_workspace_empty_month_returns_stable_shape(client: AsyncClient):
     assert snap["budget_risk_count"] == 0
     assert data["timeline"] == []
     assert data["recommendations"] == []
+    assert data["financial_health"]["monthly_stability"] == 0
+    assert data["financial_health"]["data_confidence"] == 0
+    assert data["financial_health"]["budget_adherence"] is None
 
 
 @pytest.mark.asyncio

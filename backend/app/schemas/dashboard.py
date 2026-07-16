@@ -11,6 +11,8 @@ schemas remain unchanged.
 
 from pydantic import BaseModel, Field
 
+from app.schemas.intelligence import CashFlowProjection, FinancialHealthScore, MonthComparison
+
 
 class WorkspaceSnapshot(BaseModel):
     """Command-center headline metrics for the selected month."""
@@ -94,3 +96,7 @@ class WorkspaceResponse(BaseModel):
     recommendations: list[WorkspaceRecommendation] = Field(default_factory=list)
     review_summary: ReviewSummary
     sync_summary: SyncSummary
+    projection: CashFlowProjection
+    month_comparison: MonthComparison
+    financial_health: FinancialHealthScore
+    recurring_commitments: list[dict] = Field(default_factory=list)
