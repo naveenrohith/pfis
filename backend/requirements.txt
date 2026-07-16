@@ -11,6 +11,7 @@ httpx==0.28.1
 aiosqlite==0.21.0
 PyJWT==2.10.1
 cryptography==44.0.3
+slowapi==0.1.9
 
 # Phase 1: Gmail Integration
 google-auth==2.40.3

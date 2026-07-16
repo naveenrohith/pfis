@@ -4,22 +4,33 @@ Business logic for creating, reading, and summarizing transactions.
 Keeps routes thin — all logic lives here.
 """
 
-import json
 import hashlib
+import json
 import logging
-from datetime import date, datetime, timezone
-from typing import Optional
-from sqlalchemy import select, func, extract
-from sqlalchemy.orm import selectinload
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import UTC, date, datetime
 
-from app.models.transaction import Transaction, TransactionType
-from app.models.category import Category, Merchant
+from sqlalchemy import asc, delete, desc, extract, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models.account import FinancialAccount
+from app.models.category import Category, Merchant, parse_merchant_aliases
+from app.models.summary import MonthlySummary
 from app.models.sync import UserCorrection
+from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionUpdate
 
 logger = logging.getLogger(__name__)
 AUTO_REVIEW_THRESHOLD = 0.85
+
+
+class DuplicateTransactionError(ValueError):
+    """Raised when a transaction (or correction) collides with an existing row.
+
+    Subclasses ``ValueError`` so existing callers that map ``ValueError`` to an
+    HTTP 409 keep working, while letting the pipeline distinguish a genuine
+    duplicate from an unrelated value error.
+    """
 
 
 class TransactionService:
@@ -35,26 +46,28 @@ class TransactionService:
         user_id: str,
         amount: float,
         transaction_date: date,
-        merchant: Optional[str],
-        reference_id: Optional[str],
-        account_last4: Optional[str] = None,
+        merchant: str | None,
+        reference_id: str | None,
+        account_last4: str | None = None,
     ) -> str:
         """
         Compute SHA-256 fingerprint for deduplication.
         Uses: user + amount + date + merchant + ref_id + account
         """
-        raw = "|".join([
-            user_id,
-            str(amount),
-            str(transaction_date),
-            (merchant or "unknown").lower().strip(),
-            reference_id or "",
-            account_last4 or "",
-        ])
+        raw = "|".join(
+            [
+                user_id,
+                str(amount),
+                str(transaction_date),
+                (merchant or "unknown").lower().strip(),
+                reference_id or "",
+                account_last4 or "",
+            ]
+        )
         return hashlib.sha256(raw.encode()).hexdigest()
 
     @staticmethod
-    def _serialize_correction_value(value) -> Optional[str]:
+    def _serialize_correction_value(value) -> str | None:
         """Serialize values consistently for correction history."""
         if value is None:
             return None
@@ -110,28 +123,40 @@ class TransactionService:
             )
             return
 
-        try:
-            aliases = json.loads(merchant.aliases) if merchant.aliases else []
-        except (TypeError, json.JSONDecodeError):
-            aliases = []
+        aliases = parse_merchant_aliases(merchant.aliases)
 
         alias_keys = {
-            alias.strip().upper()
-            for alias in aliases
-            if isinstance(alias, str) and alias.strip()
+            alias.strip().upper() for alias in aliases if isinstance(alias, str) and alias.strip()
         }
-        if raw_alias and raw_alias.upper() not in alias_keys and raw_alias.upper() != merchant.normalized_name.upper():
+        if (
+            raw_alias
+            and raw_alias.upper() not in alias_keys
+            and raw_alias.upper() != merchant.normalized_name.upper()
+        ):
             aliases.append(raw_alias)
             merchant.aliases = json.dumps(aliases)
 
         if txn.category_id:
             merchant.category_default_id = txn.category_id
 
+        # Invalidate normalizer cache since we mutated merchant data
+        from app.services.parser.normalizer import invalidate_merchant_cache
+
+        invalidate_merchant_cache()
+
+    async def _invalidate_monthly_summary(self, user_id: str, transaction_date: date) -> None:
+        """Remove the affected aggregate snapshot before committing a mutation."""
+        await self.db.execute(
+            delete(MonthlySummary).where(
+                MonthlySummary.user_id == user_id,
+                MonthlySummary.month == transaction_date.month,
+                MonthlySummary.year == transaction_date.year,
+            )
+        )
+
     # --- CRUD ---
 
-    async def create_transaction(
-        self, user_id: str, data: TransactionCreate
-    ) -> Transaction:
+    async def create_transaction(self, user_id: str, data: TransactionCreate) -> Transaction:
         """Create a new transaction with dedup fingerprint."""
 
         fingerprint = self.compute_fingerprint(
@@ -149,13 +174,47 @@ class TransactionService:
         )
         if existing.scalar_one_or_none():
             logger.info(f"Duplicate transaction detected: fingerprint={fingerprint[:16]}...")
-            raise ValueError("Duplicate transaction detected")
+            raise DuplicateTransactionError("Duplicate transaction detected")
+
+        financial_account_id = data.financial_account_id
+        if financial_account_id:
+            account_result = await self.db.execute(
+                select(FinancialAccount).where(
+                    FinancialAccount.id == financial_account_id,
+                    FinancialAccount.user_id == user_id,
+                )
+            )
+            if account_result.scalar_one_or_none() is None:
+                raise ValueError("Financial account not found")
+        elif data.account_last4:
+            masked_number = f"****{data.account_last4}"
+            account_result = await self.db.execute(
+                select(FinancialAccount).where(
+                    FinancialAccount.user_id == user_id,
+                    FinancialAccount.masked_number == masked_number,
+                )
+            )
+            account = account_result.scalar_one_or_none()
+            if account is None:
+                account = FinancialAccount(
+                    user_id=user_id,
+                    institution_name="Unknown",
+                    account_type="unknown",
+                    masked_number=masked_number,
+                    currency=data.currency,
+                )
+                self.db.add(account)
+                await self.db.flush()
+            financial_account_id = account.id
 
         txn = Transaction(
             user_id=user_id,
             amount=data.amount,
             currency=data.currency,
             transaction_type=data.transaction_type,
+            payment_method=data.payment_method,
+            transaction_status=data.transaction_status,
+            transaction_timestamp=data.transaction_timestamp,
             merchant_raw=data.merchant_raw,
             merchant_normalized=data.merchant_normalized,
             category_id=data.category_id,
@@ -163,13 +222,18 @@ class TransactionService:
             account_last4=data.account_last4,
             reference_id=data.reference_id,
             confidence_score=data.confidence_score,
+            parser_version=data.parser_version,
             reviewed_flag=data.confidence_score >= AUTO_REVIEW_THRESHOLD,
-            reviewed_at=datetime.now(timezone.utc) if data.confidence_score >= AUTO_REVIEW_THRESHOLD else None,
+            reviewed_at=(
+                datetime.now(UTC) if data.confidence_score >= AUTO_REVIEW_THRESHOLD else None
+            ),
             source_email_id=data.source_email_id,
             fingerprint=fingerprint,
+            financial_account_id=financial_account_id,
         )
 
         self.db.add(txn)
+        await self._invalidate_monthly_summary(user_id, data.transaction_date)
         await self.db.commit()
         await self.db.refresh(txn)
 
@@ -182,16 +246,26 @@ class TransactionService:
     async def get_transactions(
         self,
         user_id: str,
-        month: Optional[int] = None,
-        year: Optional[int] = None,
-        category_id: Optional[str] = None,
+        month: int | None = None,
+        year: int | None = None,
+        category_id: str | None = None,
+        q: str | None = None,
+        transaction_type: str | None = None,
+        payment_method: str | None = None,
+        reviewed: bool | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        amount_min: float | None = None,
+        amount_max: float | None = None,
+        sort: str = "transaction_date",
+        direction: str = "desc",
         limit: int = 50,
         offset: int = 0,
     ) -> list[Transaction]:
         """Fetch transactions with optional filters."""
         query = (
             select(Transaction)
-            .options(selectinload(Transaction.category))
+            .options(selectinload(Transaction.category), selectinload(Transaction.source_email))
             .where(Transaction.user_id == user_id)
         )
 
@@ -202,19 +276,37 @@ class TransactionService:
             )
         if category_id:
             query = query.where(Transaction.category_id == category_id)
-
-        query = query.order_by(Transaction.transaction_date.desc()).limit(limit).offset(offset)
+        query = self._apply_list_filters(
+            query,
+            q=q,
+            transaction_type=transaction_type,
+            payment_method=payment_method,
+            reviewed=reviewed,
+            date_from=date_from,
+            date_to=date_to,
+            amount_min=amount_min,
+            amount_max=amount_max,
+        )
+        sort_columns = {
+            "transaction_date": Transaction.transaction_date,
+            "amount": Transaction.amount,
+            "merchant": Transaction.merchant_normalized,
+            "created_at": Transaction.created_at,
+        }
+        sort_column = sort_columns.get(sort, Transaction.transaction_date)
+        order = asc(sort_column) if direction == "asc" else desc(sort_column)
+        query = query.order_by(order, Transaction.id.desc()).limit(limit).offset(offset)
         result = await self.db.execute(query)
         transactions = list(result.scalars().all())
         for txn in transactions:
             txn.category_name = txn.category.name if txn.category else None
         return transactions
 
-    async def get_transaction_by_id(self, txn_id: str) -> Optional[Transaction]:
+    async def get_transaction_by_id(self, txn_id: str) -> Transaction | None:
         """Get a single transaction by ID."""
         result = await self.db.execute(
             select(Transaction)
-            .options(selectinload(Transaction.category))
+            .options(selectinload(Transaction.category), selectinload(Transaction.source_email))
             .where(Transaction.id == txn_id)
         )
         txn = result.scalar_one_or_none()
@@ -222,9 +314,7 @@ class TransactionService:
             txn.category_name = txn.category.name if txn.category else None
         return txn
 
-    async def update_transaction(
-        self, txn_id: str, data: TransactionUpdate
-    ) -> Optional[Transaction]:
+    async def update_transaction(self, txn_id: str, data: TransactionUpdate) -> Transaction | None:
         """Update transaction fields (user correction)."""
         txn = await self.get_transaction_by_id(txn_id)
         if not txn:
@@ -235,7 +325,7 @@ class TransactionService:
             return txn
 
         changed_fields: dict[str, tuple[object, object]] = {}
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for field, value in update_data.items():
             current_value = getattr(txn, field)
             if field == "reviewed_flag":
@@ -273,11 +363,14 @@ class TransactionService:
                     )
                 )
                 if existing.scalar_one_or_none():
-                    raise ValueError("Correction would create a duplicate transaction")
+                    raise DuplicateTransactionError(
+                        "Correction would create a duplicate transaction"
+                    )
                 txn.fingerprint = new_fingerprint
 
         await self._record_corrections(txn.id, changed_fields)
         await self._learn_from_correction(txn, set(changed_fields))
+        await self._invalidate_monthly_summary(txn.user_id, txn.transaction_date)
 
         await self.db.commit()
         await self.db.refresh(txn)
@@ -304,7 +397,10 @@ class TransactionService:
             return {
                 "requested_count": len(transaction_ids),
                 "updated_count": 0,
-                "failed": [{"transaction_id": txn_id, "error": "No update fields provided"} for txn_id in transaction_ids],
+                "failed": [
+                    {"transaction_id": txn_id, "error": "No update fields provided"}
+                    for txn_id in transaction_ids
+                ],
             }
 
         result = await self.db.execute(
@@ -337,16 +433,124 @@ class TransactionService:
 
     # --- Aggregations ---
 
-    async def get_monthly_summary(
-        self, user_id: str, month: int, year: int
-    ) -> dict:
+    async def delete_transaction(self, txn_id: str) -> bool:
+        """Delete a transaction by ID. Returns True if deleted."""
+        result = await self.db.execute(select(Transaction).where(Transaction.id == txn_id))
+        txn = result.scalar_one_or_none()
+        if not txn:
+            return False
+        await self._invalidate_monthly_summary(txn.user_id, txn.transaction_date)
+        await self.db.delete(txn)
+        await self.db.commit()
+        logger.info(f"Transaction deleted: {txn_id}")
+        return True
+
+    async def get_transaction_count(
+        self,
+        user_id: str,
+        month: int | None = None,
+        year: int | None = None,
+        category_id: str | None = None,
+        q: str | None = None,
+        transaction_type: str | None = None,
+        payment_method: str | None = None,
+        reviewed: bool | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        amount_min: float | None = None,
+        amount_max: float | None = None,
+    ) -> int:
+        """Get total count of transactions matching filters (for pagination)."""
+        query = select(func.count(Transaction.id)).where(Transaction.user_id == user_id)
+        if month and year:
+            query = query.where(
+                extract("month", Transaction.transaction_date) == month,
+                extract("year", Transaction.transaction_date) == year,
+            )
+        if category_id:
+            query = query.where(Transaction.category_id == category_id)
+        query = self._apply_list_filters(
+            query,
+            q=q,
+            transaction_type=transaction_type,
+            payment_method=payment_method,
+            reviewed=reviewed,
+            date_from=date_from,
+            date_to=date_to,
+            amount_min=amount_min,
+            amount_max=amount_max,
+        )
+        result = await self.db.execute(query)
+        return int(result.scalar())
+
+    @staticmethod
+    def _apply_list_filters(
+        query,
+        *,
+        q: str | None,
+        transaction_type: str | None,
+        payment_method: str | None,
+        reviewed: bool | None,
+        date_from: date | None,
+        date_to: date | None,
+        amount_min: float | None,
+        amount_max: float | None,
+    ):
+        if q:
+            term = f"%{q.strip().lower()}%"
+            query = query.where(
+                or_(
+                    func.lower(Transaction.merchant_normalized).like(term),
+                    func.lower(Transaction.merchant_raw).like(term),
+                    func.lower(Transaction.reference_id).like(term),
+                    func.lower(Transaction.account_last4).like(term),
+                )
+            )
+        if transaction_type:
+            query = query.where(Transaction.transaction_type == transaction_type)
+        if payment_method:
+            query = query.where(Transaction.payment_method == payment_method)
+        if reviewed is not None:
+            query = query.where(Transaction.reviewed_flag.is_(reviewed))
+        if date_from:
+            query = query.where(Transaction.transaction_date >= date_from)
+        if date_to:
+            query = query.where(Transaction.transaction_date <= date_to)
+        if amount_min is not None:
+            query = query.where(Transaction.amount >= amount_min)
+        if amount_max is not None:
+            query = query.where(Transaction.amount <= amount_max)
+        return query
+
+    async def get_monthly_summary(self, user_id: str, month: int, year: int) -> dict:
         """Compute monthly spending summary."""
+
+        cached = await self.db.execute(
+            select(MonthlySummary.payload_json).where(
+                MonthlySummary.user_id == user_id,
+                MonthlySummary.month == month,
+                MonthlySummary.year == year,
+            )
+        )
+        cached_payload = cached.scalar_one_or_none()
+        if cached_payload:
+            try:
+                return json.loads(cached_payload)
+            except json.JSONDecodeError:
+                await self.db.execute(
+                    delete(MonthlySummary).where(
+                        MonthlySummary.user_id == user_id,
+                        MonthlySummary.month == month,
+                        MonthlySummary.year == year,
+                    )
+                )
 
         # Total spend (debits)
         spend_result = await self.db.execute(
             select(func.coalesce(func.sum(Transaction.amount), 0)).where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -358,6 +562,7 @@ class TransactionService:
             select(func.coalesce(func.sum(Transaction.amount), 0)).where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.CREDIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -387,6 +592,7 @@ class TransactionService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -414,6 +620,7 @@ class TransactionService:
             .where(
                 Transaction.user_id == user_id,
                 Transaction.transaction_type == TransactionType.DEBIT,
+                Transaction.is_transfer.is_(False),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -422,11 +629,15 @@ class TransactionService:
             .limit(10)
         )
         merchants = [
-            {"name": row.merchant_normalized or "Unknown", "total": float(row.total), "count": row.count}
+            {
+                "name": row.merchant_normalized or "Unknown",
+                "total": float(row.total),
+                "count": row.count,
+            }
             for row in merchant_result.all()
         ]
 
-        return {
+        summary = {
             "total_spend": total_spend,
             "total_income": total_income,
             "net": total_income - total_spend,
@@ -435,3 +646,13 @@ class TransactionService:
             "category_breakdown": categories,
             "top_merchants": merchants,
         }
+        self.db.add(
+            MonthlySummary(
+                user_id=user_id,
+                month=month,
+                year=year,
+                payload_json=json.dumps(summary),
+            )
+        )
+        await self.db.commit()
+        return summary

@@ -7,11 +7,13 @@ Operational models added from architect review:
 - ParseFailure: Dead Letter Queue for failed parses
 """
 
-import uuid
 import enum
-from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Float, DateTime, Boolean, Text, Enum, ForeignKey
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
 
 
@@ -30,16 +32,16 @@ class JobStatus(str, enum.Enum):
 
 class SyncRun(Base):
     """Tracks each Gmail sync operation for observability and debugging."""
-    __tablename__ = "sync_runs"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    __tablename__ = "sync_runs"
+    __table_args__ = (Index("ix_sync_runs_user_started", "user_id", "start_time"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
     start_time: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     emails_fetched: Mapped[int] = mapped_column(Integer, default=0)
@@ -57,11 +59,10 @@ class SyncRun(Base):
 
 class Budget(Base):
     """Monthly spending limits per category."""
+
     __tablename__ = "budgets"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
@@ -80,11 +81,10 @@ class Budget(Base):
 
 class UserCorrection(Base):
     """Feedback loop — user corrections feed back into parsing rules."""
+
     __tablename__ = "user_corrections"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     transaction_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("transactions.id"), nullable=False, index=True
     )
@@ -92,7 +92,7 @@ class UserCorrection(Base):
     old_value: Mapped[str] = mapped_column(Text, nullable=True)
     new_value: Mapped[str] = mapped_column(Text, nullable=False)
     corrected_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
     # Relationships
@@ -104,16 +104,22 @@ class UserCorrection(Base):
 
 class ParseFailure(Base):
     """Dead Letter Queue — stores failed parse attempts for retry."""
+
     __tablename__ = "parse_failures"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("raw_emails.id"), nullable=False, index=True
     )
-    error_message: Mapped[str] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_stage: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    parser_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     parser_version: Mapped[int] = mapped_column(Integer, default=1)
+    pattern_version: Mapped[int] = mapped_column(Integer, default=1)
+    confidence_version: Mapped[int] = mapped_column(Integer, default=1)
+    normalization_version: Mapped[int] = mapped_column(Integer, default=1)
+    diagnostic_json: Mapped[str] = mapped_column(Text, default="{}")
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     last_retry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -125,13 +131,45 @@ class ParseFailure(Base):
         return f"<ParseFailure retries={self.retry_count} resolved={self.resolved}>"
 
 
+class PipelineEvent(Base):
+    """Non-secret event log for parser and transaction pipeline observability."""
+
+    __tablename__ = "pipeline_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
+    )
+    email_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("raw_emails.id"), nullable=True, index=True
+    )
+    transaction_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("transactions.id"), nullable=True, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    stage: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    parser_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    parser_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+
+    user = relationship("User", back_populates="pipeline_events")
+
+    def __repr__(self) -> str:
+        return f"<PipelineEvent {self.event_type}:{self.status}>"
+
+
 class BackgroundJob(Base):
     """Persistent background orchestration record for async job execution."""
+
     __tablename__ = "background_jobs"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True, index=True
     )
@@ -141,7 +179,7 @@ class BackgroundJob(Base):
     result_json: Mapped[str] = mapped_column(Text, default="{}")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -150,3 +188,69 @@ class BackgroundJob(Base):
 
     def __repr__(self) -> str:
         return f"<BackgroundJob {self.job_type} status={self.status.value}>"
+
+
+class Goal(Base):
+    """User-defined financial goal tracked against monthly aggregates."""
+
+    __tablename__ = "goals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
+    )
+    goal_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(160), nullable=False)
+    target_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    target_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    target_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+
+    user = relationship("User", back_populates="goals")
+
+    def __repr__(self) -> str:
+        return f"<Goal {self.goal_type}:{self.label}>"
+
+
+class OAuthState(Base):
+    """Persistent OAuth state storage (replaces in-memory sets/dicts)."""
+
+    __tablename__ = "oauth_states"
+
+    state: Mapped[str] = mapped_column(String(128), primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    flow_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # "google_login" or "gmail_connect"
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<OAuthState {self.flow_type} expires={self.expires_at}>"
+
+
+class ConnectorAuditEvent(Base):
+    """Non-secret audit events for connector lifecycle and sync operations."""
+
+    __tablename__ = "connector_audit_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True, index=True
+    )
+    connector_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    connector_account_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<ConnectorAuditEvent {self.connector_type}:{self.event_type}>"

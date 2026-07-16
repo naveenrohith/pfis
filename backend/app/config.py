@@ -3,18 +3,20 @@ PFIS Configuration Module
 Loads settings from .env file with Pydantic validation.
 """
 
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
-
 
 APP_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = APP_DIR.parent
 ROOT_DIR = BACKEND_DIR.parent
 DEFAULT_SQLITE_DB = BACKEND_DIR / "pfis.db"
+DEFAULT_SECRET_KEY = "pfis-dev-secret-change-me-please-32bytes"
+EXAMPLE_SECRET_KEY = "change-me-in-production-with-at-least-32-characters"
 
 
 class Settings(BaseSettings):
@@ -22,11 +24,13 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "PFIS"
     APP_VERSION: str = "0.1.0"
+    ENVIRONMENT: str = "local"
     DEBUG: bool = False
     DATABASE_URL: str = "sqlite+aiosqlite:///./pfis.db"
-    SECRET_KEY: str = "pfis-dev-secret-change-me-please-32bytes"
+    SECRET_KEY: str = DEFAULT_SECRET_KEY
     TOKEN_ENCRYPTION_KEY: str = ""
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    # 30 days: the session persists until the user explicitly logs out.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200
     AUTH_REQUIRED: bool = False
     CORS_ORIGINS: Annotated[list[str], NoDecode] = [
         "http://localhost:8000",
@@ -41,6 +45,11 @@ class Settings(BaseSettings):
     GMAIL_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/auth/gmail/callback"
     GOOGLE_ALLOWED_EMAILS: Annotated[list[str], NoDecode] = []
 
+    @property
+    def is_production(self) -> bool:
+        """Return whether strict production safety validation applies."""
+        return self.ENVIRONMENT.strip().lower() in {"production", "prod"}
+
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def resolve_database_url(cls, value: Any) -> str:
@@ -54,7 +63,7 @@ class Settings(BaseSettings):
         if not value.startswith(prefix):
             return value
 
-        raw_path = value[len(prefix):]
+        raw_path = value[len(prefix) :]
         if raw_path in {":memory:", "/:memory:"}:
             return value
 
@@ -72,6 +81,16 @@ class Settings(BaseSettings):
         if isinstance(value, str) and value.strip().lower() in {"release", "production", "prod"}:
             return False
         return value
+
+    @field_validator("ENVIRONMENT", mode="before")
+    @classmethod
+    def parse_environment(cls, value: Any) -> str:
+        """Normalize environment labels while keeping local mode as default."""
+        if value is None or value == "":
+            return "local"
+        if not isinstance(value, str):
+            raise ValueError("Invalid ENVIRONMENT value")
+        return value.strip().lower()
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
@@ -97,13 +116,48 @@ class Settings(BaseSettings):
             return [item.strip().lower() for item in value.split(",") if item.strip()]
         raise ValueError("Invalid GOOGLE_ALLOWED_EMAILS value")
 
+    @model_validator(mode="after")
+    def warn_on_insecure_secret(self) -> "Settings":
+        """Surface a security warning when the built-in development secret is used.
+
+        Intentionally non-fatal so local/demo runs keep working, but the warning
+        is escalated when real authentication is enabled with the default key.
+        """
+        has_insecure_secret = self.SECRET_KEY in {DEFAULT_SECRET_KEY, EXAMPLE_SECRET_KEY}
+        if self.is_production:
+            if has_insecure_secret:
+                raise ValueError("Production requires a unique SECRET_KEY")
+            if not self.AUTH_REQUIRED:
+                raise ValueError("Production requires AUTH_REQUIRED=true")
+            if self.DATABASE_URL.startswith("sqlite"):
+                raise ValueError("Production requires a non-SQLite DATABASE_URL")
+            local_origins = {"http://localhost:8000", "http://127.0.0.1:8000"}
+            if set(self.CORS_ORIGINS) <= local_origins:
+                raise ValueError("Production requires explicit non-local CORS_ORIGINS")
+
+        if has_insecure_secret:
+            if self.AUTH_REQUIRED:
+                warnings.warn(
+                    "AUTH_REQUIRED is enabled but SECRET_KEY is a known development "
+                    "placeholder. Set a unique SECRET_KEY in your .env before "
+                    "exposing PFIS beyond local use.",
+                    stacklevel=2,
+                )
+            else:
+                warnings.warn(
+                    "SECRET_KEY is a known development placeholder. This is fine "
+                    "for local/demo use only and must be changed before deployment.",
+                    stacklevel=2,
+                )
+        return self
+
     model_config = SettingsConfigDict(
         env_file=(str(BACKEND_DIR / ".env"), str(ROOT_DIR / ".env")),
         env_file_encoding="utf-8",
     )
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Cached settings singleton."""
     return Settings()

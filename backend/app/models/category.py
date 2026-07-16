@@ -3,19 +3,36 @@ Category & Merchant Models
 Category hierarchy + merchant normalization with alias support.
 """
 
+import json
 import uuid
-from sqlalchemy import String, ForeignKey, Text
+
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
+
+
+def parse_merchant_aliases(aliases_json: str | None) -> list[str]:
+    """Parse a merchant ``aliases`` JSON blob into a list of string aliases.
+
+    Tolerates malformed/missing data and ignores non-string entries so callers
+    do not have to repeat the same defensive ``json.loads`` handling.
+    """
+    try:
+        aliases = json.loads(aliases_json) if aliases_json else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(aliases, list):
+        return []
+    return [alias for alias in aliases if isinstance(alias, str)]
 
 
 class Category(Base):
     """Transaction categories with parent-child hierarchy."""
+
     __tablename__ = "categories"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     parent_category_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("categories.id"), nullable=True
@@ -33,11 +50,10 @@ class Category(Base):
 
 class Merchant(Base):
     """Normalized merchant names with aliases for fuzzy matching."""
+
     __tablename__ = "merchants"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     normalized_name: Mapped[str] = mapped_column(
         String(255), unique=True, nullable=False, index=True
     )

@@ -3,10 +3,10 @@ Pydantic Schemas for Transactions
 Request/response validation and serialization.
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import date, datetime
 from enum import Enum
+
+from pydantic import BaseModel, Field
 
 
 class TransactionTypeEnum(str, Enum):
@@ -15,38 +15,61 @@ class TransactionTypeEnum(str, Enum):
     REFUND = "refund"
 
 
+class PaymentMethodEnum(str, Enum):
+    UPI = "upi"
+    DEBIT_CARD = "debit_card"
+    CREDIT_CARD = "credit_card"
+    EMI = "emi"
+    PAY_LATER = "pay_later"
+    WALLET = "wallet"
+    BANK_TRANSFER = "bank_transfer"
+    OTHER = "other"
+
+
 # --- Request Schemas ---
+
 
 class TransactionCreate(BaseModel):
     """Schema for creating a new transaction (manual or parsed)."""
+
     amount: float = Field(..., gt=0, description="Transaction amount")
     currency: str = Field(default="INR", max_length=3)
     transaction_type: TransactionTypeEnum
-    merchant_raw: Optional[str] = None
-    merchant_normalized: Optional[str] = None
-    category_id: Optional[str] = None
+    payment_method: PaymentMethodEnum = PaymentMethodEnum.OTHER
+    transaction_status: str = "completed"
+    transaction_timestamp: datetime | None = None
+    merchant_raw: str | None = None
+    merchant_normalized: str | None = None
+    category_id: str | None = None
     transaction_date: date
-    account_last4: Optional[str] = Field(None, max_length=4)
-    reference_id: Optional[str] = None
+    account_last4: str | None = Field(None, max_length=4)
+    reference_id: str | None = None
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
-    source_email_id: Optional[str] = None
+    parser_version: int = Field(default=1, ge=1)
+    source_email_id: str | None = None
+    financial_account_id: str | None = None
 
 
 class TransactionUpdate(BaseModel):
     """Schema for updating transaction fields (user corrections)."""
-    merchant_normalized: Optional[str] = None
-    category_id: Optional[str] = None
-    transaction_type: Optional[TransactionTypeEnum] = None
-    amount: Optional[float] = Field(None, gt=0)
-    reviewed_flag: Optional[bool] = None
+
+    merchant_normalized: str | None = None
+    category_id: str | None = None
+    transaction_type: TransactionTypeEnum | None = None
+    payment_method: PaymentMethodEnum | None = None
+    transaction_status: str | None = None
+    amount: float | None = Field(None, gt=0)
+    reviewed_flag: bool | None = None
 
 
 class BulkTransactionUpdate(BaseModel):
     """Schema for updating multiple transactions at once."""
+
     transaction_ids: list[str] = Field(..., min_length=1)
-    category_id: Optional[str] = None
-    transaction_type: Optional[TransactionTypeEnum] = None
-    reviewed_flag: Optional[bool] = None
+    category_id: str | None = None
+    transaction_type: TransactionTypeEnum | None = None
+    payment_method: PaymentMethodEnum | None = None
+    reviewed_flag: bool | None = None
 
 
 class BulkTransactionUpdateResponse(BaseModel):
@@ -57,31 +80,41 @@ class BulkTransactionUpdateResponse(BaseModel):
 
 # --- Response Schemas ---
 
+
 class TransactionResponse(BaseModel):
     """Full transaction response."""
+
     id: str
     user_id: str
     amount: float
     currency: str
     transaction_type: TransactionTypeEnum
-    merchant_raw: Optional[str]
-    merchant_normalized: Optional[str]
-    category_id: Optional[str]
-    category_name: Optional[str] = None
+    payment_method: PaymentMethodEnum
+    transaction_status: str
+    transaction_timestamp: datetime | None = None
+    merchant_raw: str | None
+    merchant_normalized: str | None
+    category_id: str | None
+    category_name: str | None = None
     transaction_date: date
-    account_last4: Optional[str]
-    reference_id: Optional[str]
+    account_last4: str | None
+    reference_id: str | None
     confidence_score: float
     reviewed_flag: bool = False
-    reviewed_at: Optional[datetime] = None
+    reviewed_at: datetime | None = None
     parser_version: int
     created_at: datetime
+    source_received_at: datetime | None = None
+    financial_account_id: str | None = None
+    transfer_group_id: str | None = None
+    is_transfer: bool = False
 
     model_config = {"from_attributes": True}
 
 
 class TransactionSummary(BaseModel):
     """Monthly summary response."""
+
     total_spend: float
     total_income: float
     net: float
@@ -93,8 +126,9 @@ class TransactionSummary(BaseModel):
 
 class CategoryResponse(BaseModel):
     """Category response."""
+
     id: str
     name: str
-    icon: Optional[str]
+    icon: str | None
 
     model_config = {"from_attributes": True}

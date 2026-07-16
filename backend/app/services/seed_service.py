@@ -4,8 +4,10 @@ Seeds the database with default categories and sample merchants.
 """
 
 import logging
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import get_settings
 from app.models.category import Category, Merchant
 from app.models.user import User
@@ -34,9 +36,21 @@ DEFAULT_CATEGORIES = [
 
 # Default merchant → category mappings
 DEFAULT_MERCHANTS = [
-    {"name": "Swiggy", "aliases": '["SWIGGY", "SWIGGY INDIA", "SWIGGY ONLINE"]', "category": "Food"},
-    {"name": "Zomato", "aliases": '["ZOMATO", "ZOMATO ORDER", "ZOMATO ONLINE"]', "category": "Food"},
-    {"name": "Amazon", "aliases": '["AMAZON", "AMAZON.IN", "AMAZON PAY", "AMZN"]', "category": "Shopping"},
+    {
+        "name": "Swiggy",
+        "aliases": '["SWIGGY", "SWIGGY INDIA", "SWIGGY ONLINE"]',
+        "category": "Food",
+    },
+    {
+        "name": "Zomato",
+        "aliases": '["ZOMATO", "ZOMATO ORDER", "ZOMATO ONLINE"]',
+        "category": "Food",
+    },
+    {
+        "name": "Amazon",
+        "aliases": '["AMAZON", "AMAZON.IN", "AMAZON PAY", "AMZN"]',
+        "category": "Shopping",
+    },
     {"name": "Flipkart", "aliases": '["FLIPKART", "FLIPKART INDIA"]', "category": "Shopping"},
     {"name": "Uber", "aliases": '["UBER", "UBER INDIA", "UBER TRIP"]', "category": "Transport"},
     {"name": "Ola", "aliases": '["OLA", "OLA CABS", "ANI TECHNOLOGIES"]', "category": "Transport"},
@@ -56,9 +70,7 @@ async def seed_categories(db: AsyncSession) -> dict[str, str]:
     category_map = {}
 
     for cat_data in DEFAULT_CATEGORIES:
-        result = await db.execute(
-            select(Category).where(Category.name == cat_data["name"])
-        )
+        result = await db.execute(select(Category).where(Category.name == cat_data["name"]))
         existing = result.scalar_one_or_none()
 
         if existing:

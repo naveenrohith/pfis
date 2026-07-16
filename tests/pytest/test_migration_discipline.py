@@ -1,0 +1,181 @@
+"""Migration discipline tests for the PFIS persistence layer."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
+from app.config import get_settings
+from app.database import Base
+from sqlalchemy import create_engine, inspect, text
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_alembic_baseline_matches_orm_table_columns(tmp_path, monkeypatch):
+    """Alembic-created schema must match the ORM table/column contract.
+
+    Tests use ``Base.metadata.create_all`` for speed, but production/shared
+    environments use Alembic. This test catches model changes that forget to
+    update migrations.
+    """
+    db_path = tmp_path / "pfis-alembic.db"
+    async_url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+    sync_url = f"sqlite:///{db_path.as_posix()}"
+
+    monkeypatch.setenv("DATABASE_URL", async_url)
+    get_settings.cache_clear()
+
+    alembic_cfg = Config(str(ROOT / "backend" / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(ROOT / "backend" / "alembic"))
+    alembic_cfg.set_main_option("sqlalchemy.url", async_url)
+
+    try:
+        command.upgrade(alembic_cfg, "head")
+
+        engine = create_engine(sync_url)
+        try:
+            inspector = inspect(engine)
+            migrated_columns = {
+                table_name: {column["name"] for column in inspector.get_columns(table_name)}
+                for table_name in inspector.get_table_names()
+                if table_name != "alembic_version"
+            }
+        finally:
+            engine.dispose()
+    finally:
+        get_settings.cache_clear()
+
+    orm_columns = {
+        table.name: {column.name for column in table.columns}
+        for table in Base.metadata.sorted_tables
+    }
+
+    assert migrated_columns == orm_columns
+
+
+def test_operational_composite_indexes_are_migrated(tmp_path, monkeypatch):
+    """Ingestion and sync history keep the report-backed query paths indexed."""
+    db_path = tmp_path / "pfis-operational-indexes.db"
+    async_url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+    sync_url = f"sqlite:///{db_path.as_posix()}"
+
+    monkeypatch.setenv("DATABASE_URL", async_url)
+    get_settings.cache_clear()
+
+    alembic_cfg = Config(str(ROOT / "backend" / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(ROOT / "backend" / "alembic"))
+    alembic_cfg.set_main_option("sqlalchemy.url", async_url)
+
+    try:
+        command.upgrade(alembic_cfg, "head")
+        engine = create_engine(sync_url)
+        try:
+            inspector = inspect(engine)
+            index_names = {
+                index["name"]
+                for table_name in ("raw_emails", "sync_runs")
+                for index in inspector.get_indexes(table_name)
+            }
+        finally:
+            engine.dispose()
+    finally:
+        get_settings.cache_clear()
+
+    assert "ix_raw_emails_user_received" in index_names
+    assert "ix_sync_runs_user_started" in index_names
+
+
+def test_payment_method_orm_type_matches_portable_migration_contract():
+    """Keep the ORM compatible with the VARCHAR column in migration 006."""
+    payment_method_type = Base.metadata.tables["transactions"].c.payment_method.type
+
+    assert payment_method_type.native_enum is False
+    assert payment_method_type.length == 20
+
+
+def test_financial_account_backfill_supports_existing_non_null_created_at(tmp_path, monkeypatch):
+    """Migration 009 must backfill databases previously initialized from ORM metadata."""
+    db_path = tmp_path / "pfis-existing-account-table.db"
+    async_url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+    sync_url = f"sqlite:///{db_path.as_posix()}"
+
+    monkeypatch.setenv("DATABASE_URL", async_url)
+    get_settings.cache_clear()
+    alembic_cfg = Config(str(ROOT / "backend" / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(ROOT / "backend" / "alembic"))
+    alembic_cfg.set_main_option("sqlalchemy.url", async_url)
+
+    try:
+        command.upgrade(alembic_cfg, "008_operational_indexes")
+        engine = create_engine(sync_url)
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        CREATE TABLE financial_accounts (
+                            id VARCHAR(36) PRIMARY KEY,
+                            user_id VARCHAR(36) NOT NULL,
+                            institution_name VARCHAR(160) NOT NULL,
+                            account_type VARCHAR(40) NOT NULL,
+                            masked_number VARCHAR(32) NOT NULL,
+                            currency VARCHAR(3) NOT NULL,
+                            connector_account_id VARCHAR(36),
+                            is_active BOOLEAN NOT NULL,
+                            created_at DATETIME NOT NULL,
+                            CONSTRAINT uq_financial_accounts_user_masked UNIQUE (user_id, masked_number),
+                            FOREIGN KEY(user_id) REFERENCES users (id)
+                        )
+                        """
+                    )
+                )
+                connection.execute(
+                    text("CREATE TABLE _alembic_tmp_transactions (id VARCHAR(36) PRIMARY KEY)")
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO users (id, email, name, currency, is_active) "
+                        "VALUES ('migration-user', 'migration@example.com', 'Migration User', 'INR', 1)"
+                    )
+                )
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO transactions
+                        (id, user_id, amount, currency, transaction_type, transaction_date,
+                         account_last4, confidence_score, parser_version, reviewed_flag, payment_method,
+                         transaction_status)
+                        VALUES
+                        ('migration-transaction', 'migration-user', 100, 'INR', 'debit', '2026-07-01',
+                         '1234', 0.9, 1, 1, 'other', 'completed')
+                        """
+                    )
+                )
+        finally:
+            engine.dispose()
+
+        command.upgrade(alembic_cfg, "head")
+        engine = create_engine(sync_url)
+        try:
+            with engine.connect() as connection:
+                account = connection.execute(
+                    text(
+                        "SELECT id, created_at FROM financial_accounts "
+                        "WHERE user_id = 'migration-user' AND masked_number = '****1234'"
+                    )
+                ).one()
+                linked_account_id = connection.execute(
+                    text(
+                        "SELECT financial_account_id FROM transactions "
+                        "WHERE id = 'migration-transaction'"
+                    )
+                ).scalar_one()
+        finally:
+            engine.dispose()
+    finally:
+        get_settings.cache_clear()
+
+    assert account.created_at is not None
+    assert linked_account_id == account.id

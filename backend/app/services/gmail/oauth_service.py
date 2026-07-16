@@ -10,18 +10,21 @@ Flow:
 """
 
 import logging
+import re
 from typing import Any
 
 from fastapi import HTTPException
-from google_auth_oauthlib.flow import Flow
+from google.auth.transport.requests import Request
 from google.oauth2 import id_token
 from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import Flow
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+_GOOGLE_CLIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$")
 
 # Gmail read-only scope — minimum access needed
 SCOPES = [
@@ -59,23 +62,37 @@ def create_oauth_flow(redirect_uri: str | None = None) -> Flow:
     return flow
 
 
+def validate_google_oauth_settings() -> None:
+    """Fail locally when Google OAuth credentials are missing or malformed."""
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=500,
+            detail="Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend/.env.",
+        )
+
+    if not _GOOGLE_CLIENT_ID_PATTERN.fullmatch(settings.GOOGLE_CLIENT_ID.strip()):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "GOOGLE_CLIENT_ID in backend/.env is not a valid Google OAuth client ID. "
+                "Use the full Web application client ID ending with .apps.googleusercontent.com."
+            ),
+        )
+
+
 def get_authorization_url(redirect_uri: str | None = None) -> tuple[str, str]:
     """
     Generate the Google OAuth authorization URL.
     Returns (auth_url, state) tuple.
     """
-    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
-        raise HTTPException(
-            status_code=500,
-            detail="Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.",
-        )
+    validate_google_oauth_settings()
 
     flow = create_oauth_flow(redirect_uri=redirect_uri)
 
     auth_url, state = flow.authorization_url(
-        access_type="offline",       # Get refresh token
+        access_type="offline",  # Get refresh token
         include_granted_scopes="true",
-        prompt="consent",            # Always show consent (ensures refresh token)
+        prompt="consent",  # Always show consent (ensures refresh token)
     )
 
     logger.info(f"Generated OAuth URL (state={state[:8]}...)")

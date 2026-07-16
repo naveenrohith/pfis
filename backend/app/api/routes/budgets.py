@@ -4,17 +4,17 @@ CRUD endpoints for category budgets and budget-vs-actual tracking.
 """
 
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
-from typing import Optional
-from sqlalchemy import select, func, extract
+from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.category import Category
 from app.models.sync import Budget
 from app.models.transaction import Transaction, TransactionType
-from app.models.category import Category
 from app.models.user import User
+from app.schemas.budget import BudgetCreate, BudgetResponse, BudgetTracker, BudgetUpdate
 from app.security import ensure_user_owns_resource, get_current_user_optional, resolve_user_scope
 
 logger = logging.getLogger(__name__)
@@ -22,39 +22,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/budgets", tags=["Budgets"])
 
 
-# ─── Schemas ───
-
-class BudgetCreate(BaseModel):
-    category_id: str
-    monthly_limit: float = Field(..., gt=0)
-
-class BudgetUpdate(BaseModel):
-    monthly_limit: float = Field(..., gt=0)
-
-class BudgetResponse(BaseModel):
-    id: str
-    user_id: str
-    category_id: str
-    category_name: Optional[str] = None
-    category_icon: Optional[str] = None
-    monthly_limit: float
-
-    model_config = {"from_attributes": True}
-
-class BudgetTracker(BaseModel):
-    """Budget with actual spend for the given month."""
-    id: str
-    category_id: str
-    category_name: str
-    category_icon: Optional[str]
-    monthly_limit: float
-    actual_spend: float
-    remaining: float
-    usage_pct: float
-    status: str  # under, warning, over
-
-
 # ─── CRUD ───
+
 
 @router.post("/", status_code=201)
 async def create_budget(
@@ -105,8 +74,11 @@ async def list_budgets(
     rows = result.all()
     return [
         BudgetResponse(
-            id=b.id, user_id=b.user_id, category_id=b.category_id,
-            category_name=name, category_icon=icon,
+            id=b.id,
+            user_id=b.user_id,
+            category_id=b.category_id,
+            category_name=name,
+            category_icon=icon,
             monthly_limit=b.monthly_limit,
         )
         for b, name, icon in rows
@@ -151,6 +123,7 @@ async def delete_budget(
 
 
 # ─── Budget Tracking ───
+
 
 @router.get("/track", response_model=list[BudgetTracker])
 async def track_budgets(
@@ -205,17 +178,19 @@ async def track_budgets(
         else:
             status = "under"
 
-        trackers.append(BudgetTracker(
-            id=budget.id,
-            category_id=budget.category_id,
-            category_name=cat_name,
-            category_icon=cat_icon,
-            monthly_limit=budget.monthly_limit,
-            actual_spend=actual,
-            remaining=remaining,
-            usage_pct=round(pct, 1),
-            status=status,
-        ))
+        trackers.append(
+            BudgetTracker(
+                id=budget.id,
+                category_id=budget.category_id,
+                category_name=cat_name,
+                category_icon=cat_icon,
+                monthly_limit=budget.monthly_limit,
+                actual_spend=actual,
+                remaining=remaining,
+                usage_pct=round(pct, 1),
+                status=status,
+            )
+        )
 
     # Sort: over first, then warning, then under
     priority = {"over": 0, "warning": 1, "under": 2}

@@ -1,0 +1,60 @@
+[project]
+name = "pfis"
+version = "0.1.0"
+description = "Personal Finance Intelligence System"
+requires-python = ">=3.13"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = [
+    ".venv",
+    "backend/alembic/versions",
+]
+
+[tool.ruff.lint]
+# Conservative, high-signal rule set for the Phase 0 baseline.
+# E/F = pyflakes + pycodestyle errors, I = import sorting, UP = pyupgrade,
+# B = bugbear, C4 = comprehensions, SIM = simplify.
+select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+    "E501",   # line length is enforced by the formatter, not the linter
+    "B008",   # FastAPI uses function calls (Depends(...)) in argument defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+# conftest must manipulate sys.path before importing the app package.
+"tests/pytest/conftest.py" = ["E402"]
+"tests/**" = ["B011"]
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+extend-exclude = "backend/alembic/versions"
+
+[tool.mypy]
+python_version = "3.13"
+# Lenient baseline: surfaces obvious issues without blocking CI.
+# Tighten incrementally in later phases.
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+no_implicit_optional = true
+check_untyped_defs = false
+exclude = [
+    "backend/alembic/",
+    "tests/",
+]
+
+# pytest configuration intentionally lives in pytest.ini (single source of truth).
+
+[tool.coverage.run]
+source = ["backend/app"]
+omit = [
+    "backend/app/static/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

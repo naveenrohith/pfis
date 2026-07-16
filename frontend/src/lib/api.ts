@@ -1,0 +1,418 @@
+import { loadSession } from './session';
+import type {
+  AuthTokenResponse,
+  AutoSyncStatus,
+  BudgetTracker,
+  BulkUpdateResponse,
+  CashFlowProjection,
+  ScenarioRequest,
+  ScenarioResponse,
+  Category,
+  CategoryIntelligenceResponse,
+  EmailsResponse,
+  FinancialAccount,
+  ExplainPayload,
+  ExplainResponse,
+  FinancialHealthScore,
+  GuidanceBrief,
+  GuidancePeriod,
+  GuidanceQueryResult,
+  Goal,
+  GoalCreatePayload,
+  InsightsResponse,
+  Job,
+  MerchantDetail,
+  MerchantSummary,
+  MonthComparison,
+  PipelineFailuresResponse,
+  PipelineMetrics,
+  PipelineReprocessRequest,
+  PipelineReprocessResponse,
+  PipelineRetryResponse,
+  SyncStatusResponse,
+  Transaction,
+  TransactionCreatePayload,
+  TransactionSummary,
+  TransactionType,
+  PaymentMethod,
+  User,
+  DashboardPreferences,
+  BalanceSnapshot,
+  NetWorthSeries,
+  Transfer,
+  WorkspaceResponse,
+} from './types';
+
+const API_BASE = '/api';
+
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  requestId?: string;
+  details?: unknown;
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    requestId?: string,
+    details?: unknown,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.requestId = requestId;
+    this.details = details;
+  }
+}
+
+interface RequestOptions {
+  method?: string;
+  body?: unknown;
+  query?: Record<string, string | number | boolean | undefined | null>;
+  auth?: boolean;
+  tolerate401?: boolean;
+}
+
+async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+  const { method = 'GET', body, query, auth = true, tolerate401 = false } = opts;
+
+  let url = `${API_BASE}${path}`;
+  if (query) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params.set(key, String(value));
+      }
+    }
+    const qs = params.toString();
+    if (qs) url += `?${qs}`;
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (auth) {
+    const session = loadSession();
+    if (session?.token) headers.Authorization = `Bearer ${session.token}`;
+  }
+
+  const response = await fetch(url, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  if (response.status === 401 && !tolerate401) {
+    throw new ApiError('Session expired', 401);
+  }
+
+  if (!response.ok) {
+    let detail = response.statusText;
+    let code: string | undefined;
+    let requestId: string | undefined;
+    let details: unknown;
+    try {
+      const errBody = await response.json();
+      const error = (
+        errBody as {
+          detail?: string;
+          error?: { code?: string; message?: string; request_id?: string; details?: unknown };
+        }
+      ).error;
+      detail = error?.message || (errBody as { detail?: string }).detail || detail;
+      code = error?.code;
+      requestId = error?.request_id;
+      details = error?.details;
+    } catch {
+      // keep statusText
+    }
+    throw new ApiError(detail, response.status, code, requestId, details);
+  }
+
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
+export interface TransactionUpdatePayload {
+  merchant_normalized?: string;
+  category_id?: string | null;
+  amount?: number;
+  transaction_type?: TransactionType;
+  payment_method?: PaymentMethod;
+  reviewed_flag?: boolean;
+}
+
+export interface BulkUpdatePayload {
+  transaction_ids: string[];
+  category_id?: string | null;
+  transaction_type?: TransactionType;
+  payment_method?: PaymentMethod;
+  reviewed_flag?: boolean;
+}
+
+export const api = {
+  // Auth
+  login: (email: string, password: string) =>
+    request<AuthTokenResponse>('/auth/login', {
+      method: 'POST',
+      body: { email, password },
+      auth: false,
+    }),
+  register: (name: string, email: string, password: string, currency: string) =>
+    request<AuthTokenResponse>('/auth/register', {
+      method: 'POST',
+      body: { name, email, password, currency },
+      auth: false,
+    }),
+  me: () => request<User>('/auth/me'),
+  listUsers: () => request<User[]>('/users/', { auth: false, tolerate401: true }),
+
+  // Reference data
+  categories: () => request<Category[]>('/categories/'),
+
+  // Transactions
+  summary: (userId: string, month: number, year: number) =>
+    request<TransactionSummary>('/transactions/summary', {
+      query: { user_id: userId, month, year },
+    }),
+  transactions: (
+    userId: string,
+    params: {
+      month?: number;
+      year?: number;
+      categoryId?: string;
+      limit?: number;
+      offset?: number;
+      q?: string;
+      transactionType?: TransactionType;
+      paymentMethod?: PaymentMethod;
+      reviewed?: boolean;
+      sort?: 'transaction_date' | 'amount' | 'merchant' | 'created_at';
+      direction?: 'asc' | 'desc';
+    },
+  ) =>
+    request<Transaction[]>('/transactions/', {
+      query: {
+        user_id: userId,
+        month: params.month,
+        year: params.year,
+        category_id: params.categoryId,
+        limit: params.limit ?? 200,
+        offset: params.offset,
+        q: params.q,
+        transaction_type: params.transactionType,
+        payment_method: params.paymentMethod,
+        reviewed: params.reviewed,
+        sort: params.sort,
+        direction: params.direction,
+      },
+    }),
+  createTransaction: (userId: string, payload: TransactionCreatePayload) =>
+    request<Transaction>('/transactions/', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: payload,
+    }),
+  updateTransaction: (id: string, payload: TransactionUpdatePayload) =>
+    request<Transaction>(`/transactions/${id}`, { method: 'PATCH', body: payload }),
+  bulkUpdate: (userId: string, payload: BulkUpdatePayload) =>
+    request<BulkUpdateResponse>('/transactions/bulk-update', {
+      method: 'PATCH',
+      query: { user_id: userId },
+      body: payload,
+    }),
+
+  // Gmail / inbox
+  emails: (userId: string, limit = 12) =>
+    request<EmailsResponse>('/gmail/emails', { query: { user_id: userId, limit } }),
+  syncStatus: (userId: string) =>
+    request<SyncStatusResponse>('/gmail/status', { query: { user_id: userId } }),
+  autoSyncStatus: (userId: string) =>
+    request<AutoSyncStatus>('/gmail/auto-sync', { query: { user_id: userId } }),
+  updateAutoSync: (userId: string, payload: { enabled?: boolean; interval_seconds?: number }) =>
+    request<AutoSyncStatus>('/gmail/auto-sync', {
+      method: 'PATCH',
+      query: { user_id: userId },
+      body: payload,
+    }),
+
+  // Insights
+  insights: (userId: string, month: number, year: number) =>
+    request<InsightsResponse>('/insights/', { query: { user_id: userId, month, year } }),
+
+  // Financial Decision Workspace (aggregate)
+  workspace: (userId: string, month: number, year: number) =>
+    request<WorkspaceResponse>('/dashboard/workspace', {
+      query: { user_id: userId, month, year },
+    }),
+
+  // Merchant and category intelligence
+  merchants: (userId: string, month: number, year: number) =>
+    request<MerchantSummary[]>('/merchants/', { query: { user_id: userId, month, year } }),
+  merchant: (userId: string, merchantKey: string, month: number, year: number) =>
+    request<MerchantDetail>(`/merchants/${encodeURIComponent(merchantKey)}`, {
+      query: { user_id: userId, month, year },
+    }),
+  categoryIntelligence: (userId: string, month: number, year: number) =>
+    request<CategoryIntelligenceResponse>('/categories/intelligence', {
+      query: { user_id: userId, month, year },
+    }),
+
+  // Advanced analytics and goals
+  cashFlow: (userId: string, month: number, year: number) =>
+    request<CashFlowProjection>('/analytics/cash-flow', {
+      query: { user_id: userId, month, year },
+    }),
+  previewScenario: (userId: string, payload: ScenarioRequest) =>
+    request<ScenarioResponse>('/analytics/scenario', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: payload,
+    }),
+  monthComparison: (userId: string, month: number, year: number) =>
+    request<MonthComparison>('/analytics/month-comparison', {
+      query: { user_id: userId, month, year },
+    }),
+  financialHealth: (userId: string, month: number, year: number) =>
+    request<FinancialHealthScore>('/analytics/financial-health', {
+      query: { user_id: userId, month, year },
+    }),
+  goals: (userId: string, month: number, year: number) =>
+    request<Goal[]>('/goals/', { query: { user_id: userId, month, year } }),
+  createGoal: (userId: string, payload: GoalCreatePayload) =>
+    request<Goal>('/goals/', { method: 'POST', query: { user_id: userId }, body: payload }),
+  explain: (payload: ExplainPayload) =>
+    request<ExplainResponse>('/ai/explain', { method: 'POST', body: payload }),
+  guidanceBrief: (userId: string, period: GuidancePeriod, asOf: string) =>
+    request<GuidanceBrief>('/guidance/brief', {
+      query: { user_id: userId, period, as_of: asOf },
+    }),
+  guidanceQuery: (userId: string, query: string, month: number, year: number) =>
+    request<GuidanceQueryResult>('/guidance/query', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: { query, month, year },
+    }),
+  setGuidanceState: (
+    userId: string,
+    recommendationId: string,
+    state: 'active' | 'dismissed' | 'snoozed',
+    snoozedUntil?: string,
+  ) =>
+    request(`/guidance/${encodeURIComponent(recommendationId)}/state`, {
+      method: 'PATCH',
+      query: { user_id: userId },
+      body: { state, snoozed_until: snoozedUntil },
+    }),
+
+  // Personalization
+  dashboardPreferences: (userId: string) =>
+    request<DashboardPreferences>('/preferences/dashboard', { query: { user_id: userId } }),
+  updateDashboardPreferences: (userId: string, payload: Partial<DashboardPreferences>) =>
+    request<DashboardPreferences>('/preferences/dashboard', {
+      method: 'PATCH',
+      query: { user_id: userId },
+      body: payload,
+    }),
+  resetDashboardPreferences: (userId: string) =>
+    request<DashboardPreferences>('/preferences/dashboard', {
+      method: 'DELETE',
+      query: { user_id: userId },
+    }),
+
+  // Accounts, balances, net worth, and transfers
+  accounts: (userId: string) =>
+    request<FinancialAccount[]>('/accounts', { query: { user_id: userId } }),
+  createAccount: (
+    userId: string,
+    payload: Pick<
+      FinancialAccount,
+      'institution_name' | 'account_type' | 'balance_kind' | 'masked_number' | 'currency'
+    >,
+  ) =>
+    request<FinancialAccount>('/accounts', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: payload,
+    }),
+  addBalance: (userId: string, accountId: string, amount: number, asOf: string) =>
+    request<BalanceSnapshot>(`/accounts/${accountId}/balances`, {
+      method: 'POST',
+      query: { user_id: userId },
+      body: { amount, as_of: asOf },
+    }),
+  netWorth: (userId: string) =>
+    request<NetWorthSeries>('/net-worth', { query: { user_id: userId } }),
+  createTransfer: (
+    userId: string,
+    payload: {
+      from_account_id: string;
+      to_account_id: string;
+      amount: number;
+      currency: string;
+      transaction_date: string;
+      description?: string;
+    },
+  ) =>
+    request<Transfer>('/transfers', { method: 'POST', query: { user_id: userId }, body: payload }),
+
+  // Parser pipeline operations
+  pipelineMetrics: (userId: string, month: number, year: number) =>
+    request<PipelineMetrics>('/pipeline/metrics', {
+      query: { user_id: userId, month, year },
+    }),
+  pipelineFailures: (userId: string, resolved = false, limit = 20, offset = 0) =>
+    request<PipelineFailuresResponse>('/pipeline/failures', {
+      query: { user_id: userId, resolved, limit, offset },
+    }),
+  retryPipelineFailure: (userId: string, failureId: string) =>
+    request<PipelineRetryResponse>(`/pipeline/failures/${failureId}/retry`, {
+      method: 'POST',
+      query: { user_id: userId },
+    }),
+  reprocessPipeline: (userId: string, payload: PipelineReprocessRequest) =>
+    request<PipelineReprocessResponse>('/pipeline/reprocess', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: payload,
+    }),
+
+  // Budgets
+  budgetsTrack: (userId: string, month: number, year: number) =>
+    request<BudgetTracker[]>('/budgets/track', { query: { user_id: userId, month, year } }),
+  createBudget: (userId: string, categoryId: string, monthlyLimit: number) =>
+    request<{ id: string; status: string }>('/budgets/', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: { category_id: categoryId, monthly_limit: monthlyLimit },
+    }),
+  updateBudget: (budgetId: string, monthlyLimit: number) =>
+    request<{ id: string; monthly_limit: number; status: string }>(`/budgets/${budgetId}`, {
+      method: 'PATCH',
+      body: { monthly_limit: monthlyLimit },
+    }),
+  deleteBudget: (budgetId: string) => request<void>(`/budgets/${budgetId}`, { method: 'DELETE' }),
+
+  // Jobs
+  demoSyncPipeline: (userId: string, limit = 80) =>
+    request<Job>('/jobs/demo-sync-pipeline', {
+      method: 'POST',
+      query: { user_id: userId, limit },
+    }),
+  gmailSyncPipeline: (userId: string, syncAll = false) =>
+    request<Job>('/jobs/gmail-sync-pipeline', {
+      method: 'POST',
+      query: { user_id: userId, sync_all: syncAll },
+    }),
+  retryParseFailures: (userId: string, limit = 40) =>
+    request<Job>('/jobs/retry-parse-failures', {
+      method: 'POST',
+      query: { user_id: userId, limit },
+    }),
+  job: (jobId: string) => request<Job>(`/jobs/${jobId}`),
+
+  // Reports (URLs for direct navigation/download)
+  csvUrl: (userId: string, month: number, year: number) =>
+    `${API_BASE}/reports/export/csv?user_id=${encodeURIComponent(userId)}&month=${month}&year=${year}`,
+  reportUrl: (userId: string, month: number, year: number) =>
+    `${API_BASE}/reports/monthly?user_id=${encodeURIComponent(userId)}&month=${month}&year=${year}`,
+};

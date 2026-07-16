@@ -3,10 +3,19 @@ Base Parser & Parser Result
 Defines the contract for all bank-specific parsers and the structured output.
 """
 
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date
-from typing import Optional
+from datetime import date, datetime
 from enum import Enum
+
+# Confidence weights (0–100 scale). Centralized so scoring stays tunable.
+CONFIDENCE_WEIGHT_AMOUNT = 40
+CONFIDENCE_WEIGHT_MERCHANT = {"exact": 30, "inferred": 20, "generic": 10}
+CONFIDENCE_WEIGHT_DATE = 20
+CONFIDENCE_WEIGHT_TYPE = 10
 
 
 class TransactionTypeEnum(str, Enum):
@@ -19,16 +28,26 @@ class TransactionTypeEnum(str, Enum):
 class ParseResult:
     """Structured output from a parser. Every field is optional — confidence depends on how many were extracted."""
 
-    amount: Optional[float] = None
+    amount: float | None = None
     currency: str = "INR"
-    transaction_type: Optional[TransactionTypeEnum] = None
-    merchant_raw: Optional[str] = None
-    date: Optional[date] = None
-    account_last4: Optional[str] = None
-    reference_id: Optional[str] = None
+    transaction_type: TransactionTypeEnum | None = None
+    payment_method: str = "other"
+    transaction_status: str = "completed"
+    transaction_timestamp: datetime | None = None
+    merchant_raw: str | None = None
+    date: date | None = None
+    account_last4: str | None = None
+    reference_id: str | None = None
     bank: str = ""
     parser_version: int = 1
+    parser_name: str | None = None
+    pattern_version: int = 1
+    confidence_version: int = 1
+    normalization_version: int = 1
     merchant_source: str = "missing"  # exact | inferred | generic | missing
+    used_fallback: bool = False  # True when the generic fallback parser handled this email
+    validation_errors: list[str] = field(default_factory=list)
+    field_confidence: dict[str, float] = field(default_factory=dict)
 
     # Computed
     confidence_score: float = 0.0
@@ -41,22 +60,34 @@ class ParseResult:
         - date found      → +20
         - type found      → +10
         """
+        field_scores: dict[str, float] = {
+            "amount": 0.0,
+            "merchant": 0.0,
+            "date": 0.0,
+            "type": 0.0,
+            "reference": 1.0 if self.reference_id else 0.0,
+            "account": 1.0 if self.account_last4 else 0.0,
+            "currency": 1.0 if self.currency else 0.0,
+        }
         score = 0
         if self.amount is not None and self.amount > 0:
-            score += 40
+            score += CONFIDENCE_WEIGHT_AMOUNT
+            field_scores["amount"] = 1.0
         if self.merchant_raw:
-            merchant_score = {
-                "exact": 30,
-                "inferred": 20,
-                "generic": 10,
-            }.get(self.merchant_source, 30)
+            merchant_score = CONFIDENCE_WEIGHT_MERCHANT.get(
+                self.merchant_source, CONFIDENCE_WEIGHT_MERCHANT["exact"]
+            )
             score += merchant_score
+            field_scores["merchant"] = merchant_score / CONFIDENCE_WEIGHT_MERCHANT["exact"]
         if self.date is not None:
-            score += 20
+            score += CONFIDENCE_WEIGHT_DATE
+            field_scores["date"] = 1.0
         if self.transaction_type is not None:
-            score += 10
+            score += CONFIDENCE_WEIGHT_TYPE
+            field_scores["type"] = 1.0
 
         self.confidence_score = score / 100.0
+        self.field_confidence = field_scores
         return self.confidence_score
 
     @property
@@ -83,14 +114,29 @@ class BaseParser:
 
     def _clean_text(self, text: str) -> str:
         """Convert email HTML/plain text into parser-friendly text."""
-        import html
-        import re
+        from app.utils.text import clean_html_to_text
 
-        text = html.unescape(text or "")
-        text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", text)
-        text = re.sub(r"(?s)<!--.*?-->", " ", text)
-        text = re.sub(r"(?i)<br\s*/?>", " ", text)
-        text = re.sub(r"(?i)</(?:p|div|tr|td|table|li|h\d)>", " ", text)
-        text = re.sub(r"<[^>]+>", " ", text)
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
+        return clean_html_to_text(text)
+
+    @staticmethod
+    def _match_amount(amount_patterns: Iterable[re.Pattern[str]], text: str) -> float | None:
+        """Return the first amount matched by any of the given patterns."""
+        for pattern in amount_patterns:
+            match = pattern.search(text)
+            if match:
+                try:
+                    return float(match.group(1).replace(",", ""))
+                except ValueError:
+                    continue
+        return None
+
+    @staticmethod
+    def _match_merchant(merchant_patterns: Iterable[re.Pattern[str]], text: str) -> str | None:
+        """Return the first merchant (>=3 chars) matched by any of the given patterns."""
+        for pattern in merchant_patterns:
+            match = pattern.search(text)
+            if match:
+                merchant = match.group(1).strip(" .-")
+                if merchant and len(merchant) >= 3:
+                    return merchant
+        return None

@@ -17,13 +17,15 @@ env/
 
 # Database
 *.db
+*.db-journal
 *.sqlite3
 
 # Environment variables
 .env
 
 # IDE
-.vscode/
+.vscode/*
+!.vscode/mcp.json
 .idea/
 *.swp
 *.swo
@@ -35,6 +37,22 @@ Thumbs.db
 # Logs
 *.log
 
+# Local test scratch
+.pytest_cache/
+.test-tmp/
+.test-run/
+
+# Tooling caches & coverage
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
 # Node (for frontend later)
 node_modules/
 .next/
+*.tsbuildinfo
+frontend/test-results/
+frontend/playwright-report/

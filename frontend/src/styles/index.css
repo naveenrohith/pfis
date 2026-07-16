@@ -1,0 +1,230 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 45 31% 95%;
+    --foreground: 168 22% 11%;
+
+    --card: 48 33% 98%;
+    --card-foreground: 168 22% 11%;
+
+    --primary: 159 65% 21%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 48 18% 90%;
+    --secondary-foreground: 165 18% 19%;
+
+    --muted: 50 17% 91%;
+    --muted-foreground: 158 12% 31%;
+
+    --accent: 247 40% 92%;
+    --accent-foreground: 248 37% 35%;
+
+    --success: 154 63% 23%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 37 82% 22%;
+    --warning-foreground: 0 0% 100%;
+
+    --danger: 7 58% 41%;
+    --danger-foreground: 0 0% 100%;
+
+    --info: 203 51% 36%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 52 12% 83%;
+    --input: 48 11% 78%;
+    --ring: 159 58% 27%;
+
+    --canvas: 45 31% 95%;
+    --surface: 48 33% 98%;
+    --surface-subtle: 50 17% 91%;
+    --surface-strong: 168 22% 14%;
+    --ledger-ink: 168 22% 11%;
+    --jade: 159 65% 21%;
+    --coral: 7 49% 49%;
+    --settlement-blue: 203 51% 36%;
+    --intelligence: 248 37% 49%;
+    --radius: 0.875rem;
+    --radius-sm: 0.625rem;
+    --radius-lg: 1.25rem;
+    --shadow-color: 162 18% 14%;
+  }
+
+  .dark {
+    --background: 164 18% 8%;
+    --foreground: 45 19% 92%;
+
+    --card: 164 17% 11%;
+    --card-foreground: 45 19% 92%;
+
+    --primary: 151 45% 57%;
+    --primary-foreground: 164 26% 9%;
+
+    --secondary: 162 14% 16%;
+    --secondary-foreground: 45 18% 87%;
+
+    --muted: 162 14% 15%;
+    --muted-foreground: 48 8% 64%;
+
+    --accent: 247 25% 22%;
+    --accent-foreground: 247 61% 82%;
+
+    --success: 151 45% 57%;
+    --success-foreground: 164 26% 9%;
+
+    --warning: 40 72% 62%;
+    --warning-foreground: 35 47% 12%;
+
+    --danger: 8 66% 66%;
+    --danger-foreground: 7 45% 12%;
+
+    --info: 203 57% 66%;
+    --info-foreground: 204 52% 12%;
+
+    --border: 162 12% 22%;
+    --input: 162 11% 28%;
+    --ring: 151 45% 57%;
+
+    --canvas: 164 18% 8%;
+    --surface: 164 17% 11%;
+    --surface-subtle: 162 14% 15%;
+    --surface-strong: 48 20% 92%;
+    --ledger-ink: 45 19% 92%;
+    --jade: 151 45% 57%;
+    --coral: 8 66% 66%;
+    --settlement-blue: 203 57% 66%;
+    --intelligence: 247 61% 72%;
+    --shadow-color: 160 40% 2%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family:
+      'Manrope Variable',
+      Manrope,
+      system-ui,
+      -apple-system,
+      'Segoe UI',
+      sans-serif;
+    min-width: 320px;
+    overflow-x: hidden;
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1;
+    text-rendering: optimizeLegibility;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+    color: hsl(var(--foreground));
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-muted-foreground/25;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+  }
+}
+
+@layer utilities {
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  .glass {
+    @apply bg-card/95 backdrop-blur-xl;
+  }
+
+  .dashboard-surface {
+    @apply rounded-[var(--radius-lg)] bg-card text-card-foreground;
+  }
+
+  .dashboard-row {
+    @apply border-b border-border/70 bg-transparent px-3 py-3 transition-colors last:border-b-0 hover:bg-muted/45;
+  }
+
+  .metric-value {
+    @apply text-2xl font-extrabold tabular-nums leading-tight tracking-[-0.035em] text-foreground;
+  }
+
+  .focus-ring {
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  .money-value {
+    @apply font-extrabold tabular-nums tracking-[-0.045em];
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .text-pretty {
+    text-wrap: pretty;
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .command-group [cmdk-group-heading] {
+    @apply px-3 pb-1 pt-3 text-xs font-semibold tracking-wide text-muted-foreground;
+  }
+
+  .dashboard-compact .dashboard-surface [class*='p-5'],
+  .dashboard-compact .dashboard-surface [class*='p-6'] {
+    padding: 1rem;
+  }
+
+  .dashboard-compact main > div.grid {
+    gap: 2rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

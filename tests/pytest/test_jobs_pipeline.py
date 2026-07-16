@@ -6,6 +6,11 @@ from __future__ import annotations
 
 import asyncio
 
+from app.models.email import RawEmail
+from app.models.sync import JobStatus
+from app.services.job_service import create_job, recover_interrupted_jobs, run_job
+from app.services.parser.pipeline import process_raw_emails
+
 from tests.pytest.helpers import create_user
 
 
@@ -51,3 +56,96 @@ async def test_retry_parse_failures_job_completes_when_nothing_pending(client):
     assert final_payload is not None
     assert final_payload["status"] == "completed"
     assert final_payload["result"]["retried_failures"] == 0
+
+
+async def test_statement_email_does_not_create_balance_transaction(client, test_session_factory):
+    user = await create_user(client, "statementskip")
+
+    async with test_session_factory() as db:
+        db.add(
+            RawEmail(
+                user_id=user["id"],
+                gmail_message_id=f"{user['id']}:balance-update",
+                sender="HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
+                subject="View: Account update for your HDFC Bank A/c",
+                body=(
+                    "HDFC BANK Dear Customer, Greetings from HDFC Bank! "
+                    "The available balance in your account ending XX1441 is "
+                    "Rs. INR 42,055.05 as of 02-FEB-26. For real-time balance updates."
+                ),
+            )
+        )
+        await db.commit()
+
+        stats = await process_raw_emails(db, user["id"])
+
+    assert stats["skipped_non_transaction"] == 1
+    assert stats["stored"] == 0
+
+    response = await client.get(f"/api/transactions/?user_id={user['id']}&limit=10")
+    response.raise_for_status()
+    assert response.json() == []
+
+
+async def test_gmail_pipeline_job_failure_includes_error_type(client):
+    user = await create_user(client, "nogmail")
+
+    enqueue_response = await client.post(f"/api/jobs/gmail-sync-pipeline?user_id={user['id']}")
+    enqueue_response.raise_for_status()
+    job = enqueue_response.json()
+
+    final_payload = None
+    for _ in range(20):
+        status_response = await client.get(f"/api/jobs/{job['id']}")
+        status_response.raise_for_status()
+        final_payload = status_response.json()
+        if final_payload["status"] in {"completed", "failed"}:
+            break
+        await asyncio.sleep(0.05)
+
+    assert final_payload is not None
+    assert final_payload["status"] == "failed"
+    assert final_payload["error_message"] == "No Gmail account connected for this user"
+    assert final_payload["result"]["error_type"] == "missing_gmail_account"
+
+
+async def test_unsupported_job_type_failure_includes_error_type(test_session_factory):
+    async with test_session_factory() as db:
+        job = await create_job(db, "not_supported", user_id=None)
+        job_id = job.id
+
+    await run_job(job_id)
+
+    async with test_session_factory() as db:
+        from app.services.job_service import get_job, serialize_job
+
+        failed_job = await get_job(db, job_id)
+        payload = serialize_job(failed_job)
+
+    assert payload["status"] == "failed"
+    assert payload["error_message"] == "Unsupported job type: not_supported"
+    assert payload["result"]["error_type"] == "unsupported_job_type"
+
+
+async def test_recover_interrupted_jobs_marks_active_jobs_failed(test_session_factory):
+    async with test_session_factory() as db:
+        queued = await create_job(db, "demo_sync_pipeline", user_id=None)
+        running = await create_job(db, "gmail_sync_pipeline", user_id=None)
+        completed = await create_job(db, "retry_parse_failures", user_id=None)
+
+        running.status = JobStatus.RUNNING
+        completed.status = JobStatus.COMPLETED
+        await db.commit()
+
+        recovered = await recover_interrupted_jobs(db)
+        assert recovered == 2
+
+        await db.refresh(queued)
+        await db.refresh(running)
+        await db.refresh(completed)
+
+    assert queued.status == JobStatus.FAILED
+    assert running.status == JobStatus.FAILED
+    assert queued.error_message == "Job interrupted by server restart; please start sync again"
+    assert running.error_message == "Job interrupted by server restart; please start sync again"
+    assert completed.status == JobStatus.COMPLETED

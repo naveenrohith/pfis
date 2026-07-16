@@ -1,7 +1,5 @@
 """Authentication schemas for registration and login."""
 
-from datetime import datetime
-
 from pydantic import BaseModel, EmailStr, Field
 
 from app.schemas.user import UserResponse

@@ -4,16 +4,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import select
-
-from app.models.category import Category, Merchant
+from app.models.category import Merchant
 from app.models.email import RawEmail
 from app.models.sync import ParseFailure, UserCorrection
 from app.models.transaction import Transaction
 from app.services.parser.normalizer import normalize_merchant
 from app.services.parser.pipeline import retry_parse_failures
+from sqlalchemy import select
+
 from tests.pytest.helpers import create_user
 
 
@@ -122,7 +122,9 @@ async def test_pipeline_dedup_remains_user_scoped(client):
     }
 
     response_one = await client.post(f"/api/transactions/?user_id={first_user['id']}", json=payload)
-    response_two = await client.post(f"/api/transactions/?user_id={second_user['id']}", json=payload)
+    response_two = await client.post(
+        f"/api/transactions/?user_id={second_user['id']}", json=payload
+    )
 
     response_one.raise_for_status()
     response_two.raise_for_status()
@@ -181,7 +183,9 @@ async def test_bulk_review_updates_apply_shared_changes(client):
     assert all(txn["reviewed_at"] is not None for txn in transactions)
 
 
-async def test_retry_parse_failures_reclassifies_balance_alerts_as_non_transaction(client, test_session_factory):
+async def test_retry_parse_failures_reclassifies_balance_alerts_as_non_transaction(
+    client, test_session_factory
+):
     user = await create_user(client, "retryignore")
 
     async with test_session_factory() as db:
@@ -195,7 +199,7 @@ async def test_retry_parse_failures_reclassifies_balance_alerts_as_non_transacti
                 "Thank you for banking with us!"
             ),
             sender="HDFC Bank InstaAlerts <alerts@hdfcbank.net>",
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
             processed_flag=True,
         )
         db.add(raw_email)
