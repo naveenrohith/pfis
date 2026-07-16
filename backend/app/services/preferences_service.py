@@ -79,7 +79,13 @@ class PreferencesService:
             preference.widgets_json = json.dumps(
                 [widget.model_dump() for widget in _goal_widgets(data.onboarding_goal)]
             )
-        for field in ("layout_version", "theme", "density", "onboarding_goal"):
+        for field in (
+            "layout_version",
+            "theme",
+            "density",
+            "briefing_cadence",
+            "onboarding_goal",
+        ):
             if field in values:
                 setattr(preference, field, values[field])
         preference.updated_at = datetime.now(UTC)
@@ -105,6 +111,7 @@ class PreferencesService:
                 widgets=_goal_widgets(None),
                 theme="system",
                 density="comfortable",
+                briefing_cadence="daily",
                 favorites=[],
                 onboarding_goal=None,
                 updated_at=None,
@@ -129,6 +136,7 @@ class PreferencesService:
             widgets=widgets or _goal_widgets(preference.onboarding_goal),
             theme=preference.theme,
             density=preference.density,
+            briefing_cadence=preference.briefing_cadence,
             favorites=favorites,
             onboarding_goal=preference.onboarding_goal,
             updated_at=preference.updated_at,

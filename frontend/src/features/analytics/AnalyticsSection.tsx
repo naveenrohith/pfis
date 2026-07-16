@@ -15,6 +15,7 @@ import { ExplainAction } from '@/features/ai/ExplainAction';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import type { Goal, GoalType } from '@/lib/types';
+import { ScenarioStudio } from './ScenarioStudio';
 
 export function AnalyticsSection({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
@@ -140,6 +141,14 @@ export function AnalyticsSection({ embedded = false }: { embedded?: boolean } = 
         </Card>
       </div>
 
+      <ScenarioStudio
+        userId={user?.id ?? ''}
+        month={month}
+        year={year}
+        currency={currency}
+        baseline={cashFlow.data}
+      />
+
       <GoalBoard
         userId={user?.id ?? ''}
         month={month}
@@ -209,14 +218,23 @@ function GoalBoard({
             </Select>
             <div>
               <Label htmlFor="goal-label">Label</Label>
-              <Input id="goal-label" value={label} onChange={(e) => setLabel(e.target.value)} />
+              <Input
+                id="goal-label"
+                name="goal-label"
+                autoComplete="off"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+              />
             </div>
             <div>
               <Label htmlFor="goal-amount">Target</Label>
               <Input
                 id="goal-amount"
+                name="goal-amount"
                 type="number"
                 min={1}
+                inputMode="decimal"
+                autoComplete="off"
                 value={targetAmount}
                 onChange={(e) => setTargetAmount(e.target.value)}
               />

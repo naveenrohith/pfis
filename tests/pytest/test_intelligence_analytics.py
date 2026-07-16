@@ -107,6 +107,49 @@ async def test_analytics_goals_and_explain_endpoint(client: AsyncClient):
     assert cash_flow.status_code == 200
     assert cash_flow.json()["net_to_date"] == 40000
 
+    transactions_before = await client.get(
+        f"/api/transactions/?user_id={user['id']}&month={today.month}&year={today.year}"
+    )
+    transaction_ids_before = [item["id"] for item in transactions_before.json()]
+
+    scenario = await client.post(
+        f"/api/analytics/scenario?user_id={user['id']}",
+        json={
+            "month": today.month,
+            "year": today.year,
+            "flexible_spend_reduction": 1000,
+            "recurring_reduction": 500,
+            "additional_income": 2000,
+        },
+    )
+    assert scenario.status_code == 200
+    scenario_body = scenario.json()
+    assert scenario_body["monthly_impact"] >= 2000
+    assert scenario_body["scenario_projected_net"] == (
+        scenario_body["baseline_projected_net"] + scenario_body["monthly_impact"]
+    )
+    assert "do not change financial records" in " ".join(scenario_body["assumptions"])
+
+    transactions_after = await client.get(
+        f"/api/transactions/?user_id={user['id']}&month={today.month}&year={today.year}"
+    )
+    assert [item["id"] for item in transactions_after.json()] == transaction_ids_before
+
+    capped_scenario = await client.post(
+        f"/api/analytics/scenario?user_id={user['id']}",
+        json={
+            "month": today.month,
+            "year": today.year,
+            "flexible_spend_reduction": 9_000_000,
+            "recurring_reduction": 9_000_000,
+        },
+    )
+    assert capped_scenario.status_code == 200
+    capped_body = capped_scenario.json()
+    assert capped_body["effective_flexible_spend_reduction"] <= cash_flow.json()["projected_spend"]
+    assert capped_body["effective_recurring_reduction"] <= cash_flow.json()["recurring_commitments"]
+    assert capped_body["scenario_projected_spend"] >= 0
+
     health = await client.get(
         f"/api/analytics/financial-health?user_id={user['id']}&month={today.month}&year={today.year}"
     )

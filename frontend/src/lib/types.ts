@@ -1,7 +1,8 @@
 // Domain types mirroring the PFIS backend API (docs/api-reference.md).
 
 export type TransactionType = 'debit' | 'credit' | 'refund';
-export type PaymentMethod = 'upi' | 'debit_card' | 'credit_card' | 'emi' | 'pay_later' | 'wallet' | 'bank_transfer' | 'other';
+export type PaymentMethod =
+  'upi' | 'debit_card' | 'credit_card' | 'emi' | 'pay_later' | 'wallet' | 'bank_transfer' | 'other';
 
 export interface User {
   id: string;
@@ -224,13 +225,7 @@ export interface WorkspaceSnapshot {
 }
 
 export type TimelineEventType =
-  | 'income'
-  | 'subscription'
-  | 'bill'
-  | 'shopping'
-  | 'refund'
-  | 'transfer'
-  | 'spending';
+  'income' | 'subscription' | 'bill' | 'shopping' | 'refund' | 'transfer' | 'spending';
 
 export interface TimelineEvent {
   type: TimelineEventType;
@@ -369,6 +364,31 @@ export interface CashFlowProjection {
   ruleset_version: string;
 }
 
+export interface ScenarioRequest {
+  month: number;
+  year: number;
+  flexible_spend_reduction: number;
+  recurring_reduction: number;
+  additional_income: number;
+}
+
+export interface ScenarioResponse {
+  month: number;
+  year: number;
+  baseline_projected_net: number;
+  scenario_projected_net: number;
+  scenario_projected_spend: number;
+  monthly_impact: number;
+  requested_flexible_spend_reduction: number;
+  effective_flexible_spend_reduction: number;
+  requested_recurring_reduction: number;
+  effective_recurring_reduction: number;
+  additional_income: number;
+  assumptions: string[];
+  data_through?: string | null;
+  ruleset_version: string;
+}
+
 export interface MonthComparison {
   month: number;
   year: number;
@@ -396,7 +416,11 @@ export interface FinancialHealthScore {
   budget_adherence: number;
   recurring_burden: number;
   review_cleanliness: number;
-  signals: Array<{ label: string; value: number; severity: 'info' | 'success' | 'warning' | 'danger' }>;
+  signals: Array<{
+    label: string;
+    value: number;
+    severity: 'info' | 'success' | 'warning' | 'danger';
+  }>;
 }
 
 export type GoalType = 'savings' | 'category_reduction' | 'recurring_reduction';
@@ -493,6 +517,7 @@ export interface DashboardPreferences {
   widgets: DashboardWidget[];
   theme: 'system' | 'light' | 'dark';
   density: 'comfortable' | 'compact';
+  briefing_cadence: GuidancePeriod;
   favorites: string[];
   onboarding_goal?: 'budgeting' | 'saving' | 'recurring_reduction' | 'cleanup' | null;
   updated_at?: string | null;

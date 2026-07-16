@@ -9,6 +9,7 @@ WidgetSize = Literal["small", "medium", "large"]
 ThemePreference = Literal["system", "light", "dark"]
 DensityPreference = Literal["comfortable", "compact"]
 OnboardingGoal = Literal["budgeting", "saving", "recurring_reduction", "cleanup"]
+BriefingCadence = Literal["daily", "weekly", "monthly"]
 
 
 class DashboardWidget(BaseModel):
@@ -22,6 +23,7 @@ class DashboardPreferenceUpdate(BaseModel):
     widgets: list[DashboardWidget] | None = None
     theme: ThemePreference | None = None
     density: DensityPreference | None = None
+    briefing_cadence: BriefingCadence | None = None
     favorites: list[str] | None = None
     onboarding_goal: OnboardingGoal | None = None
 
@@ -32,6 +34,7 @@ class DashboardPreferenceResponse(BaseModel):
     widgets: list[DashboardWidget]
     theme: ThemePreference
     density: DensityPreference
+    briefing_cadence: BriefingCadence
     favorites: list[str]
     onboarding_goal: OnboardingGoal | None = None
     updated_at: datetime | None = None

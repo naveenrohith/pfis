@@ -21,7 +21,10 @@ export const queryKeys = {
   monthComparison: (u: string, m: number, y: number) => ['monthComparison', u, m, y] as const,
   financialHealth: (u: string, m: number, y: number) => ['financialHealth', u, m, y] as const,
   goals: (u: string, m: number, y: number) => ['goals', u, m, y] as const,
-  guidanceBrief: (u: string, m: number, y: number) => ['guidanceBrief', u, m, y] as const,
+  guidanceBrief: (u: string, m: number, y: number, cadence?: string) =>
+    cadence
+      ? (['guidanceBrief', u, m, y, cadence] as const)
+      : (['guidanceBrief', u, m, y] as const),
   dashboardPreferences: (u: string) => ['dashboardPreferences', u] as const,
   accounts: (u: string) => ['accounts', u] as const,
   netWorth: (u: string) => ['netWorth', u] as const,
@@ -196,14 +199,16 @@ export function useGoals() {
 export function useGuidanceBrief() {
   const userId = useUserId();
   const { month, year } = useWorkspace();
+  const preferences = useDashboardPreferences();
+  const cadence = preferences.data?.briefing_cadence ?? 'daily';
   const asOf = `${year}-${String(month).padStart(2, '0')}-${String(
     month === new Date().getMonth() + 1 && year === new Date().getFullYear()
       ? new Date().getDate()
       : new Date(year, month, 0).getDate(),
   ).padStart(2, '0')}`;
   return useQuery({
-    queryKey: queryKeys.guidanceBrief(userId, month, year),
-    queryFn: () => api.guidanceBrief(userId, 'daily', asOf),
+    queryKey: queryKeys.guidanceBrief(userId, month, year, cadence),
+    queryFn: () => api.guidanceBrief(userId, cadence, asOf),
     enabled: !!userId,
     refetchInterval: 30_000,
   });

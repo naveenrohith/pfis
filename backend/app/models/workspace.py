@@ -17,6 +17,9 @@ class DashboardPreference(Base):
     widgets_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     theme: Mapped[str] = mapped_column(String(16), nullable=False, default="system")
     density: Mapped[str] = mapped_column(String(16), nullable=False, default="comfortable")
+    briefing_cadence: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="daily", server_default="daily"
+    )
     favorites_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     onboarding_goal: Mapped[str | None] = mapped_column(String(40), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(

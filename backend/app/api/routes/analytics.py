@@ -12,6 +12,8 @@ from app.schemas.intelligence import (
     GoalResponse,
     GoalUpdate,
     MonthComparison,
+    ScenarioRequest,
+    ScenarioResponse,
 )
 from app.security import get_current_user_optional, resolve_user_scope
 from app.services.intelligence_service import IntelligenceService
@@ -30,6 +32,17 @@ async def cash_flow(
 ):
     user_id = resolve_user_scope(user_id, current_user)
     return await IntelligenceService(db).cash_flow_projection(user_id, month, year)
+
+
+@router.post("/scenario", response_model=ScenarioResponse)
+async def preview_scenario(
+    data: ScenarioRequest,
+    user_id: str,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = resolve_user_scope(user_id, current_user)
+    return await IntelligenceService(db).preview_scenario(user_id, data)
 
 
 @router.get("/month-comparison", response_model=MonthComparison)

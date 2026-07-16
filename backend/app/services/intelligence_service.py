@@ -26,6 +26,8 @@ from app.schemas.intelligence import (
     MerchantSummary,
     MerchantUpdate,
     MonthComparison,
+    ScenarioRequest,
+    ScenarioResponse,
     TransactionPreview,
 )
 from app.services.insights_service import InsightsService
@@ -303,6 +305,42 @@ class IntelligenceService:
                 if today.year == year and today.month == month
                 else date(year, month, days_in_month)
             ),
+        )
+
+    async def preview_scenario(self, user_id: str, request: ScenarioRequest) -> ScenarioResponse:
+        """Preview an adjustment without mutating ledger, goals, or preferences."""
+        projection = await self.cash_flow_projection(user_id, request.month, request.year)
+        flexible_spend = max(projection.projected_spend - projection.recurring_commitments, 0.0)
+        effective_flexible = min(request.flexible_spend_reduction, flexible_spend)
+        spend_after_flexible = max(projection.projected_spend - effective_flexible, 0.0)
+        effective_recurring = min(
+            request.recurring_reduction,
+            projection.recurring_commitments,
+            spend_after_flexible,
+        )
+        scenario_spend = max(spend_after_flexible - effective_recurring, 0.0)
+        scenario_net = projection.income + request.additional_income - scenario_spend
+        impact = scenario_net - projection.projected_net
+
+        return ScenarioResponse(
+            month=request.month,
+            year=request.year,
+            baseline_projected_net=projection.projected_net,
+            scenario_projected_net=round(scenario_net, 2),
+            scenario_projected_spend=round(scenario_spend, 2),
+            monthly_impact=round(impact, 2),
+            requested_flexible_spend_reduction=request.flexible_spend_reduction,
+            effective_flexible_spend_reduction=round(effective_flexible, 2),
+            requested_recurring_reduction=request.recurring_reduction,
+            effective_recurring_reduction=round(effective_recurring, 2),
+            additional_income=request.additional_income,
+            assumptions=[
+                *projection.assumptions,
+                "Adjustments are a deterministic preview and do not change financial records.",
+                "Reductions are capped by projected flexible spend and detected recurring commitments.",
+                "Expected income is user supplied and is not verified by PFIS.",
+            ],
+            data_through=projection.data_through,
         )
 
     async def month_comparison(self, user_id: str, month: int, year: int) -> MonthComparison:

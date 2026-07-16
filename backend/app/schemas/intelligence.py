@@ -92,6 +92,31 @@ class CashFlowProjection(BaseModel):
     ruleset_version: str = "pfis-cash-flow-2"
 
 
+class ScenarioRequest(BaseModel):
+    month: int = Field(..., ge=1, le=12)
+    year: int = Field(..., ge=2020, le=2030)
+    flexible_spend_reduction: float = Field(0.0, ge=0, le=10_000_000)
+    recurring_reduction: float = Field(0.0, ge=0, le=10_000_000)
+    additional_income: float = Field(0.0, ge=0, le=10_000_000)
+
+
+class ScenarioResponse(BaseModel):
+    month: int
+    year: int
+    baseline_projected_net: float = 0.0
+    scenario_projected_net: float = 0.0
+    scenario_projected_spend: float = 0.0
+    monthly_impact: float = 0.0
+    requested_flexible_spend_reduction: float = 0.0
+    effective_flexible_spend_reduction: float = 0.0
+    requested_recurring_reduction: float = 0.0
+    effective_recurring_reduction: float = 0.0
+    additional_income: float = 0.0
+    assumptions: list[str] = Field(default_factory=list)
+    data_through: date | None = None
+    ruleset_version: str = "pfis-scenario-1"
+
+
 class MonthComparison(BaseModel):
     month: int
     year: int

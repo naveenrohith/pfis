@@ -84,3 +84,29 @@ test('reduced motion disables non-essential workspace animation', async ({ page 
   expect(motion.animationMs).toBeLessThanOrEqual(0.01);
   expect(motion.scrollBehavior).toBe('auto');
 });
+
+test('scenario preview and briefing rhythm stay user controlled', async ({ page }, testInfo) => {
+  test.skip(
+    testInfo.project.name !== 'desktop',
+    'One browser project is sufficient for deterministic persistence coverage',
+  );
+  await openDemoWorkspace(page);
+
+  await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await page.getByLabel('Add expected income', { exact: true }).fill('5000');
+  await page.getByRole('button', { name: 'Preview change', exact: true }).click();
+  const studio = page.getByRole('region', { name: 'Test one change before you commit to it.' });
+  await expect(studio).toContainText('This scenario improves the month-end position by');
+  await expect(studio).toContainText('₹5,000');
+
+  await page.getByRole('button', { name: 'Data & settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Preferences', exact: true }).click();
+  const cadence = page.getByLabel('Financial briefing rhythm');
+  await cadence.selectOption('weekly');
+  await page.getByRole('button', { name: 'Save layout', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Preferences', exact: true }).click();
+  await expect(page.getByLabel('Financial briefing rhythm')).toHaveValue('weekly');
+  await page.getByLabel('Financial briefing rhythm').selectOption('daily');
+  await page.getByRole('button', { name: 'Save layout', exact: true }).click();
+});

@@ -151,7 +151,7 @@ report aggregates.
 | `POST` | `/api/guidance/query` | `user_id`, `GuidanceQueryRequest` | `GuidanceQueryResult`; unsupported intents return examples instead of a generated answer |
 | `PATCH` | `/api/guidance/{recommendation_id}/state` | `user_id`, state `active|dismissed|snoozed`, optional `snoozed_until` | Persisted recommendation state |
 | `GET` | `/api/preferences/dashboard` | `user_id` | Versioned `DashboardPreferences`; deterministic defaults when missing |
-| `PATCH` | `/api/preferences/dashboard` | `user_id`, partial preferences | Validated, user-owned preferences |
+| `PATCH` | `/api/preferences/dashboard` | `user_id`, partial preferences | Validated, user-owned preferences, including `briefing_cadence: daily|weekly|monthly` |
 | `DELETE` | `/api/preferences/dashboard` | `user_id` | Reset defaults |
 
 Guidance is deterministic and allowlisted. Supported intents cover period totals,
@@ -240,12 +240,19 @@ bodies, tokens, passwords, or connector secrets.
 | `PATCH` | `/api/merchants/{merchant_key}` | `user_id`, `month`, `year`, `MerchantUpdate` | `200` | Updated `MerchantDetail`; can apply normalized name/category to existing transactions |
 | `GET` | `/api/categories/intelligence` | `user_id`, `month`, `year` | `200` | `CategoryIntelligenceResponse` with hierarchy, budget usage, MoM change, top merchants |
 | `GET` | `/api/analytics/cash-flow` | `user_id`, `month`, `year` | `200` | `CashFlowProjection` |
+| `POST` | `/api/analytics/scenario` | `user_id`, `ScenarioRequest` | `200` | Non-mutating `ScenarioResponse` with baseline, adjusted outcome, effective capped adjustments, assumptions, freshness, and ruleset |
 | `GET` | `/api/analytics/month-comparison` | `user_id`, `month`, `year` | `200` | `MonthComparison` with category deltas |
 | `GET` | `/api/analytics/financial-health` | `user_id`, `month`, `year` | `200` | `FinancialHealthScore` |
 | `GET` | `/api/goals/` | `user_id`, `month`, `year` | `200` | `list[GoalResponse]` |
 | `POST` | `/api/goals/` | `user_id`, `GoalCreate` | `201` | Created `GoalResponse` |
 | `PATCH` | `/api/goals/{goal_id}` | `user_id`, `month`, `year`, `GoalUpdate` | `200` | Updated `GoalResponse` |
 | `POST` | `/api/ai/explain` | `ExplainRequest` | `200` | `ExplainResponse` with summary, drivers, next actions, safety note |
+
+`ScenarioRequest` accepts `month`, `year`, `flexible_spend_reduction`,
+`recurring_reduction`, and `additional_income`. All adjustment amounts are
+non-negative. The service reuses the cash-flow projection rules, caps reductions
+to supported projected amounts, and never writes a transaction, goal, or
+preference.
 
 ## Reports
 

@@ -94,10 +94,15 @@ async def test_preferences_are_user_owned(client, auth_required):
     update = await client.patch(
         f"/api/preferences/dashboard?user_id={first['id']}",
         headers=auth_headers(first_token),
-        json={"density": "compact", "onboarding_goal": "saving"},
+        json={
+            "density": "compact",
+            "briefing_cadence": "weekly",
+            "onboarding_goal": "saving",
+        },
     )
     assert update.status_code == 200
     assert update.json()["density"] == "compact"
+    assert update.json()["briefing_cadence"] == "weekly"
 
     forbidden = await client.get(
         f"/api/preferences/dashboard?user_id={first['id']}",
@@ -105,12 +110,20 @@ async def test_preferences_are_user_owned(client, auth_required):
     )
     assert forbidden.status_code == 403
 
+    scenario_forbidden = await client.post(
+        f"/api/analytics/scenario?user_id={first['id']}",
+        headers=auth_headers(second_token),
+        json={"month": date.today().month, "year": date.today().year},
+    )
+    assert scenario_forbidden.status_code == 403
+
     own = await client.get(
         f"/api/preferences/dashboard?user_id={second['id']}",
         headers=auth_headers(second_token),
     )
     assert own.status_code == 200
     assert own.json()["density"] == "comfortable"
+    assert own.json()["briefing_cadence"] == "daily"
 
 
 @pytest.mark.asyncio

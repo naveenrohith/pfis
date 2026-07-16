@@ -12,7 +12,7 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 - `GmailAccount`: connected Gmail account and encrypted token references.
 - `FinancialAccount`: user-owned account identity inferred from connector metadata.
 - `AccountBalanceSnapshot`: append-only dated balance for an asset or liability account.
-- `DashboardPreference`: versioned, user-owned widget layout, theme, density, favorites, and onboarding goal.
+- `DashboardPreference`: versioned, user-owned widget layout, theme, density, favorites, onboarding goal, and in-app briefing cadence.
 - `RecommendationState`: user-owned dismissal or snooze state keyed by stable recommendation id.
 - `MonthlySummary`: persisted dashboard/report aggregate cache for one user and month.
 - `RawEmail`: stored email subject/body/sender/received timestamp for traceability.
@@ -36,6 +36,11 @@ snapshots, dashboard preferences, recommendation state, and linked transfer
 metadata. Balance snapshots are immutable after creation and unique per account
 and date. Net worth carries forward each account's most recent snapshot and
 calculates assets minus liabilities. It does not infer balances from cash flow.
+
+Migration `012_financial_rhythm` adds the non-null `briefing_cadence` preference
+with a backward-compatible `daily` default. Allowed API values are `daily`,
+`weekly`, and `monthly`; the value only controls the deterministic in-app brief
+period and does not schedule external notifications.
 
 An atomic transfer creates debit and credit transactions with one
 `transfer_group_id`. Both rows have `is_transfer=true`, remain auditable in the

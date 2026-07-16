@@ -5,6 +5,8 @@ import type {
   BudgetTracker,
   BulkUpdateResponse,
   CashFlowProjection,
+  ScenarioRequest,
+  ScenarioResponse,
   Category,
   CategoryIntelligenceResponse,
   EmailsResponse,
@@ -48,7 +50,13 @@ export class ApiError extends Error {
   code?: string;
   requestId?: string;
   details?: unknown;
-  constructor(message: string, status: number, code?: string, requestId?: string, details?: unknown) {
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    requestId?: string,
+    details?: unknown,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -104,10 +112,12 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     let details: unknown;
     try {
       const errBody = await response.json();
-      const error = (errBody as {
-        detail?: string;
-        error?: { code?: string; message?: string; request_id?: string; details?: unknown };
-      }).error;
+      const error = (
+        errBody as {
+          detail?: string;
+          error?: { code?: string; message?: string; request_id?: string; details?: unknown };
+        }
+      ).error;
       detail = error?.message || (errBody as { detail?: string }).detail || detail;
       code = error?.code;
       requestId = error?.request_id;
@@ -218,10 +228,7 @@ export const api = {
     request<SyncStatusResponse>('/gmail/status', { query: { user_id: userId } }),
   autoSyncStatus: (userId: string) =>
     request<AutoSyncStatus>('/gmail/auto-sync', { query: { user_id: userId } }),
-  updateAutoSync: (
-    userId: string,
-    payload: { enabled?: boolean; interval_seconds?: number },
-  ) =>
+  updateAutoSync: (userId: string, payload: { enabled?: boolean; interval_seconds?: number }) =>
     request<AutoSyncStatus>('/gmail/auto-sync', {
       method: 'PATCH',
       query: { user_id: userId },
@@ -254,6 +261,12 @@ export const api = {
   cashFlow: (userId: string, month: number, year: number) =>
     request<CashFlowProjection>('/analytics/cash-flow', {
       query: { user_id: userId, month, year },
+    }),
+  previewScenario: (userId: string, payload: ScenarioRequest) =>
+    request<ScenarioResponse>('/analytics/scenario', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: payload,
     }),
   monthComparison: (userId: string, month: number, year: number) =>
     request<MonthComparison>('/analytics/month-comparison', {
@@ -311,8 +324,16 @@ export const api = {
     request<FinancialAccount[]>('/accounts', { query: { user_id: userId } }),
   createAccount: (
     userId: string,
-    payload: Pick<FinancialAccount, 'institution_name' | 'account_type' | 'balance_kind' | 'masked_number' | 'currency'>,
-  ) => request<FinancialAccount>('/accounts', { method: 'POST', query: { user_id: userId }, body: payload }),
+    payload: Pick<
+      FinancialAccount,
+      'institution_name' | 'account_type' | 'balance_kind' | 'masked_number' | 'currency'
+    >,
+  ) =>
+    request<FinancialAccount>('/accounts', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: payload,
+    }),
   addBalance: (userId: string, accountId: string, amount: number, asOf: string) =>
     request<BalanceSnapshot>(`/accounts/${accountId}/balances`, {
       method: 'POST',
@@ -331,7 +352,8 @@ export const api = {
       transaction_date: string;
       description?: string;
     },
-  ) => request<Transfer>('/transfers', { method: 'POST', query: { user_id: userId }, body: payload }),
+  ) =>
+    request<Transfer>('/transfers', { method: 'POST', query: { user_id: userId }, body: payload }),
 
   // Parser pipeline operations
   pipelineMetrics: (userId: string, month: number, year: number) =>
@@ -368,8 +390,7 @@ export const api = {
       method: 'PATCH',
       body: { monthly_limit: monthlyLimit },
     }),
-  deleteBudget: (budgetId: string) =>
-    request<void>(`/budgets/${budgetId}`, { method: 'DELETE' }),
+  deleteBudget: (budgetId: string) => request<void>(`/budgets/${budgetId}`, { method: 'DELETE' }),
 
   // Jobs
   demoSyncPipeline: (userId: string, limit = 80) =>
