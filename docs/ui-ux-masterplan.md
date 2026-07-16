@@ -57,8 +57,15 @@ performance, privacy, and maintenance review before adoption. Never copy a block
 - [x] Add versioned cross-device dashboard preferences, keyboard widget reordering, and goal-led onboarding.
 - [x] Add manual asset/liability accounts, append-only balances, true net worth, and atomic linked transfers.
 - [x] Add Playwright, axe, multi-viewport browser flows, and visual snapshot specifications.
-- [ ] Run Lighthouse and approve visual baselines in the release environment.
-- [ ] Add privacy-safe product analytics and controlled rollout metrics.
+- [x] Phase 9: enforce bundle budgets and add the release-host Lighthouse/visual-baseline gate.
+- [ ] Phase 9 operations: approve Lighthouse and visual baselines on the staging/release host.
+- [x] Phase 10: ship the evidence-labelled Money Horizon.
+- [x] Phase 11: ship the deterministic, non-mutating Scenario Studio.
+- [x] Phase 12: persist the user's in-app financial briefing rhythm.
+- [ ] Phase 13 gate: complete privacy, provider, consent, and cost review before connected accounts or analytics.
+
+The locked scope, research evidence, exit criteria, and phase sequencing are documented in
+[ui-ux-next-level-roadmap.md](ui-ux-next-level-roadmap.md).
 
 ## Release Gates
 
