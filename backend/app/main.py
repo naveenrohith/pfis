@@ -340,7 +340,10 @@ async def serve_dashboard_spa(path: str):
         raise HTTPException(status_code=404, detail="Not found")
 
     frontend_root = FRONTEND_DIST.resolve()
-    candidate = (frontend_root / path).resolve()
+    normalized_path = path.replace("\\", "/")
+    if ".." in pathlib.PurePosixPath(normalized_path).parts:
+        raise HTTPException(status_code=404, detail="Not found")
+    candidate = (frontend_root / normalized_path).resolve()
     if not candidate.is_relative_to(frontend_root):
         raise HTTPException(status_code=404, detail="Not found")
     if path and candidate.is_file():
