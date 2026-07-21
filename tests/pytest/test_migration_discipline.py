@@ -144,7 +144,7 @@ def test_merchant_migration_repairs_local_create_all_partial_schema(tmp_path, mo
     finally:
         get_settings.cache_clear()
 
-    assert revision == "016_durable_jobs"
+    assert revision == "017_gmail_token_expiry"
     assert {
         "merchant_resolution_source",
         "merchant_resolution_confidence",

@@ -18,6 +18,12 @@ Gmail sync now runs through the connector-driven ingestion path:
 4. Domain events and WebSocket sync events expose progress to the dashboard.
 5. The parser pipeline remains the only owner of transaction extraction and storage.
 
+Gmail access-token expiry is persisted with the encrypted token references.
+Legacy accounts without an expiry refresh once on their next sync. Provider
+pagination rejects repeated page tokens, and malformed individual messages are
+reported with stable non-secret connector errors while transient and credential
+failures still fail the sync for retry or reauthorization.
+
 The legacy Gmail sync functions remain compatibility wrappers over this
 coordinator so existing API routes and jobs keep the same public behavior.
 

@@ -11,7 +11,8 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 - `User`: registered user profile, currency, auth status.
 - `AuthIdentity`: external provider identity keyed by stable provider subject and linked to a user.
 - `AuthSession`: revocable server-side browser session containing only hashed session and CSRF tokens.
-- `GmailAccount`: connected Gmail account and encrypted token references.
+- `GmailAccount`: connected Gmail account, encrypted token references, and the
+  access-token expiry used for proactive refresh.
 - `FinancialAccount`: user-owned account identity inferred from connector metadata.
 - `AccountBalanceSnapshot`: append-only dated balance for an asset or liability account.
 - `DashboardPreference`: versioned, user-owned widget layout, theme, density, favorites, onboarding goal, and in-app briefing cadence.

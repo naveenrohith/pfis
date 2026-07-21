@@ -10,11 +10,11 @@ PLANNER -> CODE -> TEST -> QUALITY -> REVIEW -> FIX
 
 ## Current Phase
 
-Phase 12: Realtime channel hardening.
+Phase 13: Gmail provider lifecycle hardening.
 
-Status: complete. Phase 12 adds origin and session enforcement, bounded client
-resources, concurrent broadcast isolation, and abuse-case regression coverage for
-the live sync channel.
+Status: complete. Phase 13 persists access-token expiry, repairs legacy refresh
+behavior, bounds pagination failure modes, isolates malformed messages, and makes
+demo-sync failure rollback atomic and private.
 
 Goal: keep modernization work phased, tested, and reversible while preserving the local/demo developer path.
 
@@ -41,6 +41,7 @@ Goal: keep modernization work phased, tested, and reversible while preserving th
 | 10 | Financial accounts and cached monthly summaries | Complete |
 | 11 | Coverage enforcement and ingestion privacy | Complete |
 | 12 | Realtime channel security and backpressure | Complete |
+| 13 | Gmail token lifecycle and provider contracts | Complete |
 
 ## Phase 0 Scope
 
@@ -156,6 +157,18 @@ Remaining Phase 1 follow-up:
   other users or sockets.
 - Disconnect, cross-user, origin, session, capacity, frame-size, slow-client,
   and connection-establishment behavior has regression coverage.
+
+## Phase 13 Acceptance Criteria
+
+- Gmail access-token expiry is persisted through a reversible migration and
+  used for proactive refresh; legacy rows refresh once when expiry is unknown.
+- Repeated Gmail page tokens terminate safely instead of looping indefinitely.
+- Malformed individual messages produce non-secret record failures without
+  swallowing retryable or credential-wide provider failures.
+- Demo sync rolls back partial email storage and persists only a stable failure
+  category when a batch fails.
+- OAuth, migration, pagination, token refresh, message isolation, and rollback
+  behavior is protected by offline regression tests.
 
 ## Phase 9 Acceptance Criteria
 

@@ -14,6 +14,7 @@ import hashlib
 import logging
 import re
 import secrets
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -122,7 +123,7 @@ def get_authorization_url(
         nonce=nonce,
     )
 
-    logger.info(f"Generated OAuth URL (state={state[:8]}...)")
+    logger.info("Generated Google OAuth authorization URL")
     return auth_url, state, code_verifier, nonce
 
 
@@ -219,11 +220,18 @@ def refresh_access_token(refresh_token: str) -> dict:
     }
 
 
-def build_credentials(access_token: str, refresh_token: str) -> Credentials:
+def build_credentials(
+    access_token: str,
+    refresh_token: str,
+    expiry: datetime | None = None,
+) -> Credentials:
     """
     Build a Credentials object from stored tokens.
     Used to authenticate Gmail API calls.
     """
+    google_expiry = expiry
+    if google_expiry is not None and google_expiry.tzinfo is not None:
+        google_expiry = google_expiry.astimezone(UTC).replace(tzinfo=None)
     return Credentials(
         token=access_token,
         refresh_token=refresh_token,
@@ -231,4 +239,5 @@ def build_credentials(access_token: str, refresh_token: str) -> Credentials:
         client_id=settings.GOOGLE_CLIENT_ID,
         client_secret=settings.GOOGLE_CLIENT_SECRET,
         scopes=SCOPES,
+        expiry=google_expiry,
     )

@@ -89,6 +89,16 @@ class IngestionCoordinator:
                 SourceType.GMAIL,
                 batch.records,
             )
+            persist_stats["emails_fetched"] = int(batch.metrics.get("fetched", len(batch.records)))
+            if batch.errors:
+                persist_stats["emails_failed"] += len(batch.errors)
+                persist_stats["errors"].extend(
+                    {
+                        "error": connector_error.message,
+                        "error_type": connector_error.error_type.value,
+                    }
+                    for connector_error in batch.errors
+                )
             await sync_event_manager.broadcast(
                 user_id,
                 "emails_stored",

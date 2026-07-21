@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from app.api.routes import auth as auth_routes
 from app.api.routes import gmail as gmail_routes
@@ -222,6 +223,7 @@ async def test_gmail_consent_is_separate_and_stores_verified_encrypted_tokens(
             "access_token": "raw-access-token",
             "refresh_token": "raw-refresh-token",
             "id_token": "gmail-id-token",
+            "expiry": "2026-07-21T18:00:00+00:00",
         }
 
     def fake_identity(token_data, *, expected_nonce=None):
@@ -258,6 +260,10 @@ async def test_gmail_consent_is_separate_and_stores_verified_encrypted_tokens(
         assert account.google_account_id == "gmail-subject-1"
         assert account.access_token_ref.startswith("enc:")
         assert account.refresh_token_ref.startswith("enc:")
+        assert account.token_expires_at is not None
+        assert account.token_expires_at.replace(tzinfo=UTC) == datetime(
+            2026, 7, 21, 18, 0, tzinfo=UTC
+        )
         assert "raw-access-token" not in account.access_token_ref
         assert "raw-refresh-token" not in account.refresh_token_ref
 

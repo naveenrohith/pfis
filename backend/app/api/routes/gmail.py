@@ -68,6 +68,15 @@ def _serialize_auto_sync(account: GmailAccount) -> dict:
     }
 
 
+def _parse_token_expiry(value: object) -> datetime | None:
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 # ─── OAuth Flow ───
 
 
@@ -180,6 +189,7 @@ async def gmail_callback(
             token_data,
             expected_nonce=decrypt_secret(nonce_ref),
         )
+        token_expires_at = _parse_token_expiry(token_data.get("expiry"))
 
         # Check if Gmail account already exists for this user
         account_result = await db.execute(
@@ -193,6 +203,7 @@ async def gmail_callback(
             refresh_token = encrypt_secret(token_data.get("refresh_token"))
             if refresh_token:
                 existing.refresh_token_ref = refresh_token
+            existing.token_expires_at = token_expires_at
             existing.google_account_id = profile["google_account_id"]
             gmail_account_id = existing.id
             logger.info(f"Updated Gmail tokens for user {user_id[:8]}...")
@@ -203,6 +214,7 @@ async def gmail_callback(
                 google_account_id=profile["google_account_id"],
                 access_token_ref=encrypt_secret(token_data["access_token"]),
                 refresh_token_ref=encrypt_secret(token_data.get("refresh_token")),
+                token_expires_at=token_expires_at,
             )
             db.add(gmail_account)
             await db.flush()
@@ -268,9 +280,9 @@ async def trigger_sync(
             "status": "completed",
             "stats": stats,
         }
-    except Exception as e:
-        logger.error(f"Sync failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}") from e
+    except Exception as exc:
+        logger.error("Gmail sync route failed exception=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Gmail synchronization failed") from exc
 
 
 @gmail_router.get("/status")

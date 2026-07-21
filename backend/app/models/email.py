@@ -58,6 +58,9 @@ class GmailAccount(Base):
     google_account_id: Mapped[str] = mapped_column(String(255), nullable=False)
     access_token_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
     refresh_token_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_history_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_sync_started_at: Mapped[datetime | None] = mapped_column(

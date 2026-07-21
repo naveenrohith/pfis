@@ -56,6 +56,9 @@ authentication or availability fallback.
 - Migration 016 adds the durable job lease columns and indexes. Deploy migrations
   before starting new application instances so their worker pollers can safely
   claim queued work.
+- Migration 017 adds nullable Gmail access-token expiry metadata. Existing
+  connectors refresh once on their next sync and populate it without a data
+  backfill or token exposure.
 
 ## Backup And Restore
 
