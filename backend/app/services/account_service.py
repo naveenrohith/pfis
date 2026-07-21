@@ -3,6 +3,7 @@
 import uuid
 from datetime import date
 from decimal import Decimal
+from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.account import AccountBalanceSnapshot, FinancialAccount
 from app.models.transaction import PaymentMethod, Transaction, TransactionType
 from app.schemas.account import (
+    BalanceKind,
     BalanceSnapshotCreate,
     BalanceSnapshotResponse,
     FinancialAccountCreate,
@@ -151,16 +153,20 @@ class AccountService:
         for snapshot_date, day_snapshots in by_date.items():
             for snapshot in day_snapshots:
                 running[snapshot.financial_account_id] = snapshot.amount
-            assets = sum(value for key, value in running.items() if kinds.get(key) == "asset")
+            assets = sum(
+                (value for key, value in running.items() if kinds.get(key) == "asset"),
+                Decimal("0"),
+            )
             liabilities = sum(
-                value for key, value in running.items() if kinds.get(key) == "liability"
+                (value for key, value in running.items() if kinds.get(key) == "liability"),
+                Decimal("0"),
             )
             points.append(
                 NetWorthPoint(
                     date=snapshot_date,
-                    assets=round(assets, 2),
-                    liabilities=round(liabilities, 2),
-                    net_worth=round(assets - liabilities, 2),
+                    assets=float(round(assets, 2)),
+                    liabilities=float(round(liabilities, 2)),
+                    net_worth=float(round(assets - liabilities, 2)),
                 )
             )
         latest = points[-1] if points else None
@@ -236,7 +242,7 @@ class AccountService:
             transfer_group_id=transfer_group_id,
             debit_transaction_id=debit.id,
             credit_transaction_id=credit.id,
-            amount=data.amount,
+            amount=float(data.amount),
             currency=data.currency,
             transaction_date=data.transaction_date,
         )
@@ -263,11 +269,11 @@ class AccountService:
             user_id=account.user_id,
             institution_name=account.institution_name,
             account_type=account.account_type,
-            balance_kind=account.balance_kind,
+            balance_kind=cast(BalanceKind, account.balance_kind),
             masked_number=account.masked_number,
             currency=account.currency,
             is_active=account.is_active,
-            latest_balance=latest.amount if latest else None,
+            latest_balance=float(latest.amount) if latest else None,
             balance_as_of=latest.as_of if latest else None,
             created_at=account.created_at,
         )

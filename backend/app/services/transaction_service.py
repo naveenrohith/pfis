@@ -193,8 +193,14 @@ class TransactionService:
 
     # --- CRUD ---
 
-    async def create_transaction(self, user_id: str, data: TransactionCreate) -> Transaction:
-        """Create a new transaction with dedup fingerprint."""
+    async def create_transaction(
+        self,
+        user_id: str,
+        data: TransactionCreate,
+        *,
+        commit: bool = True,
+    ) -> Transaction:
+        """Create a transaction, optionally joining the caller's unit of work."""
 
         if data.category_id is not None:
             category = await self.db.scalar(
@@ -294,7 +300,10 @@ class TransactionService:
         self.db.add(txn)
         await self._invalidate_monthly_summary(user_id, data.transaction_date)
         try:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except IntegrityError as exc:
             await self.db.rollback()
             duplicate = await self.db.scalar(
@@ -303,7 +312,8 @@ class TransactionService:
             if duplicate is not None:
                 raise DuplicateTransactionError("Duplicate transaction detected") from exc
             raise ValueError("Transaction conflicts with a database integrity rule") from exc
-        await self.db.refresh(txn)
+        if commit:
+            await self.db.refresh(txn)
 
         logger.info(
             f"Transaction created: {txn.merchant_normalized} ₹{txn.amount} "
@@ -689,7 +699,7 @@ class TransactionService:
             amount_max=amount_max,
         )
         result = await self.db.execute(query)
-        return int(result.scalar())
+        return int(result.scalar() or 0)
 
     @staticmethod
     def _apply_list_filters(
@@ -763,7 +773,7 @@ class TransactionService:
                 extract("year", Transaction.transaction_date) == year,
             )
         )
-        total_spend = float(spend_result.scalar())
+        total_spend = float(spend_result.scalar() or 0)
 
         # Total income (credits)
         income_result = await self.db.execute(
@@ -775,7 +785,7 @@ class TransactionService:
                 extract("year", Transaction.transaction_date) == year,
             )
         )
-        total_income = float(income_result.scalar())
+        total_income = float(income_result.scalar() or 0)
 
         # Transaction count
         count_result = await self.db.execute(
@@ -785,7 +795,7 @@ class TransactionService:
                 extract("year", Transaction.transaction_date) == year,
             )
         )
-        count = int(count_result.scalar())
+        count = int(count_result.scalar() or 0)
 
         # Category breakdown
         cat_result = await self.db.execute(

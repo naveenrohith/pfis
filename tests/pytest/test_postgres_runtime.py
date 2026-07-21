@@ -36,5 +36,5 @@ async def test_postgres_migrations_match_runtime_metadata():
     finally:
         await engine.dispose()
 
-    assert revision == "015_financial_integrity"
+    assert revision == "016_durable_jobs"
     assert set(Base.metadata.tables) <= table_names

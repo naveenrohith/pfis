@@ -48,6 +48,9 @@ authentication or availability fallback.
 - Migration 015 intentionally stops if it finds duplicate budgets, duplicate
   Gmail ownership, or invalid monetary values. Reconcile those records from a
   backup-reviewed copy before retrying; the migration never deletes financial data.
+- Migration 016 adds the durable job lease columns and indexes. Deploy migrations
+  before starting new application instances so their worker pollers can safely
+  claim queued work.
 
 ## Backup And Restore
 
@@ -71,6 +74,7 @@ Monitor:
 
 - API error rates and latency.
 - Background jobs by status.
+- Background job retry counts, exhausted attempts, and stale running leases.
 - Gmail sync failures.
 - Parse failures and retry counts.
 - Generic parser fallback usage.

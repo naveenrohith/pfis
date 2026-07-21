@@ -62,6 +62,12 @@ Connector
   month comparison, stability/data confidence, recurring commitments, evidence, and ranked actions
   so the Today workspace does not issue overlapping analytics requests.
 - Parser modules extract transaction data only; they do not write database rows directly.
+- Parser persistence is atomic per source email: the ledger row, processed flag,
+  summary invalidation, failure state, and pipeline events commit together.
+- Background work is claimed from the database with an atomic lease. Every API
+  replica may run a worker poller without executing the same queued job twice;
+  queued jobs survive process restarts and unexpected failures retry within a
+  bounded attempt budget.
 - Gmail sync stores raw email and sync metadata; processing happens through parser pipeline.
 - Connector implementations fetch source records only; the ingestion coordinator owns sync orchestration, audit records, retry handling, and domain events.
 - Security helpers own JWT decoding, optional auth, user-scope resolution, and resource ownership checks.

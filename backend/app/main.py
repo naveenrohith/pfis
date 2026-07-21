@@ -69,7 +69,11 @@ from app.observability import install_request_id_logging, request_id_ctx
 from app.rate_limit import limiter
 from app.security import validate_session_csrf
 from app.services.auto_sync_service import start_auto_sync_scheduler, stop_auto_sync_scheduler
-from app.services.job_service import recover_interrupted_jobs
+from app.services.job_service import (
+    recover_interrupted_jobs,
+    start_job_worker,
+    stop_job_worker,
+)
 from app.services.seed_service import run_seeds
 
 # Configure logging
@@ -106,9 +110,10 @@ async def lifespan(app: FastAPI):
         await run_seeds(db)
         recovered_jobs = await recover_interrupted_jobs(db)
         if recovered_jobs:
-            logger.warning("Marked %s interrupted background job(s) as failed", recovered_jobs)
+            logger.warning("Recovered %s interrupted background job lease(s)", recovered_jobs)
 
     base_url = _startup_base_url()
+    start_job_worker()
     start_auto_sync_scheduler()
     logger.info(f"✅ PFIS v{settings.APP_VERSION} ready at {base_url}")
     logger.info(f"📖 API docs at {base_url}/docs")
@@ -117,6 +122,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     await stop_auto_sync_scheduler()
+    await stop_job_worker()
     await close_db()
     logger.info("👋 PFIS shutdown complete")
 
@@ -154,7 +160,13 @@ app.add_middleware(
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-CSRF-Token"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Idempotency-Key",
+        "X-Requested-With",
+        "X-CSRF-Token",
+    ],
     expose_headers=["X-Total-Count", "X-Request-ID"],
 )
 

@@ -46,6 +46,8 @@ New-Item -ItemType Directory -Force .test-run | Out-Null; $env:TEMP=(Resolve-Pat
 - API changes need success, validation, and ownership tests.
 - Security changes need negative tests.
 - Job/sync changes must not call real Gmail in tests.
+- Job tests must cover atomic claims, restart recovery, bounded retries, and
+  idempotent enqueue behavior.
 - Tests must be deterministic and isolated.
 
 ## Browser Regression

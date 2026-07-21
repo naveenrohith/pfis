@@ -9,6 +9,7 @@ import json
 import logging
 from collections.abc import Iterable
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from time import perf_counter
 from typing import Any
 
@@ -253,7 +254,7 @@ def _build_transaction_create(
         raise ValueError("Cannot build transaction without a transaction date")
 
     return TransactionCreate(
-        amount=parse_result.amount,
+        amount=Decimal(str(parse_result.amount)),
         currency=parse_result.currency,
         transaction_type=TransactionSchemaType(parse_result.transaction_type.value),
         payment_method=PaymentMethodEnum(parse_result.payment_method),
@@ -359,8 +360,9 @@ async def _process_email_batch(
     default_category_id = await get_default_category_id(db)
 
     for email in emails:
+        email_id = email.id
         email_result: dict[str, Any] = {
-            "email_id": email.id,
+            "email_id": email_id,
             "subject": (email.subject or "")[:60],
             "sender": email.sender,
         }
@@ -494,6 +496,7 @@ async def _process_email_batch(
             email_result["merchant_resolution_source"] = resolution.source
             email_result["merchant_resolution_confidence"] = resolution.confidence
             email_result["confidence"] = parse_result.confidence_score
+            assert parse_result.date is not None
             identity = build_identity(
                 user_id=user_id,
                 amount=parse_result.amount or 0,
@@ -530,7 +533,7 @@ async def _process_email_batch(
             )
 
             try:
-                txn = await txn_service.create_transaction(user_id, txn_data)
+                txn = await txn_service.create_transaction(user_id, txn_data, commit=False)
                 stats["stored"] += 1
                 email_result["status"] = "stored"
                 email_result["transaction_id"] = txn.id
@@ -573,10 +576,23 @@ async def _process_email_batch(
             await db.commit()
 
         except Exception as e:
+            # The transaction row, email state, corrections, summary invalidation,
+            # and pipeline events are one per-email unit of work. Never commit a
+            # partially processed ledger entry from the error path.
+            await db.rollback()
+            if email_result.get("status") == "stored":
+                stats["stored"] -= 1
             stats["parsed_failed"] += 1
             email_result["status"] = "error"
             email_result["error"] = str(e)
-            logger.error(f"Pipeline error for email {email.id}: {e}")
+            logger.error(f"Pipeline error for email {email_id}: {e}")
+
+            recovered_email = await db.get(RawEmail, email_id)
+            if recovered_email is None:
+                logger.error("Raw email %s disappeared while recording pipeline failure", email_id)
+                stats["results"].append(email_result)
+                continue
+            email = recovered_email
 
             await _record_parse_failure(
                 db,
@@ -590,7 +606,7 @@ async def _process_email_batch(
             _record_pipeline_event(
                 db,
                 user_id=user_id,
-                email_id=email.id,
+                email_id=email_id,
                 event_type="ParseFailed",
                 stage="pipeline",
                 status="error",

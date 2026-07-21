@@ -8,6 +8,7 @@ import asyncio
 
 from app.models.email import RawEmail
 from app.models.sync import JobStatus
+from app.services import job_service
 from app.services.job_service import create_job, recover_interrupted_jobs, run_job
 from app.services.parser.pipeline import process_raw_emails
 
@@ -127,7 +128,7 @@ async def test_unsupported_job_type_failure_includes_error_type(test_session_fac
     assert payload["result"]["error_type"] == "unsupported_job_type"
 
 
-async def test_recover_interrupted_jobs_marks_active_jobs_failed(test_session_factory):
+async def test_recover_interrupted_jobs_requeues_only_running_leases(test_session_factory):
     async with test_session_factory() as db:
         queued = await create_job(db, "demo_sync_pipeline", user_id=None)
         running = await create_job(db, "gmail_sync_pipeline", user_id=None)
@@ -138,14 +139,85 @@ async def test_recover_interrupted_jobs_marks_active_jobs_failed(test_session_fa
         await db.commit()
 
         recovered = await recover_interrupted_jobs(db)
-        assert recovered == 2
+        assert recovered == 1
 
         await db.refresh(queued)
         await db.refresh(running)
         await db.refresh(completed)
 
-    assert queued.status == JobStatus.FAILED
-    assert running.status == JobStatus.FAILED
-    assert queued.error_message == "Job interrupted by server restart; please start sync again"
-    assert running.error_message == "Job interrupted by server restart; please start sync again"
+    assert queued.status == JobStatus.QUEUED
+    assert running.status == JobStatus.QUEUED
+    assert queued.error_message is None
+    assert running.error_message == "Job lease recovered after server restart"
     assert completed.status == JobStatus.COMPLETED
+
+
+async def test_job_claim_is_atomic_across_concurrent_workers(test_session_factory, monkeypatch):
+    calls = 0
+
+    async def handler(_db, _user_id, _payload):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return {"ok": True}
+
+    monkeypatch.setitem(job_service.JOB_HANDLERS, "atomic-test", handler)
+    async with test_session_factory() as db:
+        job = await create_job(db, "atomic-test", user_id=None)
+
+    await asyncio.gather(run_job(job.id), run_job(job.id))
+
+    async with test_session_factory() as db:
+        completed = await job_service.get_job(db, job.id)
+
+    assert calls == 1
+    assert completed.status == JobStatus.COMPLETED
+    assert completed.attempt_count == 1
+
+
+async def test_job_idempotency_key_returns_original_job(client):
+    user = await create_user(client, "job-idempotency")
+    headers = {"Idempotency-Key": "same-user-action"}
+
+    first = await client.post(
+        f"/api/jobs/retry-parse-failures?user_id={user['id']}", headers=headers
+    )
+    second = await client.post(
+        f"/api/jobs/retry-parse-failures?user_id={user['id']}", headers=headers
+    )
+
+    assert first.status_code == second.status_code == 202
+    assert first.json()["id"] == second.json()["id"]
+    for _ in range(40):
+        status = await client.get(f"/api/jobs/{first.json()['id']}")
+        if status.json()["status"] in {"completed", "failed"}:
+            break
+        await asyncio.sleep(0.05)
+    assert status.json()["status"] == "completed"
+
+
+async def test_unexpected_job_failure_is_retried_until_attempts_exhausted(
+    test_session_factory, monkeypatch
+):
+    async def handler(_db, _user_id, _payload):
+        raise RuntimeError("temporary worker failure")
+
+    monkeypatch.setitem(job_service.JOB_HANDLERS, "retry-test", handler)
+    async with test_session_factory() as db:
+        job = await create_job(db, "retry-test", user_id=None, max_attempts=2)
+
+    await run_job(job.id)
+    async with test_session_factory() as db:
+        retrying = await job_service.get_job(db, job.id)
+        assert retrying.status == JobStatus.QUEUED
+        assert retrying.attempt_count == 1
+        retrying.available_at = None
+        await db.commit()
+
+    await run_job(job.id)
+    async with test_session_factory() as db:
+        failed = await job_service.get_job(db, job.id)
+
+    assert failed.status == JobStatus.FAILED
+    assert failed.attempt_count == 2
+    assert failed.result_json

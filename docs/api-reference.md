@@ -296,6 +296,12 @@ preference.
 
 ## Jobs
 
+Job enqueue endpoints accept an optional `Idempotency-Key` header. Repeating the
+same key for the same user and job type returns the original durable job instead
+of starting the financial workflow twice. Job responses include `attempt_count`
+and `max_attempts`; `queued` may mean either newly accepted or waiting for a
+bounded retry.
+
 Async job submissions return `202 Accepted` with a `JobResponse`; poll the job
 by id for status. Submissions are rate-limited to 5/min. Failed jobs keep
 `error_message` populated and include `result.error_type` for stable operational

@@ -59,6 +59,11 @@ financial-account identity by user, institution, account type, and masked number
 The migration refuses to guess when legacy duplicates or invalid amounts exist;
 operators must reconcile those rows before retrying.
 
+Migration `016_durable_jobs` turns `BackgroundJob` into a durable queue record
+with atomic leases, attempt limits, retry availability, and scoped idempotency
+keys. Queued work survives restarts; interrupted running leases are requeued
+until their attempt budget is exhausted.
+
 An atomic transfer creates debit and credit transactions with one
 `transfer_group_id`. Both rows have `is_transfer=true`, remain auditable in the
 transaction ledger, and are excluded from income/spend aggregates.
