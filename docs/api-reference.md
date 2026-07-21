@@ -66,12 +66,13 @@ Auto-sync additions:
 
 | Method | Path | Query | Success | Returns |
 | --- | --- | --- | --- | --- |
-| `GET` | `/api/ws/sync` | `user_id`, `token?` | WebSocket | Sync events scoped by browser session cookie or compatibility bearer token |
+| `GET` | `/api/ws/sync` | `user_id`, `token?` | WebSocket | Sync events scoped by browser session cookie; query bearer tokens are local/compatibility-only and rejected in production |
 
 Sync events include `sync_started`, `gmail_checked`, `emails_stored`,
 `pipeline_started`, `transactions_updated`, `sync_completed`, and `sync_failed`.
-When `AUTH_REQUIRED=true`, the optional `token` query value must identify the
-same user as `user_id`.
+In local compatibility mode, an optional query token must identify the same user
+as `user_id`. Production requires an allowed origin and the revocable browser
+session cookie; bearer tokens are not accepted in WebSocket URLs.
 
 ## Pipeline
 

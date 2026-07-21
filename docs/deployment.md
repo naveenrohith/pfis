@@ -12,7 +12,8 @@ Set:
 - `DATABASE_URL` to PostgreSQL, preferably with an explicit
   `postgresql+asyncpg://` URL (plain `postgres://` and `postgresql://` deployment
   URLs are normalized to the async driver)
-- `CORS_ORIGINS` to explicit trusted origins
+- `CORS_ORIGINS` to explicit trusted HTTPS origins (no wildcard, path, query,
+  fragment, or embedded credentials)
 - `SESSION_COOKIE_NAME=__Host-pfis_session`
 - `SESSION_COOKIE_SECURE=true`
 - `ALLOW_DEMO_LOGIN=false`
@@ -20,6 +21,10 @@ Set:
 - A completed `frontend/dist` production build
 
 Production startup intentionally fails when these values are unsafe.
+
+The live sync channel accepts at most `WS_MAX_CONNECTIONS_PER_USER` sockets per
+user and closes client messages larger than `WS_MAX_MESSAGE_BYTES`. Keep the
+defaults unless measured staging traffic demonstrates a specific need.
 
 Build the canonical dashboard before starting the production API:
 

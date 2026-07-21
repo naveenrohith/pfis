@@ -131,3 +131,22 @@ def test_production_requires_host_prefixed_session_cookie():
             SESSION_COOKIE_SECURE=True,
             ALLOW_DEMO_LOGIN=False,
         )
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["*", "null", "http://pfis.example.com", "https://pfis.example.com/path"],
+)
+def test_production_requires_explicit_https_cors_origins(origin):
+    with pytest.raises(ValueError, match="explicit HTTPS origins"):
+        Settings(
+            _env_file=None,
+            ENVIRONMENT="production",
+            SECRET_KEY="a-unique-strong-secret-key-value-123456",
+            AUTH_REQUIRED=True,
+            DATABASE_URL="postgresql+asyncpg://user:pass@db/pfis",
+            CORS_ORIGINS=origin,
+            SESSION_COOKIE_SECURE=True,
+            SESSION_COOKIE_NAME="__Host-pfis_session",
+            ALLOW_DEMO_LOGIN=False,
+        )

@@ -7,8 +7,9 @@ import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 APP_DIR = Path(__file__).resolve().parent
@@ -52,6 +53,8 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/google/callback"
     GMAIL_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/auth/gmail/callback"
     GOOGLE_ALLOWED_EMAILS: Annotated[list[str], NoDecode] = []
+    WS_MAX_CONNECTIONS_PER_USER: int = Field(default=5, ge=1, le=50)
+    WS_MAX_MESSAGE_BYTES: int = Field(default=256, ge=32, le=4096)
 
     @property
     def is_production(self) -> bool:
@@ -142,6 +145,18 @@ class Settings(BaseSettings):
             local_origins = {"http://localhost:8000", "http://127.0.0.1:8000"}
             if set(self.CORS_ORIGINS) <= local_origins:
                 raise ValueError("Production requires explicit non-local CORS_ORIGINS")
+            for origin in self.CORS_ORIGINS:
+                parsed_origin = urlsplit(origin)
+                if (
+                    parsed_origin.scheme != "https"
+                    or not parsed_origin.netloc
+                    or parsed_origin.username is not None
+                    or parsed_origin.password is not None
+                    or parsed_origin.path
+                    or parsed_origin.query
+                    or parsed_origin.fragment
+                ):
+                    raise ValueError("Production CORS_ORIGINS must contain explicit HTTPS origins")
             if not self.SESSION_COOKIE_SECURE:
                 raise ValueError("Production requires SESSION_COOKIE_SECURE=true")
             if not self.SESSION_COOKIE_NAME.startswith("__Host-"):

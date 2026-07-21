@@ -64,6 +64,9 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 - Persist and broadcast stable connector/job error categories only. Provider
   exception text may contain credentials, source details, or request metadata
   and belongs neither in API responses nor durable operational records.
+- WebSocket upgrades must use an allowed origin and a revocable browser session
+  in production. Query-string bearer tokens, oversized frames, and excess
+  per-user connections are rejected; slow clients are isolated from broadcasts.
 
 ## Local Versus Production Mode
 

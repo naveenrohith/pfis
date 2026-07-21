@@ -21,6 +21,7 @@ import app.database as database_module
 import app.main as main_module
 import app.services.auto_sync_service as auto_sync_service_module
 import app.services.job_service as job_service_module
+from app.api.routes import ws as ws_routes_module
 from app.config import get_settings
 from app.database import Base, enable_sqlite_foreign_keys, get_db
 from app.main import app
@@ -69,6 +70,7 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(database_module, "AsyncSessionLocal", session_factory, raising=False)
     monkeypatch.setattr(main_module, "AsyncSessionLocal", session_factory, raising=False)
     monkeypatch.setattr(job_service_module, "AsyncSessionLocal", session_factory, raising=False)
+    monkeypatch.setattr(ws_routes_module, "AsyncSessionLocal", session_factory, raising=False)
     monkeypatch.setattr(
         auto_sync_service_module, "AsyncSessionLocal", session_factory, raising=False
     )

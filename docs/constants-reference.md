@@ -27,6 +27,8 @@ Defined in `backend/app/config.py`:
 - `GOOGLE_REDIRECT_URI`
 - `GMAIL_OAUTH_REDIRECT_URI`
 - `GOOGLE_ALLOWED_EMAILS`
+- `WS_MAX_CONNECTIONS_PER_USER`
+- `WS_MAX_MESSAGE_BYTES`
 
 ## Parser Thresholds
 

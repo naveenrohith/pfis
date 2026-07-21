@@ -10,11 +10,11 @@ PLANNER -> CODE -> TEST -> QUALITY -> REVIEW -> FIX
 
 ## Current Phase
 
-Phase 11: Production regression and ingestion privacy.
+Phase 12: Realtime channel hardening.
 
-Status: complete. Phase 11 enforces branch-aware coverage and closes connector
-ownership, atomic persistence, and exception-privacy gaps found by the production
-regression audit.
+Status: complete. Phase 12 adds origin and session enforcement, bounded client
+resources, concurrent broadcast isolation, and abuse-case regression coverage for
+the live sync channel.
 
 Goal: keep modernization work phased, tested, and reversible while preserving the local/demo developer path.
 
@@ -40,6 +40,7 @@ Goal: keep modernization work phased, tested, and reversible while preserving th
 | 9 | Parser pipeline observability and replay | Complete |
 | 10 | Financial accounts and cached monthly summaries | Complete |
 | 11 | Coverage enforcement and ingestion privacy | Complete |
+| 12 | Realtime channel security and backpressure | Complete |
 
 ## Phase 0 Scope
 
@@ -145,6 +146,16 @@ Remaining Phase 1 follow-up:
   provider exception text is restricted to non-secret classifications.
 - Ownership, rollback, duplicate, and exception-privacy failure paths have
   regression tests.
+
+## Phase 12 Acceptance Criteria
+
+- Production WebSocket upgrades require an explicitly allowed HTTPS origin and
+  a revocable session cookie; credentials in query strings are rejected.
+- Per-user connection and inbound-frame limits are configuration-bounded.
+- Broadcasts send concurrently with a timeout so one slow client cannot block
+  other users or sockets.
+- Disconnect, cross-user, origin, session, capacity, frame-size, slow-client,
+  and connection-establishment behavior has regression coverage.
 
 ## Phase 9 Acceptance Criteria
 
