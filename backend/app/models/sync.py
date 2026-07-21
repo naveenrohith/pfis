@@ -230,6 +230,9 @@ class OAuthState(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    browser_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    code_verifier_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    nonce_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     def __repr__(self) -> str:
         return f"<OAuthState {self.flow_type} expires={self.expires_at}>"

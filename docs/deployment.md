@@ -11,9 +11,26 @@ Set:
 - `SECRET_KEY` to a unique high-entropy value
 - `DATABASE_URL` to a non-SQLite database
 - `CORS_ORIGINS` to explicit trusted origins
+- `SESSION_COOKIE_NAME=__Host-pfis_session`
+- `SESSION_COOKIE_SECURE=true`
+- `ALLOW_DEMO_LOGIN=false`
 - Google OAuth settings only for approved redirect URIs
+- A completed `frontend/dist` production build
 
 Production startup intentionally fails when these values are unsafe.
+
+Build the canonical dashboard before starting the production API:
+
+```powershell
+Set-Location frontend
+npm ci
+npm run build
+Set-Location ..
+```
+
+FastAPI intentionally returns `503` in local mode and fails startup in production
+when `frontend/dist/index.html` is missing. The retired static dashboard is not an
+authentication or availability fallback.
 
 ## Database Operations
 

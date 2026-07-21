@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+from app.security import create_access_token
 from httpx import AsyncClient
 
 
@@ -35,7 +36,7 @@ async def register_user(client: AsyncClient, prefix: str = "auth") -> tuple[dict
     )
     response.raise_for_status()
     payload = response.json()
-    return payload["user"], payload["access_token"]
+    return payload["user"], create_access_token(payload["user"]["id"])
 
 
 def auth_headers(token: str) -> dict[str, str]:

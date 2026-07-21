@@ -1,7 +1,9 @@
 # PFIS API Reference
 
 All application routes are mounted under `/api`. Authentication is optional in
-local/demo mode (`AUTH_REQUIRED=false`); when required, send a bearer token.
+local/demo mode (`AUTH_REQUIRED=false`). The browser uses an opaque `HttpOnly`
+session cookie plus `X-CSRF-Token` for mutations; bearer JWTs remain supported
+for API compatibility.
 User-scoped routes accept a `user_id` and resolve the effective user via
 `resolve_user_scope(user_id, current_user)`.
 
@@ -18,11 +20,14 @@ Common error codes: `400` bad state, `401` unauthenticated, `403` forbidden,
 
 | Method | Path | Body | Query | Success | Errors | Returns |
 | --- | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/auth/register` | `RegisterRequest` | — | `201` | `409` | `AuthTokenResponse` (rate 5/min) |
-| `POST` | `/api/auth/login` | `LoginRequest` | — | `200` | `401,403` | `AuthTokenResponse` (rate 10/min) |
+| `POST` | `/api/auth/register` | `RegisterRequest` | — | `201` | `409,422` | `AuthSessionResponse` + session/CSRF cookies (rate 5/min) |
+| `POST` | `/api/auth/login` | `LoginRequest` | — | `200` | `401,403` | `AuthSessionResponse` + session/CSRF cookies (rate 10/min) |
+| `POST` | `/api/auth/demo` | — | — | `200` | `404` | Isolated demo `AuthSessionResponse` (disabled in production; rate 10/min) |
+| `POST` | `/api/auth/logout` | — | — | `200` | `403` | Revokes browser session; requires CSRF header |
+| `GET` | `/api/auth/session` | — | — | `200` | `401` | Browser-safe session metadata; never returns a token |
 | `GET` | `/api/auth/me` | — | — | `200` | `401` | `AuthMeResponse` (auth required) |
-| `GET` | `/api/auth/google/login` | — | — | `302` | `500` | Redirect to Google consent |
-| `GET` | `/api/auth/google/callback` | — | `code, state` | `200` (HTML) | `400,403,500` | Completes OAuth, sets session |
+| `GET` | `/api/auth/google/login` | — | — | `307` | — | Redirect to identity-only Google consent |
+| `GET` | `/api/auth/google/callback` | — | `code, state` | `303` | `400` | Verifies OIDC transaction, sets session, redirects to dashboard |
 
 ## Users
 
@@ -39,7 +44,7 @@ Auth router (`/api/auth/gmail`):
 | Method | Path | Query | Success | Errors | Returns |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/auth/gmail/connect` | `user_id` | `302` | `500` | Redirect to Google consent |
-| `GET` | `/api/auth/gmail/callback` | `code, state` | `200` | `400,500` | `{status, message, gmail_account_id, user_id}` |
+| `GET` | `/api/auth/gmail/callback` | `code, state` | `303` | `400,500` | Stores encrypted connector tokens and redirects to dashboard |
 
 Operations router (`/api/gmail`):
 
@@ -61,7 +66,7 @@ Auto-sync additions:
 
 | Method | Path | Query | Success | Returns |
 | --- | --- | --- | --- | --- |
-| `GET` | `/api/ws/sync` | `user_id`, `token?` | WebSocket | Sync progress events scoped to the user |
+| `GET` | `/api/ws/sync` | `user_id`, `token?` | WebSocket | Sync events scoped by browser session cookie or compatibility bearer token |
 
 Sync events include `sync_started`, `gmail_checked`, `emails_stored`,
 `pipeline_started`, `transactions_updated`, `sync_completed`, and `sync_failed`.

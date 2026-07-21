@@ -1,6 +1,5 @@
-import { loadSession } from './session';
 import type {
-  AuthTokenResponse,
+  AuthSessionResponse,
   AutoSyncStatus,
   BudgetTracker,
   BulkUpdateResponse,
@@ -45,6 +44,13 @@ import type {
 } from './types';
 
 const API_BASE = '/api';
+export const AUTH_SESSION_ENDED_EVENT = 'pfis:auth-session-ended';
+let csrfCookieName = 'pfis_csrf';
+
+function rememberSessionConfiguration(payload: AuthSessionResponse): AuthSessionResponse {
+  csrfCookieName = payload.csrf_cookie_name;
+  return payload;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -91,18 +97,25 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (auth) {
-    const session = loadSession();
-    if (session?.token) headers.Authorization = `Bearer ${session.token}`;
+  if (auth && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method.toUpperCase())) {
+    const csrf = document.cookie
+      .split('; ')
+      .find((entry) => entry.startsWith(`${csrfCookieName}=`))
+      ?.split('=')[1];
+    if (csrf) headers['X-CSRF-Token'] = decodeURIComponent(csrf);
   }
 
   const response = await fetch(url, {
     method,
     headers,
+    credentials: 'same-origin',
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
   if (response.status === 401 && !tolerate401) {
+    if (auth && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(AUTH_SESSION_ENDED_EVENT));
+    }
     throw new ApiError('Session expired', 401);
   }
 
@@ -152,18 +165,31 @@ export interface BulkUpdatePayload {
 
 export const api = {
   // Auth
-  login: (email: string, password: string) =>
-    request<AuthTokenResponse>('/auth/login', {
-      method: 'POST',
-      body: { email, password },
-      auth: false,
-    }),
-  register: (name: string, email: string, password: string, currency: string) =>
-    request<AuthTokenResponse>('/auth/register', {
-      method: 'POST',
-      body: { name, email, password, currency },
-      auth: false,
-    }),
+  login: async (email: string, password: string) =>
+    rememberSessionConfiguration(
+      await request<AuthSessionResponse>('/auth/login', {
+        method: 'POST',
+        body: { email, password },
+        auth: false,
+      }),
+    ),
+  register: async (name: string, email: string, password: string, currency: string) =>
+    rememberSessionConfiguration(
+      await request<AuthSessionResponse>('/auth/register', {
+        method: 'POST',
+        body: { name, email, password, currency },
+        auth: false,
+      }),
+    ),
+  session: async () =>
+    rememberSessionConfiguration(
+      await request<AuthSessionResponse>('/auth/session', { tolerate401: true }),
+    ),
+  logout: () => request<{ status: string }>('/auth/logout', { method: 'POST' }),
+  startDemo: async () =>
+    rememberSessionConfiguration(
+      await request<AuthSessionResponse>('/auth/demo', { method: 'POST', auth: false }),
+    ),
   me: () => request<User>('/auth/me'),
   listUsers: () => request<User[]>('/users/', { auth: false, tolerate401: true }),
 

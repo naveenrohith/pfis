@@ -111,6 +111,23 @@ def test_production_accepts_safe_minimum_configuration():
         AUTH_REQUIRED=True,
         DATABASE_URL="postgresql+asyncpg://user:pass@db/pfis",
         CORS_ORIGINS="https://pfis.example.com",
+        SESSION_COOKIE_SECURE=True,
+        SESSION_COOKIE_NAME="__Host-pfis_session",
+        ALLOW_DEMO_LOGIN=False,
     )
 
     assert settings.is_production is True
+
+
+def test_production_requires_host_prefixed_session_cookie():
+    with pytest.raises(ValueError, match="__Host-"):
+        Settings(
+            _env_file=None,
+            ENVIRONMENT="production",
+            SECRET_KEY="a-unique-strong-secret-key-value-123456",
+            AUTH_REQUIRED=True,
+            DATABASE_URL="postgresql+asyncpg://user:pass@db/pfis",
+            CORS_ORIGINS="https://pfis.example.com",
+            SESSION_COOKIE_SECURE=True,
+            ALLOW_DEMO_LOGIN=False,
+        )

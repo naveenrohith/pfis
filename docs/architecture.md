@@ -75,4 +75,4 @@ Connector
 
 ## Frontend Direction
 
-The React/Vite app under `frontend/` is the canonical UI. FastAPI serves its production build at `/dashboard`; the legacy static dashboard under `backend/app/static` remains only as a no-build fallback. See `docs/frontend.md`.
+The React/Vite app under `frontend/` is the canonical UI. FastAPI serves its production build at `/dashboard` and never falls back to the retired static dashboard. Production startup fails when the React build artifact is missing. See `docs/frontend.md`.

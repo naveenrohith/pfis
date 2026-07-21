@@ -1,5 +1,15 @@
 # PFIS Workflows
 
+## Sign In
+
+1. Email/password registration hashes the password with Argon2id, or Google sign-in requests identity scopes only.
+2. Google state is bound to the initiating browser and protected with PKCE and an OIDC nonce.
+3. Google identities resolve by the stable provider subject, not by email alone.
+4. PFIS creates a revocable server-side session and returns the raw token only in an `HttpOnly` cookie.
+5. The React app restores the session through `GET /api/auth/session`; it does not persist credentials in browser storage.
+6. Cookie-authenticated mutations echo the session-bound CSRF cookie in `X-CSRF-Token`.
+7. Logout revokes the session and clears browser cookies.
+
 ## Demo Sync
 
 1. `POST /api/gmail/demo-sync?user_id=...`
@@ -9,14 +19,15 @@
 
 ## Gmail OAuth Sync
 
-1. `GET /api/auth/gmail/connect?user_id=...`
-2. Persist OAuth state.
-3. Google redirects to callback.
-4. Exchange code for tokens.
-5. Encrypt and store token references.
-6. Record a connector audit event.
-7. `POST /api/gmail/sync` or auto-sync invokes the ingestion coordinator.
-8. `GmailConnector` fetches records, `SourceRecord` values are classified and stored, then the parser pipeline processes them.
+1. After sign-in, the user explicitly chooses `GET /api/auth/gmail/connect?user_id=...`.
+2. Request identity plus read-only Gmail scope and offline access; this consent is separate from sign-in.
+3. Persist browser-bound OAuth state, encrypted PKCE verifier, nonce, flow type, and expiry.
+4. Google redirects to callback; PFIS validates and consumes the transaction.
+5. Exchange code for tokens and verify the Google identity.
+6. Encrypt and store token references, preserving an existing refresh token if Google does not issue a new one.
+7. Record a connector audit event.
+8. `POST /api/gmail/sync` or auto-sync invokes the ingestion coordinator.
+9. `GmailConnector` fetches records, `SourceRecord` values are classified and stored, then the parser pipeline processes them.
 
 ## Automatic Sync
 

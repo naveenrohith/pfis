@@ -6,8 +6,8 @@ through a dashboard.
 
 - **Backend:** FastAPI (Python 3.13), async SQLAlchemy, SQLite locally.
 - **Frontend:** React + TypeScript + Vite under `frontend/` (see its README). Built
-  output is served by FastAPI at `/dashboard`; the legacy static dashboard under
-  `backend/app/static` remains a fallback until a build is present.
+  output is served by FastAPI at `/dashboard`. FastAPI does not serve the retired
+  static dashboard when the React build is missing.
 - **Docs:** `docs/` is the source of truth (architecture, data model, API, parser, security).
 
 ## Quick start

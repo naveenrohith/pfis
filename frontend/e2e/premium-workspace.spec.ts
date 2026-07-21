@@ -1,12 +1,45 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
+let demoCookies: Awaited<
+  ReturnType<import('@playwright/test').APIRequestContext['storageState']>
+>['cookies'] = [];
+
+test.beforeAll(async ({ request }) => {
+  const response = await request.post('/api/auth/demo');
+  expect(response.ok()).toBe(true);
+  demoCookies = (await request.storageState()).cookies;
+});
+
 async function openDemoWorkspace(page: import('@playwright/test').Page) {
+  await page.clock.setFixedTime(new Date('2026-07-16T09:00:00+05:30'));
+  await page.context().addCookies(demoCookies);
   await page.goto('/dashboard/');
-  const demo = page.getByRole('button', { name: 'Try demo workspace' });
-  if (await demo.isVisible()) await demo.click();
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 }
+
+test('sign-in is responsive, consent-clear, and accessible', async ({ page }) => {
+  await page.goto('/dashboard/');
+
+  await expect(page.getByRole('link', { name: 'Continue with Google' })).toHaveAttribute(
+    'href',
+    '/api/auth/google/login',
+  );
+  await expect(page.locator('body')).toContainText('Identity only');
+  await expect(page.locator('body')).toContainText('Read-only Gmail access');
+  await expect(page.getByLabel('Email')).toHaveAttribute('autocomplete', 'username');
+  await expect(page.getByLabel('Password', { exact: true })).toHaveAttribute(
+    'autocomplete',
+    'current-password',
+  );
+
+  const results = await new AxeBuilder({ page }).analyze();
+  const serious = results.violations.filter((violation) =>
+    ['serious', 'critical'].includes(violation.impact ?? ''),
+  );
+  expect(serious).toEqual([]);
+  await expectNoHorizontalOverflow(page);
+});
 
 async function expectNoHorizontalOverflow(page: import('@playwright/test').Page) {
   const overflow = await page.evaluate(
@@ -20,6 +53,11 @@ test('Today is keyboard reachable, responsive, and free of serious accessibility
 }) => {
   await openDemoWorkspace(page);
 
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(
+    'Connect or add activity to begin your brief.',
+  );
+  await expect(page.locator('main')).not.toContainText('You have kept ₹0');
+
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+K');
   await expect(page.getByRole('dialog', { name: 'PFIS command palette' })).toBeVisible();
   await page.keyboard.press('Escape');
@@ -32,6 +70,13 @@ test('Today is keyboard reachable, responsive, and free of serious accessibility
   );
   expect(serious).toEqual([]);
   await expectNoHorizontalOverflow(page);
+});
+
+test('Today visual baseline @visual', async ({ page }) => {
+  await openDemoWorkspace(page);
+  await page.getByTestId('brief-data-through').evaluate((element) => {
+    element.textContent = 'Based on activity through the selected period · 0 transactions';
+  });
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
   await expect(page).toHaveScreenshot('today-workspace.png', {
     animations: 'disabled',

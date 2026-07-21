@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     # 30 days: the session persists until the user explicitly logs out.
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200
     AUTH_REQUIRED: bool = False
+    SESSION_COOKIE_NAME: str = "pfis_session"
+    CSRF_COOKIE_NAME: str = "pfis_csrf"
+    OAUTH_COOKIE_NAME: str = "pfis_oauth"
+    SESSION_COOKIE_SECURE: bool = False
+    SESSION_ABSOLUTE_HOURS: int = 24
+    SESSION_IDLE_MINUTES: int = 60
+    PASSWORD_MIN_LENGTH: int = 12
+    ALLOW_DEMO_LOGIN: bool = True
     CORS_ORIGINS: Annotated[list[str], NoDecode] = [
         "http://localhost:8000",
         "http://127.0.0.1:8000",
@@ -134,6 +142,14 @@ class Settings(BaseSettings):
             local_origins = {"http://localhost:8000", "http://127.0.0.1:8000"}
             if set(self.CORS_ORIGINS) <= local_origins:
                 raise ValueError("Production requires explicit non-local CORS_ORIGINS")
+            if not self.SESSION_COOKIE_SECURE:
+                raise ValueError("Production requires SESSION_COOKIE_SECURE=true")
+            if not self.SESSION_COOKIE_NAME.startswith("__Host-"):
+                raise ValueError(
+                    "Production requires SESSION_COOKIE_NAME to use the __Host- prefix"
+                )
+            if self.ALLOW_DEMO_LOGIN:
+                raise ValueError("Production requires ALLOW_DEMO_LOGIN=false")
 
         if has_insecure_secret:
             if self.AUTH_REQUIRED:

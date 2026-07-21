@@ -18,6 +18,7 @@ import { useSync } from '@/features/workspace/SyncContext';
 import { formatCurrency, formatTime } from '@/lib/format';
 import type { CashFlowProjection } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { buildTodayBriefCopy } from './todayCopy';
 
 export function TodayExperience() {
   const { user } = useAuth();
@@ -68,11 +69,15 @@ export function TodayExperience() {
   const recurringBurden = financialHealth?.recurring_burden;
   const evidence = (data?.insights ?? []).slice(0, 2);
   const lowData = financialHealth?.data_sufficiency === 'low';
+  const transactionCount = snapshot?.transaction_count ?? 0;
 
-  const headline = primaryAction?.title || fallbackHeadline(netCashFlow, name);
-  const summary = `You have ${netCashFlow >= 0 ? 'kept' : 'spent'} ${formatCurrency(Math.abs(netCashFlow), currency)} ${
-    netCashFlow >= 0 ? 'after spending' : 'more than you earned'
-  } this month.`;
+  const { headline, summary } = buildTodayBriefCopy({
+    transactionCount,
+    netCashFlow,
+    name,
+    currency,
+    recommendationTitle: primaryAction?.title,
+  });
 
   return (
     <div className="space-y-10">
@@ -283,7 +288,7 @@ export function TodayExperience() {
       </section>
 
       <footer className="flex flex-col justify-between gap-3 border-t border-border/70 pt-5 text-xs text-muted-foreground sm:flex-row">
-        <p>
+        <p data-testid="brief-data-through">
           Based on activity through {projection?.data_through || 'the selected period'} ·{' '}
           {snapshot?.transaction_count ?? 0} transactions
           {data?.sync_summary.last_synced_at
@@ -497,12 +502,6 @@ function greeting() {
   if (hour < 12) return 'Good morning';
   if (hour < 18) return 'Good afternoon';
   return 'Good evening';
-}
-
-function fallbackHeadline(netCashFlow: number, name: string) {
-  return netCashFlow >= 0
-    ? `Good work, ${name}. You are keeping more than you spend.`
-    : `Hello, ${name}. This month needs one clear adjustment.`;
 }
 
 function formatComparison(value?: number | null) {

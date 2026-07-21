@@ -10,29 +10,36 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database import AsyncSessionLocal
 from app.models.user import User
-from app.security import decode_access_token
+from app.security import decode_access_token, get_active_auth_session
 from app.services.sync_events import sync_event_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
 
 
-async def _authorize_websocket_user(user_id: str, token: str | None) -> bool:
+async def _authorize_websocket_user(
+    user_id: str,
+    token: str | None,
+    session_token: str | None,
+) -> bool:
     settings = get_settings()
-    if not token and not settings.AUTH_REQUIRED:
+    if not token and not session_token and not settings.AUTH_REQUIRED:
         return True
-    if not token:
-        return False
-
-    try:
-        payload = decode_access_token(token)
-    except Exception:
-        return False
-    token_user_id = payload.get("sub")
-    if token_user_id != user_id:
-        return False
 
     async with AsyncSessionLocal() as db:
+        if session_token:
+            session = await get_active_auth_session(session_token, db)
+            if session is None or session.user_id != user_id:
+                return False
+        elif token:
+            try:
+                payload = decode_access_token(token)
+            except Exception:
+                return False
+            if payload.get("sub") != user_id:
+                return False
+        else:
+            return False
         result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
         return result.scalar_one_or_none() is not None
 
@@ -44,7 +51,9 @@ async def sync_updates(
     token: str | None = Query(default=None),
 ):
     """Stream sync progress events for one user."""
-    if not await _authorize_websocket_user(user_id, token):
+    settings = get_settings()
+    session_token = websocket.cookies.get(settings.SESSION_COOKIE_NAME)
+    if not await _authorize_websocket_user(user_id, token, session_token):
         await websocket.close(code=1008)
         return
 

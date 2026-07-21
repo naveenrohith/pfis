@@ -9,6 +9,8 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 ## Main Entities
 
 - `User`: registered user profile, currency, auth status.
+- `AuthIdentity`: external provider identity keyed by stable provider subject and linked to a user.
+- `AuthSession`: revocable server-side browser session containing only hashed session and CSRF tokens.
 - `GmailAccount`: connected Gmail account and encrypted token references.
 - `FinancialAccount`: user-owned account identity inferred from connector metadata.
 - `AccountBalanceSnapshot`: append-only dated balance for an asset or liability account.
@@ -27,7 +29,7 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 - `ParseFailure`: dead-letter queue for failed parser attempts.
 - `UserCorrection`: feedback loop for corrected merchant/category/amount fields.
 - `BackgroundJob`: async job tracking.
-- `OAuthState`: persisted OAuth state with expiry.
+- `OAuthState`: single-use OAuth transaction with expiry, flow type, browser binding, encrypted PKCE verifier, and encrypted OIDC nonce.
 
 Transactions may reference a `FinancialAccount` through the nullable
 `financial_account_id` field. Migration `009_financial_accounts` backfills
@@ -44,6 +46,11 @@ Migration `012_financial_rhythm` adds the non-null `briefing_cadence` preference
 with a backward-compatible `daily` default. Allowed API values are `daily`,
 `weekly`, and `monthly`; the value only controls the deterministic in-app brief
 period and does not schedule external notifications.
+
+Migration `014_auth_sessions` adds external identities and revocable browser
+sessions, and hardens OAuth transactions with browser binding, PKCE, and nonce
+references. Google identity and Gmail connector authorization remain separate
+records and separate consent flows.
 
 An atomic transfer creates debit and credit transactions with one
 `transfer_group_id`. Both rows have `is_transfer=true`, remain auditable in the
@@ -66,7 +73,7 @@ users' records. The indexes are managed by Alembic migration
 ## Rules
 
 - All user-owned entities must be queried with user scope or checked with ownership helpers.
-- Tokens and OAuth secrets must be encrypted before storage.
+- Raw session and CSRF tokens must never be stored; persist hashes only. OAuth tokens and transient OAuth secrets must be encrypted before storage.
 - Raw emails are retained to support reprocessing.
 - Transaction `fingerprint` protects deduplication.
 - Transfer legs must be created together and excluded from financial aggregates.

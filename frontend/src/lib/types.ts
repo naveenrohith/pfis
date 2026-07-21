@@ -15,7 +15,6 @@ export type SessionMode = 'auth' | 'demo';
 
 export interface Session {
   mode: SessionMode;
-  token: string | null;
   expiresAt: number | null; // epoch ms
   user: User;
 }
@@ -224,9 +223,10 @@ export interface Job {
   error_message?: string | null;
 }
 
-export interface AuthTokenResponse {
-  access_token: string;
+export interface AuthSessionResponse {
   expires_in: number;
+  mode: SessionMode;
+  csrf_cookie_name: string;
   user: User;
 }
 

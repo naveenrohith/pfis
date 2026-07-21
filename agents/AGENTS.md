@@ -32,7 +32,7 @@ If REVIEW finds no issues, FIX may be skipped. TEST and QUALITY must still run f
 - Database: async SQLAlchemy models with `AsyncSession`; SQLite in local development, PostgreSQL-compatible design for production.
 - API: routers under `backend/app/api/routes`, mounted with `/api`.
 - Services: Gmail sync, parser pipeline, transaction service, insights, jobs, seed data.
-- Frontend: canonical React/Vite app under `frontend/`, with a legacy static no-build fallback.
+- Frontend: canonical React/Vite app under `frontend/`; production requires its build artifact.
 - Tests: pytest suite under `tests/pytest` with `pytest.ini` pointing there.
 - Core pipeline: Gmail/raw email -> classify -> parse -> normalize -> categorize -> deduplicate -> store transaction -> insights/reports/dashboard.
 

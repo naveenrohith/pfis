@@ -43,12 +43,10 @@ The following are local or generated artifacts and must never be committed:
   Lighthouse reports, and temporary logs.
 - `.env` files, OAuth credentials, user data exports, and backups.
 
-The application intentionally keeps two dashboard delivery paths:
-
-- `frontend/` is the canonical React and Vite product surface.
-- `backend/app/static/` is a legacy static fallback while a React build is not
-  present. Do not delete it until the FastAPI fallback is removed and the
-  deployment path is validated.
+The application has one dashboard delivery path: `frontend/` is the canonical
+React and Vite product surface. `backend/app/static/` contains retired dashboard
+source retained temporarily for reference and is not served by FastAPI. Delete it
+only in a dedicated cleanup after verifying that no unique business behavior remains.
 
 ## Required checks before integration
 

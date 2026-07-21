@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { useToast } from '@/components/ui/Toast';
 import { ThemeToggle } from './ThemeToggle';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
@@ -23,11 +24,18 @@ const GlobalSearch = lazy(() =>
 
 export function Header() {
   const { user, session, logout } = useAuth();
+  const { notify } = useToast();
   const { month, year, isCurrentMonth, goPrev, goNext, goToday } = useWorkspace();
   const { running, runSync } = useSync();
   const { setCustomizeOpen, setCommandOpen } = useDashboardUi();
   const countdown =
     session?.mode === 'demo' ? 'Demo workspace' : formatCountdown(session?.expiresAt ?? null);
+
+  const handleLogout = async () => {
+    if (!(await logout())) {
+      notify('PFIS could not sign you out. Check your connection and try again.', 'error');
+    }
+  };
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/90 backdrop-blur-xl">
@@ -112,7 +120,7 @@ export function Header() {
               </button>
               <button
                 type="button"
-                onClick={() => logout()}
+                onClick={() => void handleLogout()}
                 className="focus-ring flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold text-danger hover:bg-danger/10"
               >
                 <LogOut className="h-4 w-4" /> {session?.mode === 'demo' ? 'End demo' : 'Sign out'}
