@@ -119,5 +119,11 @@ class Transaction(Base):
         source_email = self.__dict__.get("source_email")
         return source_email.received_at if source_email else None
 
+    @property
+    def category_name(self) -> str | None:
+        """Expose an eagerly loaded category label to response schemas."""
+        category = self.__dict__.get("category")
+        return category.name if category else None
+
     def __repr__(self) -> str:
         return f"<Transaction {self.merchant_normalized} ₹{self.amount}>"

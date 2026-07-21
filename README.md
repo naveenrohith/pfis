@@ -70,8 +70,8 @@ With `make` (or run the underlying commands directly — see the `Makefile`):
 | `make lint` | Ruff lint |
 | `make format` | Auto-format (ruff --fix + black) |
 | `make format-check` | Verify formatting without writing |
-| `make typecheck` | Mypy (baseline, non-blocking) |
-| `make check` | Lint + format-check + tests (local gate) |
+| `make typecheck` | Run the blocking mypy gate |
+| `make check` | Lint + format-check + type-check + tests |
 | `make precommit` | Install git pre-commit hooks |
 
 CI runs lint/format/type/tests, dependency audits, a real PostgreSQL migration

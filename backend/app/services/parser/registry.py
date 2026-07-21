@@ -25,12 +25,12 @@ class ParserRegistry:
     Routes emails to the right parser based on sender domain.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._parsers: dict[str, BaseParser] = {}
         self._fallback = GenericParser()
         self._register_defaults()
 
-    def _register_defaults(self):
+    def _register_defaults(self) -> None:
         """Register all known bank parsers."""
         hdfc = HDFCParser()
         sbi = SBIParser()
@@ -100,7 +100,7 @@ class ParserRegistry:
 
 
 # Singleton
-_registry: ParserRegistry = None
+_registry: ParserRegistry | None = None
 
 
 def get_parser_registry() -> ParserRegistry:

@@ -5,6 +5,7 @@ Swappable between SQLite (prototype) and PostgreSQL (production).
 """
 
 import logging
+from collections.abc import AsyncIterator
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
@@ -66,7 +67,7 @@ class Base(DeclarativeBase):
     pass
 
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncIterator[AsyncSession]:
     """Dependency injection for database sessions."""
     async with AsyncSessionLocal() as session:
         try:

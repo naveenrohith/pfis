@@ -5,6 +5,7 @@ from __future__ import annotations
 import calendar
 import statistics
 from datetime import UTC, date, datetime
+from typing import cast
 from urllib.parse import unquote
 
 from sqlalchemy import case, extract, func, or_, select
@@ -18,9 +19,12 @@ from app.schemas.intelligence import (
     CategoryIntelligenceItem,
     CategoryIntelligenceResponse,
     CategoryTopMerchant,
+    DataSufficiency,
+    EvidenceItem,
     FinancialHealthScore,
     GoalCreate,
     GoalResponse,
+    GoalType,
     GoalUpdate,
     LearnedMerchantRule,
     MerchantDetail,
@@ -65,7 +69,7 @@ class IntelligenceService:
         previous_month, previous_year = _prev_month(month, year)
         previous_spend = await self._merchant_spend_map(user_id, previous_month, previous_year)
         recurring_patterns = await RecurringPatternService(self.db).analyze(user_id)
-        recurrence_by_merchant = {}
+        recurrence_by_merchant: dict[str, RecurringPattern] = {}
         for pattern in recurring_patterns:
             key = pattern.merchant.casefold()
             if (
@@ -82,7 +86,7 @@ class IntelligenceService:
                 Category.id.label("category_id"),
                 Category.name.label("category_name"),
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
-                func.count(Transaction.id).label("count"),
+                func.count(Transaction.id).label("transaction_count"),
                 func.avg(Transaction.amount).label("avg"),
                 func.max(Transaction.transaction_date).label("latest"),
                 func.min(Transaction.amount).label("min_amount"),
@@ -107,14 +111,14 @@ class IntelligenceService:
         merchants: list[MerchantSummary] = []
         for row in result.all():
             name = _merchant_key(row.merchant)
-            pattern = recurrence_by_merchant.get(name.casefold())
-            recurrence = pattern.confidence if pattern else 0.0
+            selected_pattern = recurrence_by_merchant.get(name.casefold())
+            recurrence = selected_pattern.confidence if selected_pattern else 0.0
             merchants.append(
                 MerchantSummary(
                     merchant_key=name,
                     name=name,
                     total_spend=float(row.total or 0),
-                    transaction_count=int(row.count or 0),
+                    transaction_count=int(row.transaction_count or 0),
                     avg_spend=float(row.avg or 0),
                     month_change_pct=_pct_change(
                         float(row.total or 0), previous_spend.get(name.lower(), 0.0)
@@ -122,11 +126,18 @@ class IntelligenceService:
                     category=row.category_name,
                     category_id=row.category_id,
                     recurrence_likelihood=recurrence,
-                    recurrence_status=pattern.status if pattern else "candidate",
-                    recurrence_cadence=pattern.cadence if pattern else None,
+                    recurrence_status=(
+                        selected_pattern.status if selected_pattern else "candidate"
+                    ),
+                    recurrence_cadence=(selected_pattern.cadence if selected_pattern else None),
                     recurrence_confidence=recurrence,
-                    next_expected_date=pattern.next_expected_date if pattern else None,
-                    data_sufficiency=pattern.data_sufficiency if pattern else "low",
+                    next_expected_date=(
+                        selected_pattern.next_expected_date if selected_pattern else None
+                    ),
+                    data_sufficiency=cast(
+                        DataSufficiency,
+                        selected_pattern.data_sufficiency if selected_pattern else "low",
+                    ),
                     latest_transaction_date=row.latest,
                 )
             )
@@ -222,7 +233,7 @@ class IntelligenceService:
             select(
                 Transaction.category_id,
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
-                func.count(Transaction.id).label("count"),
+                func.count(Transaction.id).label("transaction_count"),
             )
             .where(
                 Transaction.user_id == user_id,
@@ -233,10 +244,11 @@ class IntelligenceService:
             )
             .group_by(Transaction.category_id)
         )
-        spend_map = {
-            row.category_id: {"total": float(row.total or 0), "count": int(row.count or 0)}
-            for row in spend_result.all()
-        }
+        spend_totals: dict[str | None, float] = {}
+        spend_counts: dict[str | None, int] = {}
+        for row in spend_result.all():
+            spend_totals[row.category_id] = float(row.total or 0)
+            spend_counts[row.category_id] = int(row.transaction_count or 0)
 
         budget_result = await self.db.execute(
             select(Budget.category_id, Budget.monthly_limit).where(Budget.user_id == user_id)
@@ -249,7 +261,7 @@ class IntelligenceService:
         seen: set[str | None] = set()
         for category in categories:
             seen.add(category.id)
-            spend = spend_map.get(category.id, {"total": 0.0, "count": 0})
+            category_spend = spend_totals.get(category.id, 0.0)
             budget_limit = budget_map.get(category.id)
             out.append(
                 CategoryIntelligenceItem(
@@ -258,14 +270,14 @@ class IntelligenceService:
                     parent_category_id=category.parent_category_id,
                     parent_name=category_names.get(category.parent_category_id),
                     icon=category.icon,
-                    total_spend=spend["total"],
-                    transaction_count=spend["count"],
+                    total_spend=category_spend,
+                    transaction_count=spend_counts.get(category.id, 0),
                     month_change_pct=_pct_change(
-                        spend["total"], previous_spend.get(category.id, 0.0)
+                        category_spend, previous_spend.get(category.id, 0.0)
                     ),
                     budget_limit=budget_limit,
                     budget_usage_pct=(
-                        round(spend["total"] / budget_limit * 100, 1)
+                        round(category_spend / budget_limit * 100, 1)
                         if budget_limit and budget_limit > 0
                         else None
                     ),
@@ -273,15 +285,17 @@ class IntelligenceService:
                 )
             )
 
-        if None in spend_map and None not in seen:
-            spend = spend_map[None]
+        if None in spend_totals and None not in seen:
+            uncategorized_spend = spend_totals[None]
             out.append(
                 CategoryIntelligenceItem(
                     category_id=None,
                     name="Uncategorized",
-                    total_spend=spend["total"],
-                    transaction_count=spend["count"],
-                    month_change_pct=_pct_change(spend["total"], previous_spend.get(None, 0.0)),
+                    total_spend=uncategorized_spend,
+                    transaction_count=spend_counts.get(None, 0),
+                    month_change_pct=_pct_change(
+                        uncategorized_spend, previous_spend.get(None, 0.0)
+                    ),
                     top_merchants=top_merchants.get(None, []),
                 )
             )
@@ -375,15 +389,15 @@ class IntelligenceService:
                 "The range reflects historical monthly variation and is not a guarantee.",
             ],
             evidence=[
-                {"label": "Observed transactions", "value": f"Through day {days_elapsed}"},
-                {"label": "History", "value": f"{len(historical_spend)} comparable months"},
-                {
-                    "label": "Confirmed streams",
-                    "value": str(sum(1 for p in patterns if p.status in {"mature", "missed"})),
-                },
+                EvidenceItem(label="Observed transactions", value=f"Through day {days_elapsed}"),
+                EvidenceItem(label="History", value=f"{len(historical_spend)} comparable months"),
+                EvidenceItem(
+                    label="Confirmed streams",
+                    value=str(sum(1 for p in patterns if p.status in {"mature", "missed"})),
+                ),
             ],
             confidence=round(confidence, 2),
-            data_sufficiency=data_sufficiency,
+            data_sufficiency=cast(DataSufficiency, data_sufficiency),
             historical_months=len(historical_spend),
             data_through=(
                 today
@@ -440,19 +454,21 @@ class IntelligenceService:
         previous_categories = await self._category_name_spend_map(
             user_id, previous_month, previous_year
         )
-        category_deltas = []
+        delta_rows: list[tuple[str, float, float, float | None]] = []
         for name in sorted(set(current_categories) | set(previous_categories)):
             current = current_categories.get(name, 0.0)
             previous = previous_categories.get(name, 0.0)
-            category_deltas.append(
-                {
-                    "category": name,
-                    "current": current,
-                    "previous": previous,
-                    "change_pct": _pct_change(current, previous),
-                }
-            )
-        category_deltas.sort(key=lambda d: abs(d["current"] - d["previous"]), reverse=True)
+            delta_rows.append((name, current, previous, _pct_change(current, previous)))
+        delta_rows.sort(key=lambda item: abs(item[1] - item[2]), reverse=True)
+        category_deltas = [
+            {
+                "category": name,
+                "current": current,
+                "previous": previous,
+                "change_pct": change_pct,
+            }
+            for name, current, previous, change_pct in delta_rows[:8]
+        ]
 
         return MonthComparison(
             month=month,
@@ -467,7 +483,7 @@ class IntelligenceService:
             previous_savings=prev_income - prev_spend,
             spend_change_pct=_pct_change(spend, prev_spend),
             income_change_pct=_pct_change(income, prev_income),
-            category_deltas=category_deltas[:8],
+            category_deltas=category_deltas,
         )
 
     async def financial_health(
@@ -542,7 +558,7 @@ class IntelligenceService:
             else "medium" if confidence_score >= 55 else "low"
         )
 
-        signals = [
+        signals: list[dict] = [
             {
                 "label": "Savings rate",
                 "value": round(savings_rate, 1),
@@ -572,7 +588,7 @@ class IntelligenceService:
             score=score,
             monthly_stability=score,
             data_confidence=confidence_score,
-            data_sufficiency=sufficiency,
+            data_sufficiency=cast(DataSufficiency, sufficiency),
             savings_rate=round(savings_rate, 1),
             budget_adherence=(round(budget_adherence, 1) if budget_adherence is not None else None),
             recurring_burden=round(recurring_burden, 1),
@@ -639,7 +655,7 @@ class IntelligenceService:
         return GoalResponse(
             id=goal.id,
             user_id=goal.user_id,
-            goal_type=goal.goal_type,
+            goal_type=cast(GoalType, goal.goal_type),
             label=goal.label,
             target_amount=target_amount,
             target_key=goal.target_key,
@@ -718,7 +734,7 @@ class IntelligenceService:
     async def _data_quality_metrics(self, user_id: str, month: int, year: int) -> dict[str, float]:
         result = await self.db.execute(
             select(
-                func.count(Transaction.id).label("count"),
+                func.count(Transaction.id).label("transaction_count"),
                 func.avg(Transaction.confidence_score).label("parse_confidence"),
                 func.avg(Transaction.merchant_resolution_confidence).label("merchant_confidence"),
             ).where(
@@ -728,7 +744,7 @@ class IntelligenceService:
             )
         )
         row = result.one()
-        if int(row.count or 0) == 0:
+        if int(row.transaction_count or 0) == 0:
             return {"parse_confidence": 0.0, "merchant_confidence": 0.0}
         return {
             "parse_confidence": max(0.0, min(float(row.parse_confidence or 0), 1.0)),
@@ -805,7 +821,7 @@ class IntelligenceService:
                     Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown"
                 ).label("merchant"),
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
-                func.count(Transaction.id).label("count"),
+                func.count(Transaction.id).label("transaction_count"),
             )
             .where(
                 Transaction.user_id == user_id,
@@ -828,7 +844,7 @@ class IntelligenceService:
                     CategoryTopMerchant(
                         name=_merchant_key(row.merchant),
                         total=float(row.total or 0),
-                        count=int(row.count or 0),
+                        count=int(row.transaction_count or 0),
                     )
                 )
         return out

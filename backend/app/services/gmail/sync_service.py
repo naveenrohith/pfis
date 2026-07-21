@@ -12,6 +12,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import TypedDict
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,14 +25,23 @@ from app.services.ingestion import IngestionCoordinator, IngestionMode
 logger = logging.getLogger(__name__)
 
 
+class DemoSyncStats(TypedDict):
+    emails_fetched: int
+    emails_stored: int
+    emails_skipped_otp: int
+    emails_skipped_promo: int
+    emails_skipped_duplicate: int
+    classifications: list[dict[str, object]]
+
+
 async def demo_sync_gmail_emails(
     db: AsyncSession,
     user_id: str,
-) -> dict:
+) -> DemoSyncStats:
     """Simulate Gmail sync using deterministic sample emails for demo/testing."""
     from app.services.gmail.demo_data import SAMPLE_EMAILS
 
-    stats = {
+    stats: DemoSyncStats = {
         "emails_fetched": len(SAMPLE_EMAILS),
         "emails_stored": 0,
         "emails_skipped_otp": 0,

@@ -32,9 +32,8 @@ jobs:
       - name: Black (format check)
         run: black --check backend/app tests
 
-      - name: Mypy (type check, non-blocking)
+      - name: Mypy (type check)
         run: mypy backend/app
-        continue-on-error: true
 
       - name: Audit Python dependencies
         run: pip-audit -r backend/requirements.txt

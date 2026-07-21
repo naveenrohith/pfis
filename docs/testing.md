@@ -10,6 +10,18 @@ Run all tests:
 .\.venv\Scripts\python.exe -m pytest
 ```
 
+Run the blocking backend static-analysis gates:
+
+```powershell
+.\.venv\Scripts\python.exe -m ruff check backend\app tests
+.\.venv\Scripts\python.exe -m black --check backend\app tests
+.\.venv\Scripts\python.exe -m mypy backend\app
+```
+
+Mypy checks all 98 backend modules in CI, including bodies of functions without
+fully annotated signatures. New typing errors and unused suppressions fail the
+build.
+
 Audit pinned backend and frontend dependencies:
 
 ```powershell

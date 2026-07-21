@@ -375,10 +375,7 @@ class TransactionService:
         order = asc(sort_column) if direction == "asc" else desc(sort_column)
         query = query.order_by(order, Transaction.id.desc()).limit(limit).offset(offset)
         result = await self.db.execute(query)
-        transactions = list(result.scalars().all())
-        for txn in transactions:
-            txn.category_name = txn.category.name if txn.category else None
-        return transactions
+        return list(result.scalars().all())
 
     async def get_transaction_by_id(self, txn_id: str) -> Transaction | None:
         """Get a single transaction by ID."""
@@ -388,8 +385,6 @@ class TransactionService:
             .where(Transaction.id == txn_id)
         )
         txn = result.scalar_one_or_none()
-        if txn:
-            txn.category_name = txn.category.name if txn.category else None
         return txn
 
     async def update_transaction(self, txn_id: str, data: TransactionUpdate) -> Transaction | None:
@@ -465,7 +460,6 @@ class TransactionService:
         await self.db.refresh(txn)
         if txn.category_id:
             await self.db.refresh(txn, attribute_names=["category"])
-        txn.category_name = txn.category.name if txn.category else None
         logger.info(f"Transaction updated: {txn_id} fields={list(changed_fields.keys())}")
         return txn
 

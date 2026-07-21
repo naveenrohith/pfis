@@ -5,7 +5,7 @@ CRUD endpoints for category budgets and budget-vs-actual tracking.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import extract, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,8 +28,8 @@ router = APIRouter(prefix="/budgets", tags=["Budgets"])
 
 @router.post("/", status_code=201)
 async def create_budget(
+    data: BudgetCreate = Body(...),
     user_id: str = Query(...),
-    data: BudgetCreate = ...,
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):

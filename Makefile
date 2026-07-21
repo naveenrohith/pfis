@@ -22,7 +22,7 @@ format:         ## Auto-format with black + ruff fixes
 format-check:   ## Verify formatting without writing changes
 	black --check backend/app tests
 
-typecheck:      ## Run mypy (non-blocking baseline)
+typecheck:      ## Run the blocking mypy gate
 	mypy backend/app
 
 test:           ## Run the pytest suite
@@ -31,7 +31,7 @@ test:           ## Run the pytest suite
 cov:            ## Run tests with coverage report
 	$(PY) -m pytest --cov --cov-report=term-missing
 
-check: lint format-check test  ## Run the full local gate (lint + format + tests)
+check: lint format-check typecheck test  ## Run the full local gate
 
 precommit:      ## Install git pre-commit hooks
 	pre-commit install

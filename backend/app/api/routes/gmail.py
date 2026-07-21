@@ -134,11 +134,11 @@ async def gmail_callback(
     Exchange auth code for tokens and store them.
     """
     # Verify state from DB
-    result = await db.execute(select(OAuthState).where(OAuthState.state == state))
-    oauth_state = result.scalar_one_or_none()
+    oauth_state_result = await db.execute(select(OAuthState).where(OAuthState.state == state))
+    oauth_state = oauth_state_result.scalar_one_or_none()
     now_utc = datetime.now(UTC)
-    expires = oauth_state.expires_at if oauth_state else None
-    if expires and expires.tzinfo is None:
+    expires = oauth_state.expires_at if oauth_state is not None else None
+    if expires is not None and expires.tzinfo is None:
         now_utc = now_utc.replace(tzinfo=None)
     browser_token = request.cookies.get(settings.OAUTH_COOKIE_NAME)
     browser_matches = bool(
@@ -149,6 +149,7 @@ async def gmail_callback(
     )
     if (
         not oauth_state
+        or expires is None
         or expires < now_utc
         or oauth_state.flow_type != "gmail_connect"
         or not browser_matches
@@ -159,6 +160,8 @@ async def gmail_callback(
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
     user_id = oauth_state.user_id
+    code_verifier_ref = oauth_state.code_verifier_ref
+    nonce_ref = oauth_state.nonce_ref
     await db.delete(oauth_state)
     await db.commit()
 
@@ -171,16 +174,18 @@ async def gmail_callback(
             code,
             redirect_uri=settings.GMAIL_OAUTH_REDIRECT_URI,
             scopes=GMAIL_SCOPES,
-            code_verifier=decrypt_secret(oauth_state.code_verifier_ref),
+            code_verifier=decrypt_secret(code_verifier_ref),
         )
         profile = verify_google_identity(
             token_data,
-            expected_nonce=decrypt_secret(oauth_state.nonce_ref),
+            expected_nonce=decrypt_secret(nonce_ref),
         )
 
         # Check if Gmail account already exists for this user
-        result = await db.execute(select(GmailAccount).where(GmailAccount.user_id == user_id))
-        existing = result.scalar_one_or_none()
+        account_result = await db.execute(
+            select(GmailAccount).where(GmailAccount.user_id == user_id)
+        )
+        existing = account_result.scalar_one_or_none()
 
         if existing:
             # Update tokens

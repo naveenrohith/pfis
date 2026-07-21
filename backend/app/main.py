@@ -139,8 +139,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.limiter = limiter
-app.add_exception_handler(StarletteHTTPException, http_exception_handler)
-app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
+
+
+async def _http_exception_adapter(request: Request, exc: Exception):
+    if not isinstance(exc, StarletteHTTPException):
+        raise exc
+    return await http_exception_handler(request, exc)
+
+
+async def _validation_exception_adapter(request: Request, exc: Exception):
+    if not isinstance(exc, RequestValidationError):
+        raise exc
+    return await request_validation_exception_handler(request, exc)
+
+
+app.add_exception_handler(StarletteHTTPException, _http_exception_adapter)
+app.add_exception_handler(RequestValidationError, _validation_exception_adapter)
 
 
 async def rate_limit_exception_handler(request, exc):

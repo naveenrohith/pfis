@@ -28,8 +28,8 @@ class GmailConnector:
 
     def __init__(self, account: GmailAccount) -> None:
         self.account = account
-        self._service = None
-        self._refreshed_credentials = None
+        self._service: Any | None = None
+        self._refreshed_credentials: Any | None = None
 
     async def refresh_credentials(self) -> dict[str, Any]:
         service, credentials, refreshed = await asyncio.to_thread(self._build_service_sync)
@@ -141,7 +141,8 @@ class GmailConnector:
 
     @staticmethod
     async def _get_current_history_id(service) -> str | None:
-        profile = await asyncio.to_thread(lambda: service.users().getProfile(userId="me").execute())
+        request = service.users().getProfile(userId="me")
+        profile = await asyncio.to_thread(request.execute)
         history_id = profile.get("historyId")
         return str(history_id) if history_id else None
 
@@ -149,20 +150,23 @@ class GmailConnector:
     async def _list_message_refs_by_query(
         service, query: str, max_results: int | None
     ) -> list[dict]:
-        messages = []
-        next_page_token = None
+        messages: list[dict[str, Any]] = []
+        next_page_token: str | None = None
         while True:
             page_size = 500 if max_results is None else min(max_results - len(messages), 500)
             if page_size <= 0:
                 break
 
-            list_kwargs = {"userId": "me", "q": query, "maxResults": page_size}
+            list_kwargs: dict[str, Any] = {
+                "userId": "me",
+                "q": query,
+                "maxResults": page_size,
+            }
             if next_page_token:
                 list_kwargs["pageToken"] = next_page_token
 
-            response = await asyncio.to_thread(
-                lambda lk=list_kwargs: service.users().messages().list(**lk).execute()
-            )
+            request = service.users().messages().list(**list_kwargs)
+            response = await asyncio.to_thread(request.execute)
             messages.extend(response.get("messages", []))
             next_page_token = response.get("nextPageToken")
             if not next_page_token or (max_results is not None and len(messages) >= max_results):
@@ -188,9 +192,8 @@ class GmailConnector:
             if next_page_token:
                 list_kwargs["pageToken"] = next_page_token
 
-            response = await asyncio.to_thread(
-                lambda lk=list_kwargs: service.users().history().list(**lk).execute()
-            )
+            request = service.users().history().list(**list_kwargs)
+            response = await asyncio.to_thread(request.execute)
             latest_history_id = str(response.get("historyId") or latest_history_id or "")
             for item in response.get("history", []):
                 for added in item.get("messagesAdded", []):
@@ -213,12 +216,8 @@ class GmailConnector:
     ) -> list[SourceRecord]:
         records: list[SourceRecord] = []
         for ref in refs:
-            message = await asyncio.to_thread(
-                lambda mid=ref["id"]: service.users()
-                .messages()
-                .get(userId="me", id=mid, format="full")
-                .execute()
-            )
+            request = service.users().messages().get(userId="me", id=ref["id"], format="full")
+            message = await asyncio.to_thread(request.execute)
             records.append(self._message_to_record(user_id, message))
         return records
 
