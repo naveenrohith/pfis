@@ -22,7 +22,7 @@ import app.main as main_module
 import app.services.auto_sync_service as auto_sync_service_module
 import app.services.job_service as job_service_module
 from app.config import get_settings
-from app.database import Base, get_db
+from app.database import Base, enable_sqlite_foreign_keys, get_db
 from app.main import app
 from app.services.seed_service import run_seeds
 
@@ -41,6 +41,7 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         f"sqlite+aiosqlite:///{db_path}",
         connect_args={"check_same_thread": False},
     )
+    enable_sqlite_foreign_keys(engine.sync_engine)
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     _patch_settings(

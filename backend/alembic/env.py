@@ -2,8 +2,8 @@
 
 import asyncio
 import sys
-from pathlib import Path
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy import pool
@@ -12,11 +12,10 @@ from sqlalchemy.ext.asyncio import create_async_engine
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.config import get_settings
-from app.database import Base
-
 # Import all models so metadata is populated
 import app.models  # noqa: F401
+from app.config import get_settings
+from app.database import Base, normalize_async_database_url
 
 config = context.config
 if config.config_file_name is not None:
@@ -29,11 +28,7 @@ settings = get_settings()
 
 def _get_url() -> str:
     """Get the database URL, ensuring it uses the async driver."""
-    url = settings.DATABASE_URL
-    # Ensure we have the async driver for online migrations
-    if url.startswith("sqlite:///") and "+aiosqlite" not in url:
-        url = url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
-    return url
+    return normalize_async_database_url(settings.DATABASE_URL)
 
 
 def run_migrations_offline() -> None:

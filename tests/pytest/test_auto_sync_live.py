@@ -72,11 +72,12 @@ async def test_sync_event_manager_broadcasts_only_to_target_user():
 
 
 async def test_auto_sync_scheduler_does_not_overlap_running_account(
-    test_session_factory, monkeypatch
+    client, test_session_factory, monkeypatch
 ):
+    user = await create_user(client, "autosync-overlap")
     async with test_session_factory() as db:
         account = GmailAccount(
-            user_id="user-1",
+            user_id=user["id"],
             google_account_id="gmail-test",
             access_token_ref="token",
             refresh_token_ref="refresh",
@@ -105,10 +106,13 @@ async def test_auto_sync_scheduler_does_not_overlap_running_account(
     assert scheduled == []
 
 
-async def test_auto_sync_scheduler_respects_error_cooldown(test_session_factory, monkeypatch):
+async def test_auto_sync_scheduler_respects_error_cooldown(
+    client, test_session_factory, monkeypatch
+):
+    user = await create_user(client, "autosync-cooldown")
     async with test_session_factory() as db:
         account = GmailAccount(
-            user_id="user-1",
+            user_id=user["id"],
             google_account_id="gmail-test",
             access_token_ref="token",
             refresh_token_ref="refresh",

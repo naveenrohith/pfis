@@ -9,7 +9,9 @@ Set:
 - `ENVIRONMENT=production`
 - `AUTH_REQUIRED=true`
 - `SECRET_KEY` to a unique high-entropy value
-- `DATABASE_URL` to a non-SQLite database
+- `DATABASE_URL` to PostgreSQL, preferably with an explicit
+  `postgresql+asyncpg://` URL (plain `postgres://` and `postgresql://` deployment
+  URLs are normalized to the async driver)
 - `CORS_ORIGINS` to explicit trusted origins
 - `SESSION_COOKIE_NAME=__Host-pfis_session`
 - `SESSION_COOKIE_SECURE=true`
@@ -37,6 +39,8 @@ authentication or availability fallback.
 - Use Alembic migrations under `backend/alembic/versions` as the schema path.
 - Do not rely on `Base.metadata.create_all` outside local/demo mode.
 - Run `tests/pytest/test_migration_discipline.py` after model or migration changes.
+- Keep the PostgreSQL migration/runtime CI job green; SQLite remains a local
+  convenience and is not sufficient database validation for a release.
 - Take a database backup before applying migrations to shared environments.
 - Migration 009 safely removes an empty `_alembic_tmp_transactions` table left by an interrupted
   local SQLite batch migration, but refuses to remove it when it contains rows. Backfill inserts

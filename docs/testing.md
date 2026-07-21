@@ -28,6 +28,11 @@ Run targeted suites:
 .\.venv\Scripts\python.exe -m pytest tests/pytest/test_reports.py
 ```
 
+The CI database gate starts PostgreSQL 17, applies every Alembic migration, and
+runs `tests/pytest/test_postgres_runtime.py`. Local SQLite tests enable
+`PRAGMA foreign_keys=ON` so invalid ownership references fail during development
+instead of appearing only after deployment.
+
 In the managed Windows environment, set the test temp directory to a writable
 path if the default user temp directory is blocked:
 

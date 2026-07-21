@@ -92,10 +92,54 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
+  postgres:
+    name: PostgreSQL migration & runtime
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: pfis_test
+          POSTGRES_USER: pfis
+          POSTGRES_PASSWORD: pfis_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pfis -d pfis_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@localhost:5432/pfis_test
+      POSTGRES_TEST_DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@localhost:5432/pfis_test
+      SECRET_KEY: ci-postgres-secret-key-not-used-outside-tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements-dev.txt
+
+      - name: Apply all migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Verify PostgreSQL runtime contract
+        run: pytest tests/pytest/test_postgres_runtime.py
+
   e2e:
     name: Browser regression
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, postgres]
 
     steps:
       - name: Checkout
