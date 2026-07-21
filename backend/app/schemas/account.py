@@ -1,6 +1,7 @@
 """Account, balance, net-worth, and transfer API contracts."""
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -40,7 +41,7 @@ class FinancialAccountResponse(BaseModel):
 
 
 class BalanceSnapshotCreate(BaseModel):
-    amount: float = Field(..., ge=0)
+    amount: Decimal = Field(..., ge=0, max_digits=18, decimal_places=2)
     currency: str | None = Field(None, min_length=3, max_length=3)
     as_of: date
 
@@ -74,7 +75,7 @@ class NetWorthSeries(BaseModel):
 class TransferCreate(BaseModel):
     from_account_id: str
     to_account_id: str
-    amount: float = Field(..., gt=0)
+    amount: Decimal = Field(..., gt=0, max_digits=18, decimal_places=2)
     currency: str = Field(default="INR", min_length=3, max_length=3)
     transaction_date: date
     description: str | None = Field(None, max_length=160)

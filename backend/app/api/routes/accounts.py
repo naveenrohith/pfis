@@ -56,7 +56,10 @@ async def update_account(
     db: AsyncSession = Depends(get_db),
 ):
     user_id = resolve_user_scope(user_id, current_user)
-    account = await AccountService(db).update_account(user_id, account_id, data)
+    try:
+        account = await AccountService(db).update_account(user_id, account_id, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
     return account

@@ -2,8 +2,19 @@
 
 import uuid
 from datetime import UTC, date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -14,7 +25,13 @@ class FinancialAccount(Base):
 
     __tablename__ = "financial_accounts"
     __table_args__ = (
-        UniqueConstraint("user_id", "masked_number", name="uq_financial_accounts_user_masked"),
+        UniqueConstraint(
+            "user_id",
+            "institution_name",
+            "account_type",
+            "masked_number",
+            name="uq_financial_accounts_user_identity",
+        ),
         Index("ix_financial_accounts_user_active", "user_id", "is_active"),
     )
 
@@ -51,6 +68,7 @@ class AccountBalanceSnapshot(Base):
 
     __tablename__ = "account_balance_snapshots"
     __table_args__ = (
+        CheckConstraint("amount >= 0", name="ck_account_balance_amount_nonnegative"),
         UniqueConstraint(
             "financial_account_id", "as_of", name="uq_account_balance_snapshots_account_as_of"
         ),
@@ -64,7 +82,7 @@ class AccountBalanceSnapshot(Base):
     financial_account_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("financial_accounts.id"), nullable=False, index=True
     )
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     as_of: Mapped[date] = mapped_column(Date, nullable=False)
     source: Mapped[str] = mapped_column(String(24), nullable=False, default="manual")

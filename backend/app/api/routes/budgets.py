@@ -7,6 +7,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import extract, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -34,6 +35,9 @@ async def create_budget(
 ):
     """Create a monthly budget for a category."""
     user_id = resolve_user_scope(user_id, current_user)
+    category = await db.scalar(select(Category.id).where(Category.id == data.category_id))
+    if category is None:
+        raise HTTPException(status_code=404, detail="Category not found")
     # Check if budget already exists for this user+category
     existing = await db.execute(
         select(Budget).where(
@@ -50,7 +54,13 @@ async def create_budget(
         monthly_limit=data.monthly_limit,
     )
     db.add(budget)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409, detail="Budget already exists for this category"
+        ) from exc
     await db.refresh(budget)
 
     logger.info(f"Budget created: category={data.category_id} limit=₹{data.monthly_limit}")
@@ -168,8 +178,9 @@ async def track_budgets(
     trackers = []
     for budget, cat_name, cat_icon in budgets:
         actual = spend_map.get(budget.category_id, 0)
-        remaining = budget.monthly_limit - actual
-        pct = (actual / budget.monthly_limit * 100) if budget.monthly_limit > 0 else 0
+        limit = float(budget.monthly_limit)
+        remaining = limit - actual
+        pct = (actual / limit * 100) if limit > 0 else 0
 
         if pct >= 100:
             status = "over"

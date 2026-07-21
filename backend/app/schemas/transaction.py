@@ -4,6 +4,7 @@ Request/response validation and serialization.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -32,7 +33,9 @@ class PaymentMethodEnum(str, Enum):
 class TransactionCreate(BaseModel):
     """Schema for creating a new transaction (manual or parsed)."""
 
-    amount: float = Field(..., gt=0, description="Transaction amount")
+    amount: Decimal = Field(
+        ..., gt=0, max_digits=18, decimal_places=2, description="Transaction amount"
+    )
     currency: str = Field(default="INR", max_length=3)
     transaction_type: TransactionTypeEnum
     payment_method: PaymentMethodEnum = PaymentMethodEnum.OTHER
@@ -62,7 +65,7 @@ class TransactionUpdate(BaseModel):
     transaction_type: TransactionTypeEnum | None = None
     payment_method: PaymentMethodEnum | None = None
     transaction_status: str | None = None
-    amount: float | None = Field(None, gt=0)
+    amount: Decimal | None = Field(None, gt=0, max_digits=18, decimal_places=2)
     reviewed_flag: bool | None = None
 
 

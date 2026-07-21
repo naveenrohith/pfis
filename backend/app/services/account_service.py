@@ -2,8 +2,10 @@
 
 import uuid
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import AccountBalanceSnapshot, FinancialAccount
@@ -40,14 +42,20 @@ class AccountService:
         existing = await self.db.execute(
             select(FinancialAccount).where(
                 FinancialAccount.user_id == user_id,
+                FinancialAccount.institution_name == data.institution_name,
+                FinancialAccount.account_type == data.account_type,
                 FinancialAccount.masked_number == data.masked_number,
             )
         )
         if existing.scalar_one_or_none():
-            raise ValueError("An account with this masked number already exists")
+            raise ValueError("This institution account already exists")
         account = FinancialAccount(user_id=user_id, **data.model_dump())
         self.db.add(account)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise ValueError("This institution account already exists") from exc
         await self.db.refresh(account)
         return await self._account_response(account)
 
@@ -57,9 +65,30 @@ class AccountService:
         account = await self._owned_account(user_id, account_id)
         if account is None:
             return None
-        for field, value in data.model_dump(exclude_unset=True).items():
+        updates = data.model_dump(exclude_unset=True)
+        identity = {
+            "institution_name": updates.get("institution_name", account.institution_name),
+            "account_type": updates.get("account_type", account.account_type),
+            "masked_number": updates.get("masked_number", account.masked_number),
+        }
+        duplicate = await self.db.scalar(
+            select(FinancialAccount.id).where(
+                FinancialAccount.user_id == user_id,
+                FinancialAccount.institution_name == identity["institution_name"],
+                FinancialAccount.account_type == identity["account_type"],
+                FinancialAccount.masked_number == identity["masked_number"],
+                FinancialAccount.id != account_id,
+            )
+        )
+        if duplicate is not None:
+            raise ValueError("This institution account already exists")
+        for field, value in updates.items():
             setattr(account, field, value)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise ValueError("This institution account already exists") from exc
         await self.db.refresh(account)
         return await self._account_response(account)
 
@@ -86,7 +115,11 @@ class AccountService:
             source="manual",
         )
         self.db.add(snapshot)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise ValueError("A balance snapshot already exists for this account and date") from exc
         await self.db.refresh(snapshot)
         return BalanceSnapshotResponse.model_validate(snapshot, from_attributes=True)
 
@@ -110,7 +143,7 @@ class AccountService:
         ]
         kinds = {account.id: account.balance_kind for account in accounts}
         currency = accounts[0].currency
-        running: dict[str, float] = {}
+        running: dict[str, Decimal] = {}
         points: list[NetWorthPoint] = []
         by_date: dict[date, list[AccountBalanceSnapshot]] = {}
         for snapshot in snapshots:

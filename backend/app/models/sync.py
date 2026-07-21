@@ -10,8 +10,22 @@ Operational models added from architect review:
 import enum
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -61,6 +75,10 @@ class Budget(Base):
     """Monthly spending limits per category."""
 
     __tablename__ = "budgets"
+    __table_args__ = (
+        CheckConstraint("monthly_limit > 0", name="ck_budgets_monthly_limit_positive"),
+        UniqueConstraint("user_id", "category_id", name="uq_budgets_user_category"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
@@ -69,7 +87,7 @@ class Budget(Base):
     category_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("categories.id"), nullable=False
     )
-    monthly_limit: Mapped[float] = mapped_column(Float, nullable=False)
+    monthly_limit: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
 
     # Relationships
     user = relationship("User", back_populates="budgets")
@@ -194,6 +212,7 @@ class Goal(Base):
     """User-defined financial goal tracked against monthly aggregates."""
 
     __tablename__ = "goals"
+    __table_args__ = (CheckConstraint("target_amount > 0", name="ck_goals_target_amount_positive"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
@@ -201,7 +220,7 @@ class Goal(Base):
     )
     goal_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     label: Mapped[str] = mapped_column(String(160), nullable=False)
-    target_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    target_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     target_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
     target_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_year: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -52,6 +52,13 @@ sessions, and hardens OAuth transactions with browser binding, PKCE, and nonce
 references. Google identity and Gmail connector authorization remain separate
 records and separate consent flows.
 
+Migration `015_financial_integrity` moves ledger amounts, balances, budgets, and
+goal targets to `NUMERIC(18,2)`, rejects invalid monetary values, enforces one
+budget per user/category and one Gmail connection per user/account, and keys
+financial-account identity by user, institution, account type, and masked number.
+The migration refuses to guess when legacy duplicates or invalid amounts exist;
+operators must reconcile those rows before retrying.
+
 An atomic transfer creates debit and credit transactions with one
 `transfer_group_id`. Both rows have `is_transfer=true`, remain auditable in the
 transaction ledger, and are excluded from income/spend aggregates.
@@ -76,6 +83,8 @@ users' records. The indexes are managed by Alembic migration
 - Raw session and CSRF tokens must never be stored; persist hashes only. OAuth tokens and transient OAuth secrets must be encrypted before storage.
 - Raw emails are retained to support reprocessing.
 - Transaction `fingerprint` protects deduplication.
+- Monetary API inputs accept at most two decimal places and monetary persistence
+  uses fixed-scale decimal columns rather than binary floating point.
 - Transfer legs must be created together and excluded from financial aggregates.
 - Dashboard preferences, recommendation state, accounts, and balances are always user scoped.
 - Parser changes must preserve `parser_version` traceability.

@@ -7,8 +7,21 @@ Includes confidence scoring, parser versioning, and dedup fingerprint.
 import enum
 import uuid
 from datetime import UTC, date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -34,6 +47,7 @@ class PaymentMethod(str, enum.Enum):
 class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_transactions_amount_positive"),
         Index("ix_txn_user_date", "user_id", "transaction_date"),
         Index("ix_txn_user_month_category", "user_id", "transaction_type", "category_id"),
         Index("ix_txn_user_review", "user_id", "reviewed_flag"),
@@ -43,7 +57,7 @@ class Transaction(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="INR")
     transaction_type: Mapped[TransactionType] = mapped_column(Enum(TransactionType), nullable=False)
     payment_method: Mapped[PaymentMethod] = mapped_column(

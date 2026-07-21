@@ -8,13 +8,16 @@ import hashlib
 import json
 import logging
 from datetime import UTC, date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import asc, delete, desc, extract, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.account import FinancialAccount
 from app.models.category import Category, UserMerchantRule
+from app.models.email import RawEmail
 from app.models.summary import MonthlySummary
 from app.models.sync import UserCorrection
 from app.models.transaction import Transaction, TransactionType
@@ -22,6 +25,7 @@ from app.schemas.transaction import TransactionCreate, TransactionUpdate
 
 logger = logging.getLogger(__name__)
 AUTO_REVIEW_THRESHOLD = 0.85
+MONEY_QUANTUM = Decimal("0.01")
 
 
 class DuplicateTransactionError(ValueError):
@@ -44,7 +48,7 @@ class TransactionService:
     @staticmethod
     def compute_fingerprint(
         user_id: str,
-        amount: float,
+        amount: Decimal | float,
         transaction_date: date,
         merchant: str | None,
         reference_id: str | None,
@@ -54,10 +58,11 @@ class TransactionService:
         Compute SHA-256 fingerprint for deduplication.
         Uses: user + amount + date + merchant + ref_id + account
         """
+        canonical_amount = Decimal(str(amount)).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
         raw = "|".join(
             [
                 user_id,
-                str(amount),
+                format(canonical_amount, "f"),
                 str(transaction_date),
                 (merchant or "unknown").lower().strip(),
                 reference_id or "",
@@ -191,6 +196,22 @@ class TransactionService:
     async def create_transaction(self, user_id: str, data: TransactionCreate) -> Transaction:
         """Create a new transaction with dedup fingerprint."""
 
+        if data.category_id is not None:
+            category = await self.db.scalar(
+                select(Category.id).where(Category.id == data.category_id)
+            )
+            if category is None:
+                raise ValueError("Category not found")
+        if data.source_email_id is not None:
+            source_email = await self.db.scalar(
+                select(RawEmail.id).where(
+                    RawEmail.id == data.source_email_id,
+                    RawEmail.user_id == user_id,
+                )
+            )
+            if source_email is None:
+                raise ValueError("Source email not found")
+
         fingerprint = self.compute_fingerprint(
             user_id=user_id,
             amount=data.amount,
@@ -223,6 +244,8 @@ class TransactionService:
             account_result = await self.db.execute(
                 select(FinancialAccount).where(
                     FinancialAccount.user_id == user_id,
+                    FinancialAccount.institution_name == "Unknown",
+                    FinancialAccount.account_type == "unknown",
                     FinancialAccount.masked_number == masked_number,
                 )
             )
@@ -270,7 +293,16 @@ class TransactionService:
 
         self.db.add(txn)
         await self._invalidate_monthly_summary(user_id, data.transaction_date)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            duplicate = await self.db.scalar(
+                select(Transaction.id).where(Transaction.fingerprint == fingerprint)
+            )
+            if duplicate is not None:
+                raise DuplicateTransactionError("Duplicate transaction detected") from exc
+            raise ValueError("Transaction conflicts with a database integrity rule") from exc
         await self.db.refresh(txn)
 
         logger.info(
@@ -360,6 +392,12 @@ class TransactionService:
         if not update_data:
             return txn
 
+        category_id = update_data.get("category_id")
+        if category_id is not None:
+            category = await self.db.scalar(select(Category.id).where(Category.id == category_id))
+            if category is None:
+                raise ValueError("Category not found")
+
         changed_fields: dict[str, tuple[object, object]] = {}
         now = datetime.now(UTC)
         for field, value in update_data.items():
@@ -436,9 +474,10 @@ class TransactionService:
         normalized_name = normalized_name.strip()
         if not normalized_name:
             raise ValueError("Normalized merchant name is required")
-        if rule_category_id is not None:
+        category_ids = {value for value in (category_id, rule_category_id) if value is not None}
+        for candidate_category_id in category_ids:
             category_result = await self.db.execute(
-                select(Category.id).where(Category.id == rule_category_id)
+                select(Category.id).where(Category.id == candidate_category_id)
             )
             if category_result.scalar_one_or_none() is None:
                 raise ValueError("Category not found")

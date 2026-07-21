@@ -629,22 +629,19 @@ class IntelligenceService:
 
     async def _goal_response(self, goal: Goal, user_id: str, month: int, year: int) -> GoalResponse:
         current = await self._goal_current_amount(goal, user_id, month, year)
+        target_amount = float(goal.target_amount)
         if goal.goal_type == "savings":
-            progress = current / goal.target_amount * 100 if goal.target_amount > 0 else 0.0
-            status = "achieved" if current >= goal.target_amount else "tracking"
+            progress = current / target_amount * 100 if target_amount > 0 else 0.0
+            status = "achieved" if current >= target_amount else "tracking"
         else:
-            progress = (
-                (goal.target_amount - current) / goal.target_amount * 100
-                if goal.target_amount > 0
-                else 0.0
-            )
-            status = "at_risk" if current > goal.target_amount else "tracking"
+            progress = (target_amount - current) / target_amount * 100 if target_amount > 0 else 0.0
+            status = "at_risk" if current > target_amount else "tracking"
         return GoalResponse(
             id=goal.id,
             user_id=goal.user_id,
             goal_type=goal.goal_type,
             label=goal.label,
-            target_amount=goal.target_amount,
+            target_amount=target_amount,
             target_key=goal.target_key,
             target_month=goal.target_month,
             target_year=goal.target_year,
@@ -921,11 +918,8 @@ class IntelligenceService:
             return None
         scores = []
         for budget in budgets:
-            usage = (
-                category_spend.get(budget.category_id, 0.0) / budget.monthly_limit
-                if budget.monthly_limit > 0
-                else 0
-            )
+            limit = float(budget.monthly_limit)
+            usage = category_spend.get(budget.category_id, 0.0) / limit if limit > 0 else 0
             scores.append(max(0.0, 100.0 - max(0.0, usage - 1.0) * 100.0))
         return sum(scores) / len(scores)
 

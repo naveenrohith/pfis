@@ -22,6 +22,15 @@ def test_alembic_revision_ids_fit_portable_version_column():
     assert all(len(revision.revision) <= 32 for revision in scripts.walk_revisions())
 
 
+def test_migrations_use_portable_boolean_server_defaults():
+    """PostgreSQL rejects integer defaults on BOOLEAN columns."""
+    migration_dir = ROOT / "backend" / "alembic" / "versions"
+    source = "\n".join(path.read_text(encoding="utf-8") for path in migration_dir.glob("*.py"))
+
+    assert 'server_default=sa.text("1")' not in source
+    assert 'server_default=sa.text("0")' not in source
+
+
 def test_alembic_baseline_matches_orm_table_columns(tmp_path, monkeypatch):
     """Alembic-created schema must match the ORM table/column contract.
 
@@ -58,6 +67,13 @@ def test_alembic_baseline_matches_orm_table_columns(tmp_path, monkeypatch):
             merchant_rule_index_names = {
                 index["name"] for index in inspector.get_indexes("user_merchant_rules")
             }
+            budget_unique_names = {
+                constraint["name"] for constraint in inspector.get_unique_constraints("budgets")
+            }
+            gmail_unique_names = {
+                constraint["name"]
+                for constraint in inspector.get_unique_constraints("gmail_accounts")
+            }
         finally:
             engine.dispose()
     finally:
@@ -74,6 +90,11 @@ def test_alembic_baseline_matches_orm_table_columns(tmp_path, monkeypatch):
         "ix_user_merchant_rules_user_id",
         "ix_user_merchant_rules_user_name",
     } <= merchant_rule_index_names
+    assert "uq_budgets_user_category" in budget_unique_names
+    assert {
+        "uq_gmail_accounts_user",
+        "uq_gmail_accounts_google_account",
+    } <= gmail_unique_names
 
 
 def test_merchant_migration_repairs_local_create_all_partial_schema(tmp_path, monkeypatch):
@@ -123,7 +144,7 @@ def test_merchant_migration_repairs_local_create_all_partial_schema(tmp_path, mo
     finally:
         get_settings.cache_clear()
 
-    assert revision == "014_auth_sessions"
+    assert revision == "015_financial_integrity"
     assert {
         "merchant_resolution_source",
         "merchant_resolution_confidence",
@@ -170,6 +191,21 @@ def test_payment_method_orm_type_matches_portable_migration_contract():
 
     assert payment_method_type.native_enum is False
     assert payment_method_type.length == 20
+
+
+def test_money_columns_use_fixed_scale_numeric_storage():
+    """Ledger values must never use binary floating-point persistence."""
+    expected = {
+        ("transactions", "amount"),
+        ("budgets", "monthly_limit"),
+        ("account_balance_snapshots", "amount"),
+        ("goals", "target_amount"),
+    }
+
+    for table_name, column_name in expected:
+        column_type = Base.metadata.tables[table_name].c[column_name].type
+        assert column_type.precision == 18
+        assert column_type.scale == 2
 
 
 def test_financial_account_backfill_supports_existing_non_null_created_at(tmp_path, monkeypatch):

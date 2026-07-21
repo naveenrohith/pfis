@@ -45,6 +45,9 @@ authentication or availability fallback.
 - Migration 009 safely removes an empty `_alembic_tmp_transactions` table left by an interrupted
   local SQLite batch migration, but refuses to remove it when it contains rows. Backfill inserts
   always populate `financial_accounts.created_at` for compatibility with ORM-initialized databases.
+- Migration 015 intentionally stops if it finds duplicate budgets, duplicate
+  Gmail ownership, or invalid monetary values. Reconcile those records from a
+  backup-reviewed copy before retrying; the migration never deletes financial data.
 
 ## Backup And Restore
 

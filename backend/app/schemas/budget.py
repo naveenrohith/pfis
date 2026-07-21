@@ -1,15 +1,17 @@
 """Budget schemas — Pydantic models for budget CRUD and tracking."""
 
+from decimal import Decimal
+
 from pydantic import BaseModel, Field
 
 
 class BudgetCreate(BaseModel):
     category_id: str
-    monthly_limit: float = Field(..., gt=0)
+    monthly_limit: Decimal = Field(..., gt=0, max_digits=18, decimal_places=2)
 
 
 class BudgetUpdate(BaseModel):
-    monthly_limit: float = Field(..., gt=0)
+    monthly_limit: Decimal = Field(..., gt=0, max_digits=18, decimal_places=2)
 
 
 class BudgetResponse(BaseModel):

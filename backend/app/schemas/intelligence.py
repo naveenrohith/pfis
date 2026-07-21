@@ -1,6 +1,7 @@
 """Schemas for merchant, category, analytics, goals, and explanations."""
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
@@ -182,7 +183,7 @@ class FinancialHealthScore(BaseModel):
 class GoalCreate(BaseModel):
     goal_type: GoalType
     label: str = Field(..., min_length=1, max_length=160)
-    target_amount: float = Field(..., gt=0)
+    target_amount: Decimal = Field(..., gt=0, max_digits=18, decimal_places=2)
     target_key: str | None = Field(None, max_length=160)
     target_month: int | None = Field(None, ge=1, le=12)
     target_year: int | None = Field(None, ge=2020, le=2030)
@@ -190,7 +191,7 @@ class GoalCreate(BaseModel):
 
 class GoalUpdate(BaseModel):
     label: str | None = Field(None, min_length=1, max_length=160)
-    target_amount: float | None = Field(None, gt=0)
+    target_amount: Decimal | None = Field(None, gt=0, max_digits=18, decimal_places=2)
     target_key: str | None = Field(None, max_length=160)
     target_month: int | None = Field(None, ge=1, le=12)
     target_year: int | None = Field(None, ge=2020, le=2030)

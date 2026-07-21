@@ -26,7 +26,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("currency", sa.String(3), server_default="INR"),
         sa.Column("password_hash", sa.String(255), nullable=True),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
     )
 
@@ -58,7 +58,7 @@ def upgrade() -> None:
         sa.Column("body", sa.Text(), nullable=True),
         sa.Column("sender", sa.String(255), nullable=True, index=True),
         sa.Column("received_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("processed_flag", sa.Boolean(), server_default=sa.text("0")),
+        sa.Column("processed_flag", sa.Boolean(), server_default=sa.false()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
     )
 
@@ -88,7 +88,13 @@ def upgrade() -> None:
         sa.Column("account_last4", sa.String(4), nullable=True),
         sa.Column("reference_id", sa.String(100), nullable=True),
         sa.Column("confidence_score", sa.Float(), server_default="0.0"),
-        sa.Column("reviewed_flag", sa.Boolean(), nullable=False, server_default=sa.text("0"), index=True),
+        sa.Column(
+            "reviewed_flag",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.false(),
+            index=True,
+        ),
         sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("parser_version", sa.Integer(), server_default="1"),
         sa.Column("fingerprint", sa.String(64), unique=True, nullable=True, index=True),
@@ -142,7 +148,7 @@ def upgrade() -> None:
         sa.Column("parser_version", sa.Integer(), server_default="1"),
         sa.Column("retry_count", sa.Integer(), server_default="0"),
         sa.Column("last_retry_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("resolved", sa.Boolean(), server_default=sa.text("0")),
+        sa.Column("resolved", sa.Boolean(), server_default=sa.false()),
     )
 
     # --- background_jobs ---

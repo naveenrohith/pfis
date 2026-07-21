@@ -230,7 +230,8 @@ class WorkspaceService:
         out: list[dict] = []
         for budget, cat_name in budgets:
             actual = spend_map.get(budget.category_id, 0.0)
-            pct = (actual / budget.monthly_limit * 100) if budget.monthly_limit > 0 else 0.0
+            limit = float(budget.monthly_limit)
+            pct = (actual / limit * 100) if limit > 0 else 0.0
             if pct >= 100:
                 status = "over"
             elif pct >= 80:
