@@ -2,16 +2,24 @@
 
 ## Executive Summary
 
-PFIS is not production-ready yet, and the repository is honest about that. It is a strong structured MVP with good architecture, documentation, and tests. The path to production is achievable, but it requires deliberate work on production configuration, durable jobs, database operations, monitoring, backup/restore, frontend direction, and parser quality controls.
+PFIS has moved beyond its structured-MVP baseline and now has a production-candidate
+application foundation. Application-level controls cover production configuration,
+durable jobs, database migrations, authentication, connector ownership, regression
+testing, and operational health. A real deployment is not ready for go-live until
+its managed database, backup/restore drill, TLS/network controls, monitoring, and
+alert routing are provisioned and verified.
 
 ## Evidence Base
 
-- `README.md` states the current target is local/single-user use and that production hardening is out of scope for now.
-- `backend/app/config.py` allows local defaults such as SQLite and a development secret.
-- `backend/app/security.py` provides auth and encryption primitives, but production use still depends on configuration.
-- `backend/app/services/job_service.py` uses in-process task scheduling.
-- `backend/app/observability.py` provides request-id logging but not metrics.
-- `.github/workflows/ci.yml` provides a strong CI baseline.
+- `backend/app/config.py` preserves local defaults but rejects them in production.
+- `backend/app/security.py` provides revocable authentication, CSRF protection,
+  password hashing, and token encryption primitives.
+- `backend/app/services/job_service.py` persists leased jobs with bounded retries,
+  idempotency, and restart recovery.
+- `backend/app/observability.py` and health routes expose request ids, timing,
+  readiness, and operational counters.
+- `.github/workflows/ci.yml` gates formatting, lint, typing, dependency audit,
+  PostgreSQL integration, browser regression, and branch-aware coverage.
 - `docs/` provides source-of-truth documentation.
 
 ## Scorecard
@@ -20,46 +28,44 @@ PFIS is not production-ready yet, and the repository is honest about that. It is
 | --- | ---: | --- |
 | Architecture | 8 | Clear layering and service separation, with pipeline growth risk |
 | Maintainability | 8 | Good docs and module structure; some dense orchestration remains |
-| Scalability | 6 | Good async foundation; SQLite default and in-process jobs limit scale |
+| Scalability | 7 | Async services, PostgreSQL support, and atomic job claims support scale-out; load limits still need deployment-specific measurement |
 | Performance | 6 | Adequate for local use; needs measurement and batch tuning |
-| Reliability | 5 | Parse failures and job status exist; durable execution is missing |
-| Security | 6 | Auth, encryption, and ownership helpers exist; production config must fail closed |
-| Observability | 5 | Request ids and records exist; metrics and dashboards are missing |
-| Testing | 7 | Useful pytest suite and CI; needs broader fixtures and stricter typing over time |
+| Reliability | 8 | Durable leased jobs, bounded retries, restart recovery, and atomic parser/source persistence are implemented |
+| Security | 8 | Fail-closed production config, revocable sessions, CSRF, encrypted OAuth credentials, and service-level connector ownership are implemented |
+| Observability | 7 | Request ids, server timing, readiness, operational counters, and sanitized failure categories are implemented; hosted dashboards remain deployment-owned |
+| Testing | 9 | PostgreSQL, browser, responsive, accessibility, typing, dependency audit, and branch-aware coverage gates run in CI/local regression |
 | Documentation | 8 | Strong source-of-truth docs and now audit docs |
 | Developer experience | 8 | Clear commands, Makefile, CI, docs, tests |
 | Technical debt | 7 | Debt is identifiable and manageable |
-| Deployment readiness | 4 | Local/single-user profile is clear; production profile is not complete |
-| Overall readiness | 6 | Structured MVP, not production candidate |
+| Deployment readiness | 7 | Production profile and runbook are complete; provider backups, alert routing, and infrastructure remain deployment-owned |
+| Overall readiness | 8 | Production-candidate application baseline; environment operations are still required before go-live |
 
 ## Critical Production Gaps
 
-> Status verified 2026-06-30. Resolved gaps are marked; remaining gaps keep their
+> Status verified 2026-07-21. Resolved gaps are marked; remaining gaps keep their
 > original recommendation.
 
 | Gap | Severity | Status | Recommendation |
 | --- | --- | --- | --- |
 | Production configuration validation | High | Resolved | Fails closed on default secret, SQLite, non-local CORS, and auth mode |
-| Durable background processing | High | Open | Replace or supplement in-process jobs for hosted use |
+| Durable background processing | High | Resolved | Database leases, retries, idempotency, recovery, and multi-replica atomic claims are implemented |
 | Database operations | High | Partial | Alembic + parity test + prod skips `create_all`; backups/restore still needed |
 | Observability metrics | Medium | Partial | Request ids, `/health/ops`, and fallback metric exist; full metrics dashboard pending |
 | Parser quality controls | Medium | Partial | Fallback tracking added; expand fixtures and review queue |
-| Frontend migration decision | Medium | Open | Choose static dashboard or Svelte as canonical |
+| Frontend migration decision | Medium | Resolved | React/Vite is canonical and production fails closed without its build |
 
 
 ## Production Readiness Criteria
 
-PFIS should not be considered production-ready until:
+The application baseline is complete. A deployment should not be considered
+production-ready until all environment-owned criteria are verified:
 
-- Production startup fails if secrets are default.
-- Production uses a managed or server-grade database.
-- Alembic migrations are the schema path.
-- Background jobs survive process restarts.
-- Backups and restore are documented and tested.
-- Parser regressions are fixture-protected.
-- Auth-required mode is tested and enabled for hosted use.
-- Monitoring covers sync failures, parse failures, job failures, API errors, and latency.
-- A deployment runbook exists.
+- Production uses a managed or server-grade database and applies Alembic migrations.
+- Backup retention is configured and a restore drill has succeeded.
+- Auth-required mode is enabled with deployment-owned secrets and OAuth credentials.
+- Monitoring and alerting cover sync, parse, job, API, capacity, and latency failures.
+- TLS termination, network policy, scaling limits, and incident ownership are assigned.
+- The deployment runbook and rollback procedure are exercised in the target environment.
 
 ## Strengths to Preserve
 
@@ -74,31 +80,32 @@ PFIS should not be considered production-ready until:
 
 | Risk | Severity | Impact | Recommendation |
 | --- | --- | --- | --- |
-| Hosted use with local defaults | Critical | Security and data reliability | Add production config validation |
-| Process restart during job | High | Lost or stuck work | Add durable job execution |
-| Missing restore drill | High | Data recovery risk | Document and test backup/restore |
+| Misconfigured production environment | Critical | Security and data reliability | Keep fail-closed startup checks in deployment smoke tests |
+| Unverified restore procedure | High | Data recovery risk | Run and record recurring restore drills |
 | Limited metrics | Medium | Slow incident diagnosis | Add sync, parser, job, and API metrics |
 | Parser quality drift | Medium | Incorrect transaction data | Expand parser fixtures and fallback tracking |
 
 ## Recommended Next Actions
 
-1. Complete Phase 0 and Phase 1 of the modernization roadmap.
-2. Add production configuration validation.
-3. Decide the canonical frontend path.
-4. Extract report rendering from route code.
-5. Add operational metrics and production runbook.
+1. Select the managed PostgreSQL provider and provision encrypted backups.
+2. Run and record a point-in-time restore drill.
+3. Connect operational health and structured logs to hosted dashboards and alerts.
+4. Execute load, soak, failure-recovery, and rollback tests in staging.
+5. Complete the release checklist with named incident and data-recovery owners.
 
 ## Validation Strategy
 
 - Run full CI.
 - Run production configuration smoke tests.
 - Run parser regression suite.
-- Run restore drill once backup procedure exists.
-- Run restart test for background jobs after durable worker implementation.
+- Run a restore drill against the selected production database provider.
+- Repeat restart, lease-expiry, multi-worker, load, and soak tests in staging.
 
 ## Migration Guidance
 
-Move from structured MVP to production candidate by separating local/demo behavior from production behavior first. Production controls should be added behind explicit settings and deployment documentation, not by weakening the local developer experience.
+Deploy the production-candidate application through an explicit production profile.
+Keep provider-specific infrastructure and secrets outside the repository while
+retaining the repository's fail-closed validation and documented local profile.
 
 ## Rollback Strategy
 

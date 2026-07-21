@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.models.email import GmailAccount
-from app.models.sync import ConnectorAuditEvent
+from app.models.sync import ConnectorAuditEvent, SyncRun, SyncStatus
 from app.services.classification import ClassificationType, classify_source_record
 from app.services.connectors.base import ConnectorBatch, ConnectorCursor, ConnectorErrorType
 from app.services.connectors.errors import classify_connector_exception
@@ -136,3 +136,42 @@ def test_connector_error_classifier_marks_dns_failures_transient():
         classify_connector_exception(Exception("Unable to find the server at gmail.googleapis.com"))
         == ConnectorErrorType.TRANSIENT
     )
+
+
+async def test_ingestion_rejects_another_users_gmail_account(client, test_session_factory):
+    owner = await create_user(client, "gmail-owner")
+    other = await create_user(client, "gmail-other")
+    async with test_session_factory() as db:
+        account = GmailAccount(
+            user_id=owner["id"],
+            google_account_id="owned-gmail-account",
+            access_token_ref="encrypted-access",
+            refresh_token_ref="encrypted-refresh",
+        )
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
+        account_id = account.id
+
+    async with test_session_factory() as db:
+        try:
+            await IngestionCoordinator(db).run_gmail(
+                other["id"], account_id, IngestionMode.BACKFILL
+            )
+        except LookupError as exc:
+            assert str(exc) == "Gmail account not found"
+        else:
+            raise AssertionError("Cross-user Gmail account access was not rejected")
+
+        sync_run = await db.scalar(select(SyncRun).where(SyncRun.user_id == other["id"]))
+        audits = list(
+            await db.scalars(
+                select(ConnectorAuditEvent).where(ConnectorAuditEvent.user_id == other["id"])
+            )
+        )
+
+    assert sync_run is not None
+    assert sync_run.status == SyncStatus.FAILED
+    assert "owned-gmail-account" not in sync_run.errors
+    assert all(audit.connector_account_id is None for audit in audits)
+    assert all(audit.event_type != "sync_started" for audit in audits)

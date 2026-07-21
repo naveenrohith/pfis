@@ -22,6 +22,11 @@ Mypy checks all 98 backend modules in CI, including bodies of functions without
 fully annotated signatures. New typing errors and unused suppressions fail the
 build.
 
+The full backend suite measures statement and branch coverage together and
+enforces a 70% minimum. This is a regression floor, not a target: new work must
+test its critical success, ownership, rollback, and failure paths rather than
+adding untested code until the repository falls back to the threshold.
+
 Audit pinned backend and frontend dependencies:
 
 ```powershell

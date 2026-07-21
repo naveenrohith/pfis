@@ -116,7 +116,7 @@ async def gmail_connect(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("Failed to start Gmail OAuth")
+        logger.error("Failed to start Gmail OAuth exception=%s", type(exc).__name__)
         raise HTTPException(
             status_code=500, detail="Gmail connection could not be started"
         ) from exc
@@ -227,7 +227,7 @@ async def gmail_callback(
         raise
     except Exception as exc:
         await db.rollback()
-        logger.exception("Gmail OAuth callback failed")
+        logger.error("Gmail OAuth callback failed exception=%s", type(exc).__name__)
         raise HTTPException(
             status_code=500, detail="Gmail connection could not be completed"
         ) from exc

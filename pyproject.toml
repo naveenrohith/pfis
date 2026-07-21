@@ -48,6 +48,7 @@ exclude = [
 
 [tool.coverage.run]
 source = ["backend/app"]
+branch = true
 omit = [
     "backend/app/static/*",
     "*/__init__.py",
@@ -56,3 +57,5 @@ omit = [
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+fail_under = 70
+precision = 2

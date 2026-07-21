@@ -249,6 +249,16 @@ def _job_error_result(error_type: str, message: str) -> str:
     return json.dumps({"error_type": error_type, "error_message": message})
 
 
+def public_job_error_message(error_type: str) -> str:
+    """Return a stable job error without exposing provider or payload details."""
+    return {
+        "missing_gmail_account": "No Gmail account connected for this user",
+        "validation_error": "Background job validation failed",
+        "credential_error": "Connector authorization failed",
+        "unexpected_error": "Background job failed unexpectedly",
+    }.get(error_type, "Background job failed")
+
+
 def _scoped_idempotency_key(
     user_id: str | None, job_type: str, idempotency_key: str | None
 ) -> str | None:
@@ -391,14 +401,20 @@ async def run_job(job_id: str) -> None:
             if job.user_id and job.job_type in {"gmail_sync_pipeline", "demo_sync_pipeline"}:
                 await sync_event_manager.broadcast(job.user_id, "sync_completed", result)
         except Exception as exc:
-            logger.exception("Background job %s failed", job_id)
             await db.rollback()
             job = await get_job(db, job_id)
             if job is None:
                 return
             error_type = classify_job_error(exc)
-            job.error_message = str(exc)
-            job.result_json = _job_error_result(error_type, str(exc))
+            public_error = public_job_error_message(error_type)
+            logger.warning(
+                "Background job failed job_id=%s error_type=%s exception=%s",
+                job_id,
+                error_type,
+                type(exc).__name__,
+            )
+            job.error_message = public_error
+            job.result_json = _job_error_result(error_type, public_error)
             job.lease_owner = None
             job.lease_expires_at = None
             if error_type == "unexpected_error" and job.attempt_count < job.max_attempts:
@@ -413,7 +429,9 @@ async def run_job(job_id: str) -> None:
                 job.finished_at = datetime.now(UTC)
             await db.commit()
             if job.user_id and job.job_type in {"gmail_sync_pipeline", "demo_sync_pipeline"}:
-                await sync_event_manager.broadcast(job.user_id, "sync_failed", {"error": str(exc)})
+                await sync_event_manager.broadcast(
+                    job.user_id, "sync_failed", {"error": public_error}
+                )
         finally:
             if "heartbeat" in locals():
                 heartbeat.cancel()

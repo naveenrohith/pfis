@@ -10,9 +10,11 @@ PLANNER -> CODE -> TEST -> QUALITY -> REVIEW -> FIX
 
 ## Current Phase
 
-Phase 10: Financial domain and read-performance foundation.
+Phase 11: Production regression and ingestion privacy.
 
-Status: implementation pass in progress. Phase 9 evolves the parser pipeline without replacing the existing parser registry or introducing external queue infrastructure. Phase 10 adds account identity and cached monthly aggregates without changing the local/demo operating model.
+Status: complete. Phase 11 enforces branch-aware coverage and closes connector
+ownership, atomic persistence, and exception-privacy gaps found by the production
+regression audit.
 
 Goal: keep modernization work phased, tested, and reversible while preserving the local/demo developer path.
 
@@ -35,8 +37,9 @@ Goal: keep modernization work phased, tested, and reversible while preserving th
 | 4 | Reliability and operations | Job error classification and operational health counters complete |
 | 5 | Production hardening | Production config validation and deployment runbook complete |
 | 6 | Connector platform expansion | SourceRecord contract complete |
-| 9 | Parser pipeline observability and replay | Active |
-| 10 | Financial accounts and cached monthly summaries | Active |
+| 9 | Parser pipeline observability and replay | Complete |
+| 10 | Financial accounts and cached monthly summaries | Complete |
+| 11 | Coverage enforcement and ingestion privacy | Complete |
 
 ## Phase 0 Scope
 
@@ -102,7 +105,8 @@ Remaining Phase 1 follow-up:
 - Job failure categories are persisted in job results.
 - Operational health exposes non-secret runtime posture and job status counters.
 - Real Gmail calls remain excluded from tests.
-- Durable queue/worker selection remains deferred until a deployment target is chosen.
+- Database-backed job leases, retries, idempotency, and restart recovery protect
+  hosted background work without requiring a separate broker.
 
 ## Phase 5 Acceptance Criteria
 
@@ -116,12 +120,11 @@ Remaining Phase 1 follow-up:
 - Gmail remains the first connector and current behavior remains unchanged.
 - Connector fixture tests protect the source-record contract.
 
-## Deferred Production Decisions
+## Deployment-Owned Decisions
 
-- Durable background worker or queue implementation.
-- Production database provider and backup tooling.
-- Svelte dashboard promotion and static dashboard retirement.
-- Hosted observability stack and alert routing.
+- Production database provider, backup schedule, and restore-drill ownership.
+- Hosted log/metrics platform and alert routing.
+- TLS termination, network policy, and infrastructure scaling policy.
 
 ## Phase 10 Acceptance Criteria
 
@@ -130,7 +133,18 @@ Remaining Phase 1 follow-up:
 - New transactions reuse the inferred financial account from their existing last-four metadata.
 - Monthly dashboard/report summaries persist after their first calculation and are invalidated by transaction mutations.
 - Dashboard feature sections load as users approach them, keeping the overview bundle small.
-- A durable queue remains deferred: cached aggregates and local background-job records are sufficient until a production deployment target is selected.
+- Cached aggregates and durable database-backed jobs remain compatible with the
+  local developer profile and a multi-replica PostgreSQL deployment.
+
+## Phase 11 Acceptance Criteria
+
+- Backend CI measures statement and branch coverage and rejects regressions below 70%.
+- Ingestion validates user and source ownership inside the service boundary.
+- A source record and its stored event are handled atomically per record.
+- Connector and job failures persist, audit, and broadcast stable public errors;
+  provider exception text is restricted to non-secret classifications.
+- Ownership, rollback, duplicate, and exception-privacy failure paths have
+  regression tests.
 
 ## Phase 9 Acceptance Criteria
 

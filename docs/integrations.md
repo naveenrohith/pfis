@@ -13,7 +13,8 @@ Gmail sync now runs through the connector-driven ingestion path:
 
 1. `GmailConnector` fetches backfill or incremental records from Gmail.
 2. The connector returns `SourceRecord` values plus cursor and metrics data.
-3. `IngestionCoordinator` persists eligible source records into `RawEmail`.
+3. `IngestionCoordinator` verifies connector ownership and persists each eligible
+   source record in an isolated savepoint before publishing its stored event.
 4. Domain events and WebSocket sync events expose progress to the dashboard.
 5. The parser pipeline remains the only owner of transaction extraction and storage.
 
@@ -32,7 +33,9 @@ subscription, loan, and ignore.
 
 Connector lifecycle and sync operations write non-secret audit events. These
 events record connect, token refresh, sync started, sync completed, and sync
-failed states without storing tokens or full source bodies.
+failed states without storing tokens, provider exception text, or full source
+bodies. Source ownership mismatches never associate an audit record with another
+user's connector.
 
 ## Database
 
@@ -40,7 +43,8 @@ Local development uses SQLite through async SQLAlchemy. Production design should
 
 ## Dashboard
 
-The dashboard is static HTML/CSS/JS served by FastAPI. It consumes `/api` routes and should not bypass backend ownership rules.
+The canonical React/Vite dashboard is built into `frontend/dist` and served by
+FastAPI. It consumes `/api` routes and must not bypass backend ownership rules.
 
 ## External Dependencies
 

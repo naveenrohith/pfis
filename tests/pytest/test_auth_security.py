@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from app.api.routes import auth as auth_routes
 from app.api.routes import gmail as gmail_routes
 from app.models.auth import AuthSession
@@ -258,6 +260,45 @@ async def test_gmail_consent_is_separate_and_stores_verified_encrypted_tokens(
         assert account.refresh_token_ref.startswith("enc:")
         assert "raw-access-token" not in account.access_token_ref
         assert "raw-refresh-token" not in account.refresh_token_ref
+
+
+async def test_gmail_callback_failure_does_not_log_provider_secret(client, monkeypatch, caplog):
+    demo = await client.post("/api/auth/demo")
+    demo.raise_for_status()
+    user = demo.json()["user"]
+    state = "gmail-private-failure-state"
+    secret = "invalid_grant provider-secret-must-not-be-logged"
+
+    monkeypatch.setattr(
+        gmail_routes,
+        "get_authorization_url",
+        lambda redirect_uri=None, scopes=None, offline=True: (
+            "https://accounts.google.test/gmail",
+            state,
+            "verifier",
+            "nonce",
+        ),
+    )
+    connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={user['id']}",
+        follow_redirects=False,
+    )
+    assert connect.status_code == 307
+
+    def fail_exchange(*_args, **_kwargs):
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(gmail_routes, "exchange_code_for_tokens", fail_exchange)
+
+    with caplog.at_level(logging.ERROR, logger="app.api.routes.gmail"):
+        callback = await client.get(
+            f"/api/auth/gmail/callback?code=gmail-code&state={state}",
+            follow_redirects=False,
+        )
+
+    assert callback.status_code == 500
+    assert secret not in caplog.text
+    assert "exception=RuntimeError" in caplog.text
 
 
 async def test_protected_route_requires_auth_when_enabled(client, auth_required):

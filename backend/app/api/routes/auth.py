@@ -322,9 +322,9 @@ async def google_callback(
         )
         _clear_oauth_cookie(redirect)
         return redirect
-    except Exception:
+    except Exception as exc:
         await db.rollback()
-        logger.exception("Google sign-in callback failed")
+        logger.error("Google sign-in callback failed exception=%s", type(exc).__name__)
         redirect = RedirectResponse(
             url="/dashboard?auth_error=google_signin_failed", status_code=303
         )

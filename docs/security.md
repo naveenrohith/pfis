@@ -59,6 +59,11 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 - Preserve rate limiting for sensitive endpoints.
 - Keep CORS scoped to configured origins and required methods/headers.
 - Return generic errors for credential failures.
+- Validate connector-account ownership again inside ingestion services; route
+  authorization alone is not a sufficient trust boundary for workers.
+- Persist and broadcast stable connector/job error categories only. Provider
+  exception text may contain credentials, source details, or request metadata
+  and belongs neither in API responses nor durable operational records.
 
 ## Local Versus Production Mode
 

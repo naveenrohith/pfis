@@ -221,3 +221,26 @@ async def test_unexpected_job_failure_is_retried_until_attempts_exhausted(
     assert failed.status == JobStatus.FAILED
     assert failed.attempt_count == 2
     assert failed.result_json
+
+
+async def test_unexpected_job_error_does_not_persist_secret_details(
+    test_session_factory, monkeypatch
+):
+    secret = "access_token=must-never-appear"
+
+    async def handler(_db, _user_id, _payload):
+        raise RuntimeError(secret)
+
+    monkeypatch.setitem(job_service.JOB_HANDLERS, "private-error-test", handler)
+    async with test_session_factory() as db:
+        job = await create_job(db, "private-error-test", user_id=None, max_attempts=1)
+
+    await run_job(job.id)
+
+    async with test_session_factory() as db:
+        failed = await job_service.get_job(db, job.id)
+
+    assert failed.status == JobStatus.FAILED
+    assert failed.error_message == "Connector authorization failed"
+    assert secret not in failed.error_message
+    assert secret not in failed.result_json
