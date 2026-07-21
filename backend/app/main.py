@@ -19,6 +19,7 @@ import pathlib
 import sys
 import uuid
 from contextlib import asynccontextmanager
+from time import perf_counter
 
 if __name__ == "__main__" and (__package__ is None or __package__ == ""):
     backend_dir = pathlib.Path(__file__).resolve().parents[1]
@@ -167,7 +168,7 @@ app.add_middleware(
         "X-Requested-With",
         "X-CSRF-Token",
     ],
-    expose_headers=["X-Total-Count", "X-Request-ID"],
+    expose_headers=["X-Total-Count", "X-Request-ID", "Server-Timing"],
 )
 
 
@@ -254,15 +255,26 @@ async def security_headers_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def request_id_middleware(request, call_next):
-    """Attach a correlation id to each request for traceable logging."""
+    """Attach correlation and application-duration signals to each request."""
     rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
     token = request_id_ctx.set(rid)
+    started_at = perf_counter()
     try:
         response = await call_next(request)
+        duration_ms = (perf_counter() - started_at) * 1000
+        response.headers["X-Request-ID"] = rid
+        response.headers["Server-Timing"] = f"app;dur={duration_ms:.1f}"
+        if request.url.path.startswith("/api") and duration_ms >= 1000:
+            logger.warning(
+                "Slow API response method=%s path=%s status=%s duration_ms=%.1f",
+                request.method,
+                request.url.path,
+                response.status_code,
+                duration_ms,
+            )
+        return response
     finally:
         request_id_ctx.reset(token)
-    response.headers["X-Request-ID"] = rid
-    return response
 
 
 # Static files (CSS, JS, assets)

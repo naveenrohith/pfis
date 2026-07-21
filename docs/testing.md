@@ -33,6 +33,10 @@ runs `tests/pytest/test_postgres_runtime.py`. Local SQLite tests enable
 `PRAGMA foreign_keys=ON` so invalid ownership references fail during development
 instead of appearing only after deployment.
 
+The workspace regression suite also enforces a database-query budget for the
+zero-data dashboard path. This guards against accidentally invoking every
+analytics service during onboarding and for months without transactions.
+
 In the managed Windows environment, set the test temp directory to a writable
 path if the default user temp directory is blocked:
 
@@ -68,6 +72,10 @@ before updating snapshots:
 npm run test:e2e
 npm run test:e2e:update
 ```
+
+Stable financial queries are refreshed after mutations, sync events, reconnect,
+or window focus once stale; they are not continuously polled. Operational sync
+and pipeline views poll once per minute only while mounted and visible.
 
 Never update a visual baseline solely to make CI green. Confirm that changed copy,
 financial meaning, hierarchy, and responsive layout are intentional first.

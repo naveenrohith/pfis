@@ -68,7 +68,14 @@ SQLite local/demo data can be backed up by copying the database file while the a
 Use:
 
 - `GET /api/health` for basic process liveness.
+- `GET /api/health/ready` for database-backed readiness. Route traffic only
+  while this endpoint returns `200`.
 - `GET /api/health/ops` for non-secret runtime posture and job counters.
+
+API responses expose `Server-Timing: app;dur=<milliseconds>` and an
+`X-Request-ID` correlation header. PFIS writes a structured warning for API
+responses taking at least one second; forward these application logs to the
+deployment log store and alert on sustained latency rather than a single sample.
 
 Monitor:
 

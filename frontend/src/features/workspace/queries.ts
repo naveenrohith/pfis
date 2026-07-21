@@ -3,6 +3,19 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
 
+const FINANCIAL_STALE_TIME_MS = 5 * 60 * 1000;
+const OPERATIONAL_REFETCH_INTERVAL_MS = 60_000;
+
+const financialQueryPolicy = {
+  staleTime: FINANCIAL_STALE_TIME_MS,
+  refetchOnWindowFocus: true,
+} as const;
+
+const operationalQueryPolicy = {
+  refetchInterval: OPERATIONAL_REFETCH_INTERVAL_MS,
+  refetchIntervalInBackground: false,
+} as const;
+
 /** Shared query keys so mutations can invalidate precisely. */
 export const queryKeys = {
   categories: ['categories'] as const,
@@ -39,7 +52,7 @@ export function useCategories() {
   return useQuery({
     queryKey: queryKeys.categories,
     queryFn: () => api.categories(),
-    staleTime: 5 * 60 * 1000,
+    ...financialQueryPolicy,
   });
 }
 
@@ -50,7 +63,7 @@ export function useSummary() {
     queryKey: queryKeys.summary(userId, month, year),
     queryFn: () => api.summary(userId, month, year),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...financialQueryPolicy,
   });
 }
 
@@ -61,7 +74,7 @@ export function useTransactions() {
     queryKey: queryKeys.transactions(userId, month, year),
     queryFn: () => api.transactions(userId, { month, year, limit: 200 }),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...financialQueryPolicy,
   });
 }
 
@@ -71,7 +84,7 @@ export function useEmails() {
     queryKey: queryKeys.emails(userId),
     queryFn: () => api.emails(userId, 12),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...operationalQueryPolicy,
   });
 }
 
@@ -81,7 +94,7 @@ export function useSyncStatus() {
     queryKey: queryKeys.syncStatus(userId),
     queryFn: () => api.syncStatus(userId),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...operationalQueryPolicy,
   });
 }
 
@@ -92,7 +105,7 @@ export function useAutoSyncStatus() {
     queryFn: () => api.autoSyncStatus(userId),
     enabled: !!userId,
     retry: false,
-    refetchInterval: 30_000,
+    ...operationalQueryPolicy,
   });
 }
 
@@ -103,7 +116,7 @@ export function useInsights() {
     queryKey: queryKeys.insights(userId, month, year),
     queryFn: () => api.insights(userId, month, year),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...financialQueryPolicy,
   });
 }
 
@@ -114,6 +127,7 @@ export function useBudgets() {
     queryKey: queryKeys.budgets(userId, month, year),
     queryFn: () => api.budgetsTrack(userId, month, year),
     enabled: !!userId,
+    ...financialQueryPolicy,
   });
 }
 
@@ -124,7 +138,7 @@ export function useWorkspaceSnapshot() {
     queryKey: queryKeys.workspace(userId, month, year),
     queryFn: () => api.workspace(userId, month, year),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...financialQueryPolicy,
   });
 }
 
@@ -135,7 +149,7 @@ export function useMerchants() {
     queryKey: queryKeys.merchants(userId, month, year),
     queryFn: () => api.merchants(userId, month, year),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...financialQueryPolicy,
   });
 }
 
@@ -145,6 +159,7 @@ export function useLearnedMerchantRules() {
     queryKey: queryKeys.learnedMerchantRules(userId),
     queryFn: () => api.learnedMerchantRules(userId),
     enabled: !!userId,
+    ...financialQueryPolicy,
   });
 }
 
@@ -166,7 +181,7 @@ export function useCategoryIntelligence() {
     queryKey: queryKeys.categoryIntelligence(userId, month, year),
     queryFn: () => api.categoryIntelligence(userId, month, year),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...financialQueryPolicy,
   });
 }
 
@@ -177,7 +192,7 @@ export function useGoals() {
     queryKey: queryKeys.goals(userId, month, year),
     queryFn: () => api.goals(userId, month, year),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...financialQueryPolicy,
   });
 }
 
@@ -195,7 +210,7 @@ export function useGuidanceBrief() {
     queryKey: queryKeys.guidanceBrief(userId, month, year, cadence),
     queryFn: () => api.guidanceBrief(userId, cadence, asOf),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...financialQueryPolicy,
   });
 }
 
@@ -205,7 +220,7 @@ export function useDashboardPreferences() {
     queryKey: queryKeys.dashboardPreferences(userId),
     queryFn: () => api.dashboardPreferences(userId),
     enabled: !!userId,
-    staleTime: 5 * 60 * 1000,
+    ...financialQueryPolicy,
   });
 }
 
@@ -215,6 +230,7 @@ export function useAccounts() {
     queryKey: queryKeys.accounts(userId),
     queryFn: () => api.accounts(userId),
     enabled: !!userId,
+    ...financialQueryPolicy,
   });
 }
 
@@ -224,6 +240,7 @@ export function useNetWorth() {
     queryKey: queryKeys.netWorth(userId),
     queryFn: () => api.netWorth(userId),
     enabled: !!userId,
+    ...financialQueryPolicy,
   });
 }
 
@@ -234,7 +251,7 @@ export function usePipelineMetrics() {
     queryKey: queryKeys.pipelineMetrics(userId, month, year),
     queryFn: () => api.pipelineMetrics(userId, month, year),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...operationalQueryPolicy,
   });
 }
 
@@ -244,6 +261,6 @@ export function usePipelineFailures(resolved = false) {
     queryKey: queryKeys.pipelineFailures(userId, resolved),
     queryFn: () => api.pipelineFailures(userId, resolved, 20),
     enabled: !!userId,
-    refetchInterval: 30_000,
+    ...operationalQueryPolicy,
   });
 }

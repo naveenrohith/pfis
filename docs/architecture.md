@@ -60,7 +60,9 @@ Connector
   (coverage and classification quality). Review cleanliness never raises Monthly Stability.
 - `WorkspaceService` is the authoritative premium briefing read model. It includes projection,
   month comparison, stability/data confidence, recurring commitments, evidence, and ranked actions
-  so the Today workspace does not issue overlapping analytics requests.
+  so the Today workspace does not issue overlapping analytics requests. Empty periods take a
+  two-query fast path and return the same stable response contract without invoking the complete
+  analytics graph.
 - Parser modules extract transaction data only; they do not write database rows directly.
 - Parser persistence is atomic per source email: the ledger row, processed flag,
   summary invalidation, failure state, and pipeline events commit together.
@@ -81,4 +83,4 @@ Connector
 
 ## Frontend Direction
 
-The React/Vite app under `frontend/` is the canonical UI. FastAPI serves its production build at `/dashboard` and never falls back to the retired static dashboard. Production startup fails when the React build artifact is missing. See `docs/frontend.md`.
+The React/Vite app under `frontend/` is the canonical UI. FastAPI serves its production build at `/dashboard` and never falls back to the retired static dashboard. Production startup fails when the React build artifact is missing. Financial read models use event-driven cache invalidation with bounded staleness; only operational status views retain low-frequency foreground polling. See `docs/frontend.md`.

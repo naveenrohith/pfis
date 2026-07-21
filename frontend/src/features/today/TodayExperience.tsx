@@ -104,7 +104,7 @@ export function TodayExperience() {
                 liveConnected ? 'bg-success' : 'bg-muted-foreground',
               )}
             />
-            {running ? 'Syncing' : liveConnected ? 'Live' : 'Polling'}
+            {running ? 'Syncing' : liveConnected ? 'Live' : 'Saved snapshot'}
           </Badge>
         }
       />
