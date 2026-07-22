@@ -576,7 +576,7 @@ async def _process_email_batch(
             email.processed_flag = True
             await db.commit()
 
-        except Exception as e:
+        except Exception as exc:
             # The transaction row, email state, corrections, summary invalidation,
             # and pipeline events are one per-email unit of work. Never commit a
             # partially processed ledger entry from the error path.
@@ -585,8 +585,12 @@ async def _process_email_batch(
                 stats["stored"] -= 1
             stats["parsed_failed"] += 1
             email_result["status"] = "error"
-            email_result["error"] = str(e)
-            logger.error(f"Pipeline error for email {email_id}: {e}")
+            email_result["error"] = "pipeline_processing_failed"
+            logger.error(
+                "Pipeline record failed: email_id=%s error_type=%s",
+                email_id,
+                type(exc).__name__,
+            )
 
             recovered_email = await db.get(RawEmail, email_id)
             if recovered_email is None:
@@ -598,11 +602,11 @@ async def _process_email_batch(
             await _record_parse_failure(
                 db,
                 email,
-                str(e),
+                "Pipeline processing failed",
                 parser_version=1,
                 failure_stage="pipeline",
                 failure_code="unexpected_error",
-                diagnostic={"error_type": type(e).__name__},
+                diagnostic={"error_type": type(exc).__name__},
             )
             _record_pipeline_event(
                 db,
@@ -611,7 +615,7 @@ async def _process_email_batch(
                 event_type="ParseFailed",
                 stage="pipeline",
                 status="error",
-                payload={"error_type": type(e).__name__},
+                payload={"error_type": type(exc).__name__},
             )
             email.processed_flag = True
             await db.commit()

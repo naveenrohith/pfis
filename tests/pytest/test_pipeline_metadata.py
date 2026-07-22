@@ -87,8 +87,10 @@ async def test_pipeline_rolls_back_ledger_when_post_parse_step_fails(
 ):
     user = await create_user(client, "pipelineatomic")
 
+    secret = "simulated-event-secret-must-not-leak"
+
     async def fail_publish(_event):
-        raise RuntimeError("simulated event failure")
+        raise RuntimeError(secret)
 
     monkeypatch.setattr(domain_event_dispatcher, "publish", fail_publish)
 
@@ -115,7 +117,10 @@ async def test_pipeline_rolls_back_ledger_when_post_parse_step_fails(
     assert stats["parsed_failed"] == 1
     assert transactions == []
     assert len(failures) == 1
-    assert failures[0].error_message == "simulated event failure"
+    assert failures[0].error_message == "Pipeline processing failed"
+    assert stats["results"][0]["error"] == "pipeline_processing_failed"
+    assert secret not in str(stats)
+    assert secret not in failures[0].error_message
     assert email.processed_flag is True
 
 

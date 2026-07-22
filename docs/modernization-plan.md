@@ -10,11 +10,12 @@ PLANNER -> CODE -> TEST -> QUALITY -> REVIEW -> FIX
 
 ## Current Phase
 
-Phase 13: Gmail provider lifecycle hardening.
+Phase 16: Pipeline failure privacy.
 
-Status: complete. Phase 13 persists access-token expiry, repairs legacy refresh
-behavior, bounds pagination failure modes, isolates malformed messages, and makes
-demo-sync failure rollback atomic and private.
+Status: complete. All repository-owned modernization phases are implemented and
+validated. Phase 16 removes raw pipeline exception text from responses, logs,
+per-record results, and durable parse-failure messages while retaining stable
+error categories and exception types.
 
 Goal: keep modernization work phased, tested, and reversible while preserving the local/demo developer path.
 
@@ -42,6 +43,9 @@ Goal: keep modernization work phased, tested, and reversible while preserving th
 | 11 | Coverage enforcement and ingestion privacy | Complete |
 | 12 | Realtime channel security and backpressure | Complete |
 | 13 | Gmail token lifecycle and provider contracts | Complete |
+| 14 | Financial account, currency, budget, and transfer invariants | Complete |
+| 15 | Paired-transfer mutation and deletion integrity | Complete |
+| 16 | Pipeline failure privacy and stable errors | Complete |
 
 ## Phase 0 Scope
 
@@ -127,6 +131,10 @@ Remaining Phase 1 follow-up:
 - Production database provider, backup schedule, and restore-drill ownership.
 - Hosted log/metrics platform and alert routing.
 - TLS termination, network policy, and infrastructure scaling policy.
+
+These are release gates rather than unfinished source phases. They require the
+selected production provider and named operational owners; source code cannot
+truthfully provision or certify them.
 
 ## Phase 10 Acceptance Criteria
 

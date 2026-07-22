@@ -87,6 +87,9 @@ production-ready until all environment-owned criteria are verified:
 
 ## Recommended Next Actions
 
+All repository-owned modernization phases through Phase 16 are complete. The
+remaining actions require the target hosted environment and operational owners:
+
 1. Select the managed PostgreSQL provider and provision encrypted backups.
 2. Run and record a point-in-time restore drill.
 3. Connect operational health and structured logs to hosted dashboards and alerts.

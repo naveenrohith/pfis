@@ -80,6 +80,10 @@ session cookie; bearer tokens are not accepted in WebSocket URLs.
 | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/pipeline/process` | `user_id`, `limit` (1–200, def 50) | `200` | `500` | `{status, stats}` (parse → normalize → categorize → dedup → store) |
 
+Unexpected pipeline request failures use the standard generic `internal_error`
+envelope. Per-record failures expose `pipeline_processing_failed` in statistics;
+durable diagnostics retain only the exception type, not its message.
+
 ### GET `/api/pipeline/metrics`
 
 Returns parser-pipeline health for a user/month:
