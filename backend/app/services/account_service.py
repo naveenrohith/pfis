@@ -68,6 +68,20 @@ class AccountService:
         if account is None:
             return None
         updates = data.model_dump(exclude_unset=True)
+        requested_currency = updates.get("currency")
+        if requested_currency is not None and requested_currency != account.currency:
+            history_exists = await self.db.scalar(
+                select(AccountBalanceSnapshot.id)
+                .where(AccountBalanceSnapshot.financial_account_id == account_id)
+                .limit(1)
+            )
+            transaction_exists = await self.db.scalar(
+                select(Transaction.id)
+                .where(Transaction.financial_account_id == account_id)
+                .limit(1)
+            )
+            if history_exists is not None or transaction_exists is not None:
+                raise ValueError("Account currency cannot change after financial history exists")
         identity = {
             "institution_name": updates.get("institution_name", account.institution_name),
             "account_type": updates.get("account_type", account.account_type),
@@ -100,6 +114,10 @@ class AccountService:
         account = await self._owned_account(user_id, account_id)
         if account is None:
             return None
+        if not account.is_active:
+            raise ValueError("Cannot add a balance to an inactive account")
+        if data.currency is not None and data.currency != account.currency:
+            raise ValueError("Balance currency must match the account currency")
         existing = await self.db.execute(
             select(AccountBalanceSnapshot.id).where(
                 AccountBalanceSnapshot.financial_account_id == account_id,
@@ -135,9 +153,16 @@ class AccountService:
         accounts = list(accounts_result.scalars().all())
         if not accounts:
             return NetWorthSeries(currency="INR")
+        currencies = {account.currency for account in accounts}
+        if len(currencies) != 1:
+            raise ValueError("Net worth cannot combine currencies without exchange rates")
+        account_ids = [account.id for account in accounts]
         snapshots_result = await self.db.execute(
             select(AccountBalanceSnapshot)
-            .where(AccountBalanceSnapshot.user_id == user_id)
+            .where(
+                AccountBalanceSnapshot.user_id == user_id,
+                AccountBalanceSnapshot.financial_account_id.in_(account_ids),
+            )
             .order_by(AccountBalanceSnapshot.as_of, AccountBalanceSnapshot.created_at)
         )
         snapshots = [
@@ -184,6 +209,8 @@ class AccountService:
         to_account = await self._owned_account(user_id, data.to_account_id)
         if from_account is None or to_account is None:
             raise LookupError("Account not found")
+        if not from_account.is_active or not to_account.is_active:
+            raise ValueError("Transfers require active accounts")
         if from_account.currency != data.currency or to_account.currency != data.currency:
             raise ValueError("Cross-currency transfers are not supported")
 
@@ -232,10 +259,14 @@ class AccountService:
             is_transfer=True,
         )
         self.db.add_all([debit, credit])
-        await TransactionService(self.db)._invalidate_monthly_summary(
-            user_id, data.transaction_date
-        )
-        await self.db.commit()
+        try:
+            await TransactionService(self.db)._invalidate_monthly_summary(
+                user_id, data.transaction_date
+            )
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
         await self.db.refresh(debit)
         await self.db.refresh(credit)
         return TransferResponse(

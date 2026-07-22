@@ -54,6 +54,7 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         TOKEN_ENCRYPTION_KEY="",
         GOOGLE_ALLOWED_EMAILS=[],
     )
+    main_module.limiter.reset()
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -84,6 +85,7 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         yield session_factory
     finally:
         app.dependency_overrides.clear()
+        main_module.limiter.reset()
         invalidate_merchant_cache()
         await engine.dispose()
 

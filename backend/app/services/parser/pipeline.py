@@ -273,6 +273,7 @@ def _build_transaction_create(
         merchant_rule_id=resolution.rule_id,
         merchant_resolver_version=resolution.resolver_version,
         source_email_id=email.id,
+        financial_account_id=None,
     )
 
 

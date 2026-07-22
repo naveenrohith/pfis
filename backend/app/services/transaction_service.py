@@ -243,8 +243,11 @@ class TransactionService:
                     FinancialAccount.user_id == user_id,
                 )
             )
-            if account_result.scalar_one_or_none() is None:
+            account = account_result.scalar_one_or_none()
+            if account is None:
                 raise ValueError("Financial account not found")
+            if account.currency != data.currency:
+                raise ValueError("Transaction currency must match the financial account currency")
         elif data.account_last4:
             masked_number = f"****{data.account_last4}"
             account_result = await self.db.execute(
@@ -266,6 +269,8 @@ class TransactionService:
                 )
                 self.db.add(account)
                 await self.db.flush()
+            elif account.currency != data.currency:
+                raise ValueError("Transaction currency must match the financial account currency")
             financial_account_id = account.id
 
         txn = Transaction(

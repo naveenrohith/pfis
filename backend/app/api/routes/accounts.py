@@ -95,7 +95,10 @@ async def get_net_worth(
     db: AsyncSession = Depends(get_db),
 ):
     user_id = resolve_user_scope(user_id, current_user)
-    return await AccountService(db).net_worth(user_id, as_of)
+    try:
+        return await AccountService(db).net_worth(user_id, as_of)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/transfers", response_model=TransferResponse, status_code=201)

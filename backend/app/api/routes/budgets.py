@@ -168,6 +168,7 @@ async def track_budgets(
         .where(
             Transaction.user_id == user_id,
             Transaction.transaction_type == TransactionType.DEBIT,
+            Transaction.is_transfer.is_(False),
             extract("month", Transaction.transaction_date) == month,
             extract("year", Transaction.transaction_date) == year,
         )
