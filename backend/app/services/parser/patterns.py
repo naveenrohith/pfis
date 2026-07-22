@@ -191,21 +191,21 @@ def extract_date(text: str) -> date | None:
                 elif fmt == "dMonth":
                     d = int(match.group(1))
                     m_str = match.group(2).lower()[:3]
-                    m = MONTH_MAP.get(m_str)
+                    named_month = MONTH_MAP.get(m_str)
                     y = int(match.group(3))
-                    if m and _valid_year(y):
-                        return date(y, m, d)
+                    if named_month and _valid_year(y):
+                        return date(y, named_month, d)
                 elif fmt == "dMy":
                     d = int(match.group(1))
                     m_str = match.group(2).lower()[:3]
-                    m = MONTH_MAP.get(m_str)
-                    if not m:
+                    named_month = MONTH_MAP.get(m_str)
+                    if not named_month:
                         continue
                     y = int(match.group(3))
                     if y < 100:
                         y += 2000
                     if _valid_year(y):
-                        return date(y, m, d)
+                        return date(y, named_month, d)
                 elif fmt == "ymd":
                     y, m, d = int(match.group(1)), int(match.group(2)), int(match.group(3))
                     if _valid_year(y):

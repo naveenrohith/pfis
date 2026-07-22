@@ -15,7 +15,14 @@ from googleapiclient.errors import HttpError
 from app.models.email import GmailAccount
 from app.security import decrypt_secret, encrypt_secret
 from app.services.classification.engine import KNOWN_BANK_SENDERS
-from app.services.connectors.base import BackfillOptions, ConnectorBatch, ConnectorCursor
+from app.services.connectors.base import (
+    BackfillOptions,
+    ConnectorBatch,
+    ConnectorCursor,
+    ConnectorError,
+    ConnectorErrorType,
+)
+from app.services.connectors.errors import classify_connector_exception
 from app.services.connectors.source_record import SourceRecord, SourceType
 from app.services.gmail.oauth_service import build_credentials
 from app.utils.text import clean_html_to_text
@@ -28,8 +35,8 @@ class GmailConnector:
 
     def __init__(self, account: GmailAccount) -> None:
         self.account = account
-        self._service = None
-        self._refreshed_credentials = None
+        self._service: Any | None = None
+        self._refreshed_credentials: Any | None = None
 
     async def refresh_credentials(self) -> dict[str, Any]:
         service, credentials, refreshed = await asyncio.to_thread(self._build_service_sync)
@@ -39,6 +46,10 @@ class GmailConnector:
             self.account.refresh_token_ref = encrypt_secret(
                 credentials.refresh_token or decrypt_secret(self.account.refresh_token_ref) or ""
             )
+            token_expiry = credentials.expiry
+            if token_expiry is not None and token_expiry.tzinfo is None:
+                token_expiry = token_expiry.replace(tzinfo=UTC)
+            self.account.token_expires_at = token_expiry
             self._refreshed_credentials = credentials
         return {"refreshed": refreshed}
 
@@ -69,7 +80,7 @@ class GmailConnector:
                 500,
             )
 
-        records = await self._message_refs_to_records(service, user_id, refs)
+        records, errors = await self._message_refs_to_records(service, user_id, refs)
         return ConnectorBatch(
             records=records,
             cursor=ConnectorCursor(
@@ -79,9 +90,11 @@ class GmailConnector:
             metrics={
                 "fetched": len(refs),
                 "records": len(records),
+                "message_failures": len(errors),
                 "fallback_used": fallback_used,
                 "credentials_refreshed": self._refreshed_credentials is not None,
             },
+            errors=errors,
         )
 
     async def fetch_backfill(self, user_id: str, options: BackfillOptions) -> ConnectorBatch:
@@ -91,26 +104,32 @@ class GmailConnector:
             self._build_sender_query(),
             options.max_results,
         )
-        records = await self._message_refs_to_records(service, user_id, refs)
+        records, errors = await self._message_refs_to_records(service, user_id, refs)
         return ConnectorBatch(
             records=records,
             cursor=ConnectorCursor(history_id=await self._get_current_history_id(service)),
             metrics={
                 "fetched": len(refs),
                 "records": len(records),
+                "message_failures": len(errors),
                 "fallback_used": False,
                 "credentials_refreshed": self._refreshed_credentials is not None,
             },
+            errors=errors,
         )
 
     def _build_service_sync(self):
         credentials = build_credentials(
             decrypt_secret(self.account.access_token_ref) or "",
             decrypt_secret(self.account.refresh_token_ref) or "",
+            self.account.token_expires_at,
         )
         refreshed = False
-        if credentials.expired:
-            logger.info("Access token expired, refreshing...")
+        should_refresh = bool(
+            credentials.refresh_token and (credentials.expiry is None or credentials.expired)
+        )
+        if should_refresh:
+            logger.info("Refreshing Gmail access credentials")
             credentials.refresh(Request())
             refreshed = True
         return build("gmail", "v1", credentials=credentials), credentials, refreshed
@@ -141,7 +160,8 @@ class GmailConnector:
 
     @staticmethod
     async def _get_current_history_id(service) -> str | None:
-        profile = await asyncio.to_thread(lambda: service.users().getProfile(userId="me").execute())
+        request = service.users().getProfile(userId="me")
+        profile = await asyncio.to_thread(request.execute)
         history_id = profile.get("historyId")
         return str(history_id) if history_id else None
 
@@ -149,22 +169,30 @@ class GmailConnector:
     async def _list_message_refs_by_query(
         service, query: str, max_results: int | None
     ) -> list[dict]:
-        messages = []
-        next_page_token = None
+        messages: list[dict[str, Any]] = []
+        next_page_token: str | None = None
+        seen_page_tokens: set[str] = set()
         while True:
             page_size = 500 if max_results is None else min(max_results - len(messages), 500)
             if page_size <= 0:
                 break
 
-            list_kwargs = {"userId": "me", "q": query, "maxResults": page_size}
+            list_kwargs: dict[str, Any] = {
+                "userId": "me",
+                "q": query,
+                "maxResults": page_size,
+            }
             if next_page_token:
                 list_kwargs["pageToken"] = next_page_token
 
-            response = await asyncio.to_thread(
-                lambda lk=list_kwargs: service.users().messages().list(**lk).execute()
-            )
+            request = service.users().messages().list(**list_kwargs)
+            response = await asyncio.to_thread(request.execute)
             messages.extend(response.get("messages", []))
             next_page_token = response.get("nextPageToken")
+            if next_page_token and next_page_token in seen_page_tokens:
+                raise RuntimeError("Gmail pagination repeated a page token")
+            if next_page_token:
+                seen_page_tokens.add(next_page_token)
             if not next_page_token or (max_results is not None and len(messages) >= max_results):
                 break
 
@@ -176,6 +204,7 @@ class GmailConnector:
     ) -> tuple[list[dict], str | None]:
         messages_by_id: dict[str, dict] = {}
         next_page_token = None
+        seen_page_tokens: set[str] = set()
         latest_history_id: str | None = None
 
         while True:
@@ -188,9 +217,8 @@ class GmailConnector:
             if next_page_token:
                 list_kwargs["pageToken"] = next_page_token
 
-            response = await asyncio.to_thread(
-                lambda lk=list_kwargs: service.users().history().list(**lk).execute()
-            )
+            request = service.users().history().list(**list_kwargs)
+            response = await asyncio.to_thread(request.execute)
             latest_history_id = str(response.get("historyId") or latest_history_id or "")
             for item in response.get("history", []):
                 for added in item.get("messagesAdded", []):
@@ -200,6 +228,10 @@ class GmailConnector:
                         messages_by_id[message_id] = {"id": message_id}
 
             next_page_token = response.get("nextPageToken")
+            if next_page_token and next_page_token in seen_page_tokens:
+                raise RuntimeError("Gmail history pagination repeated a page token")
+            if next_page_token:
+                seen_page_tokens.add(next_page_token)
             if not next_page_token:
                 break
 
@@ -210,24 +242,42 @@ class GmailConnector:
         service,
         user_id: str,
         refs: list[dict],
-    ) -> list[SourceRecord]:
+    ) -> tuple[list[SourceRecord], list[ConnectorError]]:
         records: list[SourceRecord] = []
+        errors: list[ConnectorError] = []
         for ref in refs:
-            message = await asyncio.to_thread(
-                lambda mid=ref["id"]: service.users()
-                .messages()
-                .get(userId="me", id=mid, format="full")
-                .execute()
-            )
-            records.append(self._message_to_record(user_id, message))
-        return records
+            message_id = ref.get("id")
+            if not isinstance(message_id, str) or not message_id:
+                errors.append(
+                    ConnectorError(
+                        ConnectorErrorType.UNKNOWN,
+                        "Gmail returned an invalid message reference",
+                        False,
+                    )
+                )
+                continue
+            try:
+                request = service.users().messages().get(userId="me", id=message_id, format="full")
+                message = await asyncio.to_thread(request.execute)
+                records.append(self._message_to_record(user_id, message))
+            except Exception as exc:
+                error_type = classify_connector_exception(exc)
+                if error_type != ConnectorErrorType.UNKNOWN:
+                    raise
+                errors.append(
+                    ConnectorError(
+                        ConnectorErrorType.UNKNOWN,
+                        "Gmail message could not be decoded",
+                        False,
+                    )
+                )
+        return records, errors
 
     @classmethod
     def _message_to_record(cls, user_id: str, message: dict) -> SourceRecord:
         payload = message.get("payload", {})
         headers = cls._extract_headers(payload.get("headers", []))
-        internal_date_ms = int(message.get("internalDate", 0))
-        received_at = datetime.fromtimestamp(internal_date_ms / 1000, tz=UTC)
+        received_at = cls._parse_internal_date(message.get("internalDate"))
         return SourceRecord(
             user_id=user_id,
             source_type=SourceType.GMAIL,
@@ -237,6 +287,16 @@ class GmailConnector:
             body=clean_html_to_text(cls._extract_email_body(payload)),
             received_at=received_at,
         )
+
+    @staticmethod
+    def _parse_internal_date(value: object) -> datetime | None:
+        try:
+            internal_date_ms = int(str(value))
+            if internal_date_ms <= 0:
+                return None
+            return datetime.fromtimestamp(internal_date_ms / 1000, tz=UTC)
+        except (OverflowError, TypeError, ValueError):
+            return None
 
     @staticmethod
     def _extract_headers(headers: list[dict]) -> dict:

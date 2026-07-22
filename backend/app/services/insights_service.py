@@ -13,6 +13,8 @@ Insight Types:
 """
 
 import logging
+import statistics
+from calendar import monthrange
 from datetime import date
 
 from sqlalchemy import case, extract, func, select
@@ -20,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
 from app.models.transaction import Transaction, TransactionType
+from app.services.knowledge.recurring_knowledge import RecurringPattern, RecurringPatternService
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +33,14 @@ class InsightsService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def generate_insights(self, user_id: str, month: int, year: int) -> dict:
+    async def generate_insights(
+        self,
+        user_id: str,
+        month: int,
+        year: int,
+        *,
+        recurring_patterns: list[RecurringPattern] | None = None,
+    ) -> dict:
         """
         Generate all insights for a user's given month.
         Returns a dict with insight cards, trend data, and recurring items.
@@ -47,7 +57,12 @@ class InsightsService:
         categories = await self._category_breakdown(user_id, month, year)
         top_merchants = await self._top_merchants(user_id, month, year)
         daily_trend = await self._daily_spending_trend(user_id, month, year)
-        recurring = await self._detect_recurring(user_id)
+        period_end = date(year, month, monthrange(year, month)[1])
+        recurring = (
+            self._recurring_payload(recurring_patterns)
+            if recurring_patterns is not None
+            else await self._detect_recurring(user_id, min(period_end, date.today()))
+        )
         prev = await self._monthly_aggregates(user_id, prev_month, prev_year)
         prev_spend = prev["spend"]
         prev_income = prev["income"]
@@ -186,15 +201,21 @@ class InsightsService:
         if daily_trend:
             amounts = [d["total"] for d in daily_trend if d["total"] > 0]
             if len(amounts) >= 3:
-                avg_daily = sum(amounts) / len(amounts)
+                median_daily = statistics.median(amounts)
+                mad = statistics.median(abs(amount - median_daily) for amount in amounts)
                 max_day = max(daily_trend, key=lambda d: d["total"])
-                if max_day["total"] > avg_daily * 2.5 and max_day["total"] > 500:
+                robust_score = (
+                    0.6745 * (max_day["total"] - median_daily) / mad
+                    if mad > 0
+                    else max_day["total"] / max(median_daily, 1)
+                )
+                if robust_score > 3.5 and max_day["total"] > 500:
                     insights.append(
                         {
                             "type": "anomaly",
                             "icon": "🔍",
                             "title": f"Spending spike on {max_day['date']}",
-                            "description": f"₹{max_day['total']:,.0f} spent — {max_day['total'] / avg_daily:.1f}× your daily average of ₹{avg_daily:,.0f}.",
+                            "description": f"₹{max_day['total']:,.0f} spent — materially above your typical active day of ₹{median_daily:,.0f}. Review it if unexpected.",
                             "severity": "warning",
                         }
                     )
@@ -395,45 +416,15 @@ class InsightsService:
 
         return trend
 
-    async def _detect_recurring(self, user_id: str) -> list[dict]:
-        """
-        Detect recurring payments: same merchant appearing 2+ times
-        with similar amounts (within ±10%).
-        """
-        result = await self.db.execute(
-            select(
-                Transaction.merchant_normalized,
-                func.count(Transaction.id).label("occurrences"),
-                func.avg(Transaction.amount).label("avg_amount"),
-                func.min(Transaction.amount).label("min_amount"),
-                func.max(Transaction.amount).label("max_amount"),
-            )
-            .where(
-                Transaction.user_id == user_id,
-                Transaction.transaction_type == TransactionType.DEBIT,
-                Transaction.is_transfer.is_(False),
-                Transaction.merchant_normalized.isnot(None),
-            )
-            .group_by(Transaction.merchant_normalized)
-            .having(func.count(Transaction.id) >= 2)
-            .order_by(func.avg(Transaction.amount).desc())
-        )
+    async def _detect_recurring(self, user_id: str, as_of: date | None = None) -> list[dict]:
+        """Return the shared recurring-stream read model for all PFIS surfaces."""
+        patterns = await RecurringPatternService(self.db).analyze(user_id, as_of=as_of)
+        return self._recurring_payload(patterns)
 
-        recurring = []
-        for row in result.all():
-            avg = float(row.avg_amount)
-            mn = float(row.min_amount)
-            mx = float(row.max_amount)
-
-            # Check if amounts are consistent (max within ±15% of min)
-            if mn > 0 and mx / mn <= 1.15:
-                recurring.append(
-                    {
-                        "merchant": row.merchant_normalized,
-                        "occurrences": row.occurrences,
-                        "avg_amount": round(avg, 2),
-                        "is_consistent": True,
-                    }
-                )
-
-        return recurring
+    @staticmethod
+    def _recurring_payload(patterns: list[RecurringPattern]) -> list[dict]:
+        return [
+            pattern.as_dict()
+            for pattern in patterns
+            if pattern.status in {"early", "mature", "missed"}
+        ]

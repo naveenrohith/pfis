@@ -36,45 +36,47 @@ export function useSyncPipeline() {
     queryClient.invalidateQueries();
   }, [queryClient]);
 
-  const formatSyncEvent = useCallback((event: SyncEvent): string | null => {
-    const data = event.data ?? {};
-    switch (event.event) {
-      case 'ws_connected':
-        return 'Live sync connected';
-      case 'sync_started':
-        setRunning(true);
-        setStatus('running');
-        return 'Automatic sync started';
-      case 'gmail_checked':
-        return `Gmail checked: ${Number(data.fetched ?? 0)} new candidate email(s)`;
-      case 'emails_stored':
-        return `Emails stored: ${Number(data.stored ?? 0)} new, ${Number(data.duplicates ?? 0)} duplicate`;
-      case 'pipeline_started':
-        return 'Parser pipeline started';
-      case 'transactions_updated':
-        invalidateAll();
-        return `Transactions updated: ${Number(data.stored ?? 0)} stored`;
-      case 'sync_completed':
-        setRunning(false);
-        setStatus('completed');
-        invalidateAll();
-        return 'Sync completed';
-      case 'sync_failed':
-        setRunning(false);
-        setStatus('failed');
-        invalidateAll();
-        return `Sync failed: ${String(data.error ?? 'unknown error')}`;
-      default:
-        return null;
-    }
-  }, [invalidateAll]);
+  const formatSyncEvent = useCallback(
+    (event: SyncEvent): string | null => {
+      const data = event.data ?? {};
+      switch (event.event) {
+        case 'ws_connected':
+          return 'Live sync connected';
+        case 'sync_started':
+          setRunning(true);
+          setStatus('running');
+          return 'Automatic sync started';
+        case 'gmail_checked':
+          return `Gmail checked: ${Number(data.fetched ?? 0)} new candidate email(s)`;
+        case 'emails_stored':
+          return `Emails stored: ${Number(data.stored ?? 0)} new, ${Number(data.duplicates ?? 0)} duplicate`;
+        case 'pipeline_started':
+          return 'Parser pipeline started';
+        case 'transactions_updated':
+          invalidateAll();
+          return `Transactions updated: ${Number(data.stored ?? 0)} stored`;
+        case 'sync_completed':
+          setRunning(false);
+          setStatus('completed');
+          invalidateAll();
+          return 'Sync completed';
+        case 'sync_failed':
+          setRunning(false);
+          setStatus('failed');
+          invalidateAll();
+          return `Sync failed: ${String(data.error ?? 'unknown error')}`;
+        default:
+          return null;
+      }
+    },
+    [invalidateAll],
+  );
 
   useEffect(() => {
     if (!user) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const params = new URLSearchParams({ user_id: user.id });
-    if (session?.token) params.set('token', session.token);
     const wsUrl = `${protocol}//${window.location.host}/api/ws/sync?${params.toString()}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;

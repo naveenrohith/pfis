@@ -23,7 +23,7 @@ from app.services.insights_service import InsightsService
 from app.services.intelligence_service import IntelligenceService
 from app.services.recommendation_utils import recommendation_id
 
-RULESET_VERSION = "pfis-guidance-1"
+RULESET_VERSION = "pfis-guidance-2"
 SUPPORTED_EXAMPLES = [
     "How much did I spend this month?",
     "Show recurring charges",
@@ -39,12 +39,8 @@ class GuidanceService:
 
     async def brief(self, user_id: str, period: GuidancePeriod, as_of: date) -> GuidanceBrief:
         workspace = await WorkspaceService(self.db).get_workspace(user_id, as_of.month, as_of.year)
-        health = await IntelligenceService(self.db).financial_health(
-            user_id, as_of.month, as_of.year
-        )
-        comparison = await IntelligenceService(self.db).month_comparison(
-            user_id, as_of.month, as_of.year
-        )
+        health = workspace.financial_health
+        comparison = workspace.month_comparison
         hidden = await self._hidden_recommendations(user_id)
         actions: list[GuidanceAction] = []
         for index, rec in enumerate(workspace.recommendations):
@@ -114,7 +110,10 @@ class GuidanceService:
         if any(term in query for term in ("recurring", "subscription", "subscriptions")):
             insights = await InsightsService(self.db).generate_insights(user_id, month, year)
             recurring = insights.get("recurring_payments", [])
-            total = sum(float(item.get("avg_amount", 0)) for item in recurring)
+            total = sum(
+                float(item.get("monthly_equivalent", item.get("avg_amount", 0)))
+                for item in recurring
+            )
             return self._result(
                 "recurring_charges",
                 f"PFIS found {len(recurring)} recurring charge{'s' if len(recurring) != 1 else ''} averaging {self._money(total, currency)} per month.",
@@ -126,6 +125,15 @@ class GuidanceService:
 
         if "budget" in query:
             rows = await IntelligenceService(self.db)._budget_adherence(user_id, month, year)
+            if rows is None:
+                return self._result(
+                    "budget_status",
+                    "No monthly budgets are configured yet, so PFIS has not calculated adherence.",
+                    [GuidanceMetric(label="Budget adherence", value="Not configured")],
+                    month,
+                    year,
+                    ["Open budgets", "Set a first category guardrail"],
+                )
             return self._result(
                 "budget_status",
                 f"Your deterministic budget-adherence score is {rows:.0f}% for this month.",

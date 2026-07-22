@@ -14,14 +14,34 @@ logger = logging.getLogger(__name__)
 
 
 class SyncEventManager:
-    def __init__(self) -> None:
+    def __init__(self, *, send_timeout_seconds: float = 5.0) -> None:
         self._connections: dict[str, set[WebSocket]] = {}
         self._lock = asyncio.Lock()
+        self._send_timeout_seconds = send_timeout_seconds
 
-    async def connect(self, user_id: str, websocket: WebSocket) -> None:
-        await websocket.accept()
+    async def connect(
+        self,
+        user_id: str,
+        websocket: WebSocket,
+        *,
+        max_connections: int | None = None,
+    ) -> bool:
+        rejected = False
         async with self._lock:
-            self._connections.setdefault(user_id, set()).add(websocket)
+            sockets = self._connections.setdefault(user_id, set())
+            if max_connections is not None and len(sockets) >= max_connections:
+                rejected = True
+            else:
+                sockets.add(websocket)
+        if rejected:
+            await websocket.close(code=1013)
+            return False
+        try:
+            await websocket.accept()
+        except Exception:
+            await self.disconnect(user_id, websocket)
+            raise
+        return True
 
     async def disconnect(self, user_id: str, websocket: WebSocket) -> None:
         async with self._lock:
@@ -42,19 +62,26 @@ class SyncEventManager:
         async with self._lock:
             sockets = list(self._connections.get(user_id, set()))
 
-        stale: list[WebSocket] = []
-        for websocket in sockets:
+        async def send(websocket: WebSocket) -> WebSocket | None:
             try:
                 if websocket.client_state == WebSocketState.CONNECTED:
-                    await websocket.send_json(payload)
-                else:
-                    stale.append(websocket)
+                    await asyncio.wait_for(
+                        websocket.send_json(payload),
+                        timeout=self._send_timeout_seconds,
+                    )
+                    return None
+                if websocket.client_state != WebSocketState.DISCONNECTED:
+                    return None
             except Exception:
-                stale.append(websocket)
                 logger.debug("Dropping stale sync WebSocket for user %s", user_id[:8])
+            return websocket
 
-        for websocket in stale:
-            await self.disconnect(user_id, websocket)
+        stale = [
+            websocket
+            for websocket in await asyncio.gather(*(send(socket) for socket in sockets))
+            if websocket is not None
+        ]
+        await asyncio.gather(*(self.disconnect(user_id, socket) for socket in stale))
 
     async def connection_count(self, user_id: str) -> int:
         async with self._lock:

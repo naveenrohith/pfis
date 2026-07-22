@@ -5,7 +5,10 @@ Swappable between SQLite (prototype) and PostgreSQL (production).
 """
 
 import logging
+from collections.abc import AsyncIterator
 
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -14,13 +17,41 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+
+def normalize_async_database_url(url: str) -> str:
+    """Return an async-driver URL for every supported database."""
+    if url.startswith("sqlite:///") and "+aiosqlite" not in url:
+        return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
+def enable_sqlite_foreign_keys(engine: Engine) -> None:
+    """Make SQLite enforce the same foreign-key ownership rules as PostgreSQL."""
+    if engine.dialect.name != "sqlite":
+        return
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
+
+
 # Create async engine — works with both SQLite and PostgreSQL
+database_url = normalize_async_database_url(settings.DATABASE_URL)
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    database_url,
     echo=settings.DEBUG,
     # SQLite needs check_same_thread=False
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
+    connect_args={"check_same_thread": False} if database_url.startswith("sqlite") else {},
 )
+enable_sqlite_foreign_keys(engine.sync_engine)
 
 # Session factory
 AsyncSessionLocal = async_sessionmaker(
@@ -36,7 +67,7 @@ class Base(DeclarativeBase):
     pass
 
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncIterator[AsyncSession]:
     """Dependency injection for database sessions."""
     async with AsyncSessionLocal() as session:
         try:

@@ -15,7 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.email import GmailAccount
 from app.models.sync import ConnectorAuditEvent, SyncRun, SyncStatus
 from app.services.connectors.base import BackfillOptions, ConnectorCursor, ConnectorErrorType
-from app.services.connectors.errors import classify_connector_exception
+from app.services.connectors.errors import (
+    classify_connector_exception,
+    public_connector_error,
+)
 from app.services.connectors.gmail_connector import GmailConnector
 from app.services.connectors.source_record import SourceType
 from app.services.domain_events import DomainEvent, domain_event_dispatcher
@@ -47,13 +50,13 @@ class IngestionCoordinator:
         self.db.add(sync_run)
         await self.db.commit()
         await self.db.refresh(sync_run)
+        sync_run_id = sync_run.id
         started_at = datetime.now(UTC)
 
-        await sync_event_manager.broadcast(user_id, "sync_started", {"mode": mode.value})
-        await self._audit(user_id, gmail_account_id, "sync_started", {"mode": mode.value})
-
         try:
-            account = await self._get_gmail_account(gmail_account_id)
+            account = await self._get_gmail_account(user_id, gmail_account_id)
+            await sync_event_manager.broadcast(user_id, "sync_started", {"mode": mode.value})
+            await self._audit(user_id, account.id, "sync_started", {"mode": mode.value})
             account.auto_sync_status = "running"
             account.auto_sync_error = None
             account.last_sync_started_at = sync_run.start_time
@@ -86,6 +89,16 @@ class IngestionCoordinator:
                 SourceType.GMAIL,
                 batch.records,
             )
+            persist_stats["emails_fetched"] = int(batch.metrics.get("fetched", len(batch.records)))
+            if batch.errors:
+                persist_stats["emails_failed"] += len(batch.errors)
+                persist_stats["errors"].extend(
+                    {
+                        "error": connector_error.message,
+                        "error_type": connector_error.error_type.value,
+                    }
+                    for connector_error in batch.errors
+                )
             await sync_event_manager.broadcast(
                 user_id,
                 "emails_stored",
@@ -126,7 +139,7 @@ class IngestionCoordinator:
             await self._audit(user_id, gmail_account_id, "sync_completed", stats)
             return stats
         except Exception as exc:
-            await self._handle_failure(sync_run, user_id, gmail_account_id, exc)
+            await self._handle_failure(sync_run_id, user_id, gmail_account_id, exc)
             raise
 
     async def _fetch_with_retry(
@@ -156,39 +169,62 @@ class IngestionCoordinator:
                     continue
                 raise
 
-    async def _get_gmail_account(self, gmail_account_id: str) -> GmailAccount:
+    async def _get_gmail_account(self, user_id: str, gmail_account_id: str) -> GmailAccount:
         result = await self.db.execute(
-            select(GmailAccount).where(GmailAccount.id == gmail_account_id)
+            select(GmailAccount).where(
+                GmailAccount.id == gmail_account_id,
+                GmailAccount.user_id == user_id,
+            )
         )
         account = result.scalar_one_or_none()
         if account is None:
-            raise ValueError(f"Gmail account {gmail_account_id} not found")
+            raise LookupError("Gmail account not found")
         return account
 
     async def _handle_failure(
         self,
-        sync_run: SyncRun,
+        sync_run_id: str,
         user_id: str,
         gmail_account_id: str,
         exc: Exception,
     ) -> None:
+        await self.db.rollback()
         error_type = classify_connector_exception(exc)
-        account = await self._get_gmail_account(gmail_account_id)
-        account.auto_sync_status = (
-            "paused" if error_type == ConnectorErrorType.PERMANENT else "error"
+        public_error = public_connector_error(error_type)
+        logger.warning(
+            "Gmail sync failed user=%s error_type=%s exception=%s",
+            user_id[:8],
+            error_type.value,
+            type(exc).__name__,
         )
-        account.auto_sync_error = str(exc)
-        account.last_sync_started_at = sync_run.start_time
+        sync_run = await self.db.scalar(
+            select(SyncRun).where(SyncRun.id == sync_run_id, SyncRun.user_id == user_id)
+        )
+        if sync_run is None:
+            logger.error("Gmail sync failure could not find its persisted sync run")
+            return
+        account = await self.db.scalar(
+            select(GmailAccount).where(
+                GmailAccount.id == gmail_account_id,
+                GmailAccount.user_id == user_id,
+            )
+        )
+        if account is not None:
+            account.auto_sync_status = (
+                "paused" if error_type == ConnectorErrorType.PERMANENT else "error"
+            )
+            account.auto_sync_error = public_error
+            account.last_sync_started_at = sync_run.start_time
         sync_run.status = SyncStatus.FAILED
         sync_run.end_time = datetime.now(UTC)
         sync_run.emails_failed = 1
-        sync_run.errors = json.dumps([{"error": str(exc), "error_type": error_type.value}])
+        sync_run.errors = json.dumps([{"error": public_error, "error_type": error_type.value}])
         await self.db.commit()
         await self._audit(
             user_id,
-            gmail_account_id,
+            account.id if account is not None else None,
             "sync_failed",
-            {"error": str(exc), "error_type": error_type.value},
+            {"error": public_error, "error_type": error_type.value},
         )
         await domain_event_dispatcher.publish(
             DomainEvent(
@@ -203,13 +239,16 @@ class IngestionCoordinator:
                 "ConnectorHealthChanged",
                 user_id,
                 SourceType.GMAIL,
-                {"status": account.auto_sync_status, "error_type": error_type.value},
+                {
+                    "status": account.auto_sync_status if account is not None else "error",
+                    "error_type": error_type.value,
+                },
             )
         )
         await sync_event_manager.broadcast(
             user_id,
             "sync_failed",
-            {"error": str(exc), "error_type": error_type.value},
+            {"error": public_error, "error_type": error_type.value},
         )
 
     async def _audit(

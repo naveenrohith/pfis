@@ -16,6 +16,8 @@ aggregated transaction, insight, budget, and sync-status data is surfaced.
 """
 
 import logging
+from calendar import monthrange
+from datetime import date
 
 from sqlalchemy import case, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +35,15 @@ from app.schemas.dashboard import (
     WorkspaceResponse,
     WorkspaceSnapshot,
 )
+from app.schemas.intelligence import (
+    CashFlowProjection,
+    FinancialHealthScore,
+    MonthComparison,
+)
 from app.services.insights_service import InsightsService
+from app.services.intelligence_service import IntelligenceService
+from app.services.knowledge.recurring_knowledge import RecurringPatternService
+from app.services.knowledge.ruleset_registry import RECOMMENDATION_RANKING
 from app.services.recommendation_utils import recommendation_id
 
 logger = logging.getLogger(__name__)
@@ -50,19 +60,43 @@ class WorkspaceService:
         self.db = db
 
     async def get_workspace(self, user_id: str, month: int, year: int) -> WorkspaceResponse:
-        insights_payload = await InsightsService(self.db).generate_insights(user_id, month, year)
-        meta = insights_payload.get("meta", {})
+        period_metrics = await self._period_metrics(user_id, month, year)
+        sync = await self._sync_summary(user_id)
+        if period_metrics["transaction_count"] == 0:
+            return self._empty_workspace(month, year, sync)
+
+        period_end = date(year, month, monthrange(year, month)[1])
+        recurring_patterns = await RecurringPatternService(self.db).analyze(
+            user_id, as_of=min(period_end, date.today())
+        )
+        insights_payload = await InsightsService(self.db).generate_insights(
+            user_id, month, year, recurring_patterns=recurring_patterns
+        )
         recurring = insights_payload.get("recurring_payments", [])
+        intelligence = IntelligenceService(self.db)
+        historical_periods = await intelligence.historical_income_spend(user_id, month, year, 6)
+        projection = await intelligence.cash_flow_projection(
+            user_id,
+            month,
+            year,
+            recurring_patterns=recurring_patterns,
+            historical_periods=historical_periods,
+        )
+        comparison = await intelligence.month_comparison(user_id, month, year)
+        financial_health = await intelligence.financial_health(
+            user_id,
+            month,
+            year,
+            recurring_patterns=recurring_patterns,
+            historical_periods=historical_periods,
+        )
 
-        spend = float(meta.get("total_spend", 0.0))
-        income = float(meta.get("total_income", 0.0))
-
-        txn_count = await self._transaction_count(user_id, month, year)
-        review = await self._review_summary(user_id, month, year)
+        spend = period_metrics["spend"]
+        income = period_metrics["income"]
+        txn_count = period_metrics["transaction_count"]
+        review = period_metrics["review"]
         budgets = await self._budget_status(user_id, month, year)
         budget_risk = sum(1 for b in budgets if b["status"] in ("warning", "over"))
-        sync = await self._sync_summary(user_id)
-
         recurring_merchants = {
             str(r.get("merchant", "")).strip().lower() for r in recurring if r.get("merchant")
         }
@@ -98,11 +132,16 @@ class WorkspaceService:
             review=review,
             insights=insights_payload.get("insights", []),
         )
-        for index, recommendation in enumerate(recommendations):
+        recommendations = self._rank_recommendations(
+            recommendations,
+            income=income,
+            recurring=recurring,
+            review=review,
+        )
+        for recommendation in recommendations:
             recommendation.id = recommendation_id(
                 recommendation.type, recommendation.target, recommendation.title
             )
-            recommendation.priority = max(10, 100 - index * 10)
             recommendation.reason_codes = [recommendation.type, recommendation.severity]
             recommendation.expected_impact = self._expected_impact(recommendation.type)
 
@@ -115,25 +154,46 @@ class WorkspaceService:
             recommendations=recommendations,
             review_summary=review,
             sync_summary=sync,
+            projection=projection,
+            month_comparison=comparison,
+            financial_health=financial_health,
+            recurring_commitments=recurring,
         )
 
     # ──────────────────────────────────────────
     # Data queries
     # ──────────────────────────────────────────
 
-    async def _transaction_count(self, user_id: str, month: int, year: int) -> int:
-        result = await self.db.execute(
-            select(func.count(Transaction.id)).where(
-                Transaction.user_id == user_id,
-                extract("month", Transaction.transaction_date) == month,
-                extract("year", Transaction.transaction_date) == year,
-            )
-        )
-        return int(result.scalar() or 0)
-
-    async def _review_summary(self, user_id: str, month: int, year: int) -> ReviewSummary:
+    async def _period_metrics(self, user_id: str, month: int, year: int) -> dict:
         result = await self.db.execute(
             select(
+                func.count(Transaction.id).label("transaction_count"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                (Transaction.transaction_type == TransactionType.DEBIT)
+                                & Transaction.is_transfer.is_(False),
+                                Transaction.amount,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("spend"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                (Transaction.transaction_type == TransactionType.CREDIT)
+                                & Transaction.is_transfer.is_(False),
+                                Transaction.amount,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("income"),
                 func.coalesce(
                     func.sum(case((Transaction.reviewed_flag.is_(False), 1), else_=0)), 0
                 ).label("pending"),
@@ -158,11 +218,16 @@ class WorkspaceService:
             )
         )
         row = result.one()
-        return ReviewSummary(
-            pending_count=int(row.pending or 0),
-            low_confidence_count=int(row.low_conf or 0),
-            avg_confidence=(float(row.avg_conf) if row.avg_conf is not None else None),
-        )
+        return {
+            "transaction_count": int(row.transaction_count or 0),
+            "spend": float(row.spend or 0),
+            "income": float(row.income or 0),
+            "review": ReviewSummary(
+                pending_count=int(row.pending or 0),
+                low_confidence_count=int(row.low_conf or 0),
+                avg_confidence=(float(row.avg_conf) if row.avg_conf is not None else None),
+            ),
+        }
 
     async def _budget_status(self, user_id: str, month: int, year: int) -> list[dict]:
         budget_result = await self.db.execute(
@@ -193,7 +258,8 @@ class WorkspaceService:
         out: list[dict] = []
         for budget, cat_name in budgets:
             actual = spend_map.get(budget.category_id, 0.0)
-            pct = (actual / budget.monthly_limit * 100) if budget.monthly_limit > 0 else 0.0
+            limit = float(budget.monthly_limit)
+            pct = (actual / limit * 100) if limit > 0 else 0.0
             if pct >= 100:
                 status = "over"
             elif pct >= 80:
@@ -269,39 +335,93 @@ class WorkspaceService:
         return "shopping"
 
     async def _sync_summary(self, user_id: str) -> SyncSummary:
-        run_result = await self.db.execute(
+        latest_status = (
             select(SyncRun)
             .where(SyncRun.user_id == user_id)
             .order_by(SyncRun.start_time.desc())
             .limit(1)
+            .with_only_columns(SyncRun.status)
+            .scalar_subquery()
         )
-        latest_run = run_result.scalar_one_or_none()
-
-        account_result = await self.db.execute(
-            select(GmailAccount.last_synced_at)
+        last_synced = (
+            select(func.max(GmailAccount.last_synced_at))
             .where(GmailAccount.user_id == user_id)
-            .order_by(GmailAccount.last_synced_at.desc())
-            .limit(1)
+            .scalar_subquery()
         )
-        last_synced_at = account_result.scalar_one_or_none()
-
-        email_result = await self.db.execute(
+        result = await self.db.execute(
             select(
+                latest_status.label("latest_status"),
+                last_synced.label("last_synced_at"),
                 func.count(RawEmail.id).label("total"),
                 func.coalesce(
                     func.sum(case((RawEmail.processed_flag.is_(True), 1), else_=0)), 0
                 ).label("processed"),
             ).where(RawEmail.user_id == user_id)
         )
-        email_row = email_result.one()
+        email_row = result.one()
         total = int(email_row.total or 0)
         processed = int(email_row.processed or 0)
 
         return SyncSummary(
-            latest_status=(latest_run.status.value if latest_run else None),
-            last_synced_at=(last_synced_at.isoformat() if last_synced_at else None),
+            latest_status=(
+                email_row.latest_status.value
+                if hasattr(email_row.latest_status, "value")
+                else email_row.latest_status
+            ),
+            last_synced_at=(
+                email_row.last_synced_at.isoformat() if email_row.last_synced_at else None
+            ),
             processed_total=processed,
             unprocessed_total=max(total - processed, 0),
+        )
+
+    @staticmethod
+    def _empty_workspace(month: int, year: int, sync: SyncSummary) -> WorkspaceResponse:
+        previous_month = 12 if month == 1 else month - 1
+        previous_year = year - 1 if month == 1 else year
+        days_in_month = monthrange(year, month)[1]
+        today = date.today()
+        selected_start = date(year, month, 1)
+        selected_end = date(year, month, days_in_month)
+        if selected_end < today:
+            data_through = selected_end
+            days_elapsed = days_in_month
+        elif selected_start <= today:
+            data_through = today
+            days_elapsed = today.day
+        else:
+            data_through = None
+            days_elapsed = 0
+        return WorkspaceResponse(
+            month=month,
+            year=year,
+            snapshot=WorkspaceSnapshot(sync_status=sync.latest_status or "idle"),
+            timeline=[],
+            insights=[],
+            recommendations=[],
+            review_summary=ReviewSummary(),
+            sync_summary=sync,
+            projection=CashFlowProjection(
+                month=month,
+                year=year,
+                days_elapsed=days_elapsed,
+                days_in_month=days_in_month,
+                data_through=data_through,
+            ),
+            month_comparison=MonthComparison(
+                month=month,
+                year=year,
+                previous_month=previous_month,
+                previous_year=previous_year,
+            ),
+            financial_health=FinancialHealthScore(
+                score=0,
+                monthly_stability=0,
+                data_confidence=0,
+                data_sufficiency="low",
+                budget_adherence=None,
+            ),
+            recurring_commitments=[],
         )
 
     # ──────────────────────────────────────────
@@ -348,7 +468,9 @@ class WorkspaceService:
 
         # 2. Recurring charge review
         if recurring:
-            total_recurring = sum(float(r.get("avg_amount", 0)) for r in recurring)
+            total_recurring = sum(
+                float(r.get("monthly_equivalent", r.get("avg_amount", 0))) for r in recurring
+            )
             recs.append(
                 WorkspaceRecommendation(
                     type="recurring",
@@ -409,6 +531,56 @@ class WorkspaceService:
                 )
 
         return recs
+
+    @staticmethod
+    def _rank_recommendations(
+        recommendations: list[WorkspaceRecommendation],
+        *,
+        income: float,
+        recurring: list[dict],
+        review: ReviewSummary,
+    ) -> list[WorkspaceRecommendation]:
+        """Rank actions by materiality, confidence, urgency, and actionability."""
+        recurring_total = sum(
+            float(item.get("monthly_equivalent", item.get("avg_amount", 0))) for item in recurring
+        )
+        recurring_confidence = (
+            sum(float(item.get("confidence", 0)) for item in recurring) / len(recurring)
+            if recurring
+            else 0.0
+        )
+        severity_points = {"danger": 30, "warning": 20, "info": 10, "success": 5}
+        for recommendation in recommendations:
+            materiality = 10.0
+            confidence = 15.0
+            if recommendation.type == "recurring":
+                materiality = min(25.0, recurring_total / max(income, 1) * 100)
+                confidence = recurring_confidence * 20
+                recommendation.evidence = [
+                    {"label": "Monthly equivalent", "value": f"₹{recurring_total:,.0f}"},
+                    {"label": "Knowledge ruleset", "value": RECOMMENDATION_RANKING.version},
+                ]
+            elif recommendation.type == "review":
+                materiality = min(25.0, review.low_confidence_count * 5.0)
+                confidence = 20.0
+                recommendation.evidence = [
+                    {"label": "Needs review", "value": str(review.low_confidence_count)},
+                    {
+                        "label": "Average confidence",
+                        "value": f"{(review.avg_confidence or 0) * 100:.0f}%",
+                    },
+                ]
+            else:
+                recommendation.evidence = [
+                    {"label": "Selected period", "value": "Current workspace month"},
+                    {"label": "Ruleset", "value": RECOMMENDATION_RANKING.version},
+                ]
+            urgency = severity_points.get(recommendation.severity, 10)
+            actionability = 20.0 if recommendation.action_label and recommendation.target else 0.0
+            recommendation.priority = int(
+                round(min(100.0, materiality + confidence + urgency + actionability))
+            )
+        return sorted(recommendations, key=lambda item: item.priority, reverse=True)
 
     @staticmethod
     def _expected_impact(kind: str) -> str:

@@ -19,12 +19,13 @@ import pathlib
 import sys
 import uuid
 from contextlib import asynccontextmanager
+from time import perf_counter
 
 if __name__ == "__main__" and (__package__ is None or __package__ == ""):
     backend_dir = pathlib.Path(__file__).resolve().parents[1]
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -33,8 +34,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-# Import all models so SQLAlchemy Base.metadata registers them before create_all()
-import app.models  # noqa: F401
+# Import all models so SQLAlchemy Base.metadata registers them before create_all().
+# The alias avoids shadowing the FastAPI ``app`` instance for static type checkers.
+from app import models as _models  # noqa: F401
 from app.api.error_responses import (
     error_response,
     http_exception_handler,
@@ -66,8 +68,13 @@ from app.config import get_settings
 from app.database import AsyncSessionLocal, close_db, init_db
 from app.observability import install_request_id_logging, request_id_ctx
 from app.rate_limit import limiter
+from app.security import validate_session_csrf
 from app.services.auto_sync_service import start_auto_sync_scheduler, stop_auto_sync_scheduler
-from app.services.job_service import recover_interrupted_jobs
+from app.services.job_service import (
+    recover_interrupted_jobs,
+    start_job_worker,
+    stop_job_worker,
+)
 from app.services.seed_service import run_seeds
 
 # Configure logging
@@ -95,6 +102,7 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     # Startup
     logger.info("🚀 Starting PFIS...")
+    ensure_production_frontend_build()
     await init_db()
     logger.info("✅ Database initialized")
 
@@ -103,9 +111,10 @@ async def lifespan(app: FastAPI):
         await run_seeds(db)
         recovered_jobs = await recover_interrupted_jobs(db)
         if recovered_jobs:
-            logger.warning("Marked %s interrupted background job(s) as failed", recovered_jobs)
+            logger.warning("Recovered %s interrupted background job lease(s)", recovered_jobs)
 
     base_url = _startup_base_url()
+    start_job_worker()
     start_auto_sync_scheduler()
     logger.info(f"✅ PFIS v{settings.APP_VERSION} ready at {base_url}")
     logger.info(f"📖 API docs at {base_url}/docs")
@@ -114,6 +123,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     await stop_auto_sync_scheduler()
+    await stop_job_worker()
     await close_db()
     logger.info("👋 PFIS shutdown complete")
 
@@ -129,8 +139,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.limiter = limiter
-app.add_exception_handler(StarletteHTTPException, http_exception_handler)
-app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
+
+
+async def _http_exception_adapter(request: Request, exc: Exception):
+    if not isinstance(exc, StarletteHTTPException):
+        raise exc
+    return await http_exception_handler(request, exc)
+
+
+async def _validation_exception_adapter(request: Request, exc: Exception):
+    if not isinstance(exc, RequestValidationError):
+        raise exc
+    return await request_validation_exception_handler(request, exc)
+
+
+app.add_exception_handler(StarletteHTTPException, _http_exception_adapter)
+app.add_exception_handler(RequestValidationError, _validation_exception_adapter)
 
 
 async def rate_limit_exception_handler(request, exc):
@@ -151,34 +175,142 @@ app.add_middleware(
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
-    expose_headers=["X-Total-Count", "X-Request-ID"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Idempotency-Key",
+        "X-Requested-With",
+        "X-CSRF-Token",
+    ],
+    expose_headers=["X-Total-Count", "X-Request-ID", "Server-Timing"],
 )
+
+
+_CSRF_EXEMPT_PATHS = {
+    "/api/auth/login",
+    "/api/auth/register",
+    "/api/auth/demo",
+}
+
+
+def _is_cross_site_mutation(request: Request) -> bool:
+    """Reject browser mutations initiated outside the configured PFIS origins."""
+    if request.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+        return True
+    origin = request.headers.get("Origin")
+    if not origin:
+        return False
+    allowed_origins = {
+        str(request.base_url).rstrip("/"),
+        *(configured.rstrip("/") for configured in settings.CORS_ORIGINS),
+    }
+    return origin.rstrip("/") not in allowed_origins
+
+
+@app.middleware("http")
+async def browser_csrf_middleware(request: Request, call_next):
+    """Require a session-bound CSRF token for cookie-authenticated mutations."""
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and _is_cross_site_mutation(request):
+        return error_response(
+            request,
+            403,
+            code="cross_site_request_blocked",
+            message="Cross-site request blocked.",
+        )
+    if (
+        request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and request.url.path not in _CSRF_EXEMPT_PATHS
+        and "authorization" not in request.headers
+    ):
+        session_token = request.cookies.get(settings.SESSION_COOKIE_NAME)
+        if session_token:
+            csrf_cookie = request.cookies.get(settings.CSRF_COOKIE_NAME, "")
+            csrf_header = request.headers.get("X-CSRF-Token", "")
+            if not csrf_cookie or csrf_cookie != csrf_header:
+                return error_response(
+                    request,
+                    403,
+                    code="csrf_failed",
+                    message="Security check failed. Refresh the page and try again.",
+                )
+            async with AsyncSessionLocal() as db:
+                if not await validate_session_csrf(session_token, csrf_header, db):
+                    return error_response(
+                        request,
+                        403,
+                        code="csrf_failed",
+                        message="Security check failed. Sign in again and retry.",
+                    )
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Apply a conservative browser security baseline to HTML and API responses."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    )
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; "
+        "object-src 'none'; form-action 'self'; img-src 'self' data:; "
+        "font-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; connect-src 'self' ws: wss:"
+    )
+    if settings.is_production:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if request.url.path.startswith("/api"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.middleware("http")
 async def request_id_middleware(request, call_next):
-    """Attach a correlation id to each request for traceable logging."""
+    """Attach correlation and application-duration signals to each request."""
     rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
     token = request_id_ctx.set(rid)
+    started_at = perf_counter()
     try:
         response = await call_next(request)
+        duration_ms = (perf_counter() - started_at) * 1000
+        response.headers["X-Request-ID"] = rid
+        response.headers["Server-Timing"] = f"app;dur={duration_ms:.1f}"
+        if request.url.path.startswith("/api") and duration_ms >= 1000:
+            logger.warning(
+                "Slow API response method=%s path=%s status=%s duration_ms=%.1f",
+                request.method,
+                request.url.path,
+                response.status_code,
+                duration_ms,
+            )
+        return response
     finally:
         request_id_ctx.reset(token)
-    response.headers["X-Request-ID"] = rid
-    return response
 
 
 # Static files (CSS, JS, assets)
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# Built React SPA (frontend/dist). Served at /dashboard when present; the legacy
-# static dashboard remains a fallback so the app still works before a build.
+# Built React SPA (frontend/dist). The React workspace is the only dashboard
+# implementation served by FastAPI; local Vite development remains available.
 FRONTEND_DIST = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "dist"
 SPA_INDEX = FRONTEND_DIST / "index.html"
-SPA_AVAILABLE = SPA_INDEX.exists()
-if SPA_AVAILABLE and (FRONTEND_DIST / "assets").exists():
+
+
+def ensure_production_frontend_build() -> None:
+    """Fail closed when a production image omits the canonical dashboard."""
+    if settings.is_production and not SPA_INDEX.is_file():
+        raise RuntimeError(
+            "Production startup requires the canonical React build at "
+            f"{SPA_INDEX}. Run the frontend production build before starting PFIS."
+        )
+
+
+if SPA_INDEX.exists() and (FRONTEND_DIST / "assets").exists():
     app.mount(
         "/dashboard/assets",
         StaticFiles(directory=str(FRONTEND_DIST / "assets")),
@@ -227,14 +359,13 @@ async def root():
 
 @app.get("/dashboard")
 async def serve_dashboard():
-    """Serve the PFIS dashboard.
-
-    Prefers the built React SPA (frontend/dist); falls back to the legacy static
-    dashboard when the SPA has not been built yet. Presence is checked per request
-    so a server started before a build still serves the SPA once it appears.
-    """
-    target = SPA_INDEX if SPA_INDEX.exists() else STATIC_DIR / "dashboard.html"
-    response = FileResponse(str(target), media_type="text/html")
+    """Serve the canonical React dashboard build."""
+    if not SPA_INDEX.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail="Dashboard build is unavailable. Run the frontend production build.",
+        )
+    response = FileResponse(str(SPA_INDEX), media_type="text/html")
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     return response
@@ -242,19 +373,23 @@ async def serve_dashboard():
 
 @app.get("/dashboard/{path:path}")
 async def serve_dashboard_spa(path: str):
-    """SPA fallback: serve a built asset if it exists, else the SPA index.
+    """Serve contained build assets or the SPA index for client-side routes."""
+    if not SPA_INDEX.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
 
-    Enables client-side routing under /dashboard without 404s. Only active when
-    the React build is present (checked per request).
-    """
-    if SPA_INDEX.exists():
-        candidate = FRONTEND_DIST / path
-        if path and candidate.is_file():
-            return FileResponse(str(candidate))
-        response = FileResponse(str(SPA_INDEX), media_type="text/html")
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        return response
-    raise HTTPException(status_code=404, detail="Not found")
+    frontend_root = FRONTEND_DIST.resolve()
+    normalized_path = path.replace("\\", "/")
+    if ".." in pathlib.PurePosixPath(normalized_path).parts:
+        raise HTTPException(status_code=404, detail="Not found")
+    candidate = (frontend_root / normalized_path).resolve()
+    if not candidate.is_relative_to(frontend_root):
+        raise HTTPException(status_code=404, detail="Not found")
+    if path and candidate.is_file():
+        return FileResponse(str(candidate))
+
+    response = FileResponse(str(SPA_INDEX), media_type="text/html")
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
 
 
 if __name__ == "__main__":

@@ -45,7 +45,7 @@ agents/                     agent workflow instructions
 - Parser registry: `backend/app/services/parser/registry.py`
 - Transaction service: `backend/app/services/transaction_service.py`
 - Gmail sync: `backend/app/services/gmail/sync_service.py`
-- Dashboard: `backend/app/static/dashboard.html`, `backend/app/static/css/`, `backend/app/static/js/`
+- Dashboard: canonical React/Vite source in `frontend/`; FastAPI serves `frontend/dist`
 - Tests: `tests/pytest/`
 
 ## Non-Negotiables

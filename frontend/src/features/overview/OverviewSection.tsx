@@ -145,7 +145,7 @@ export function OverviewSection() {
         action={
           <>
             <Badge variant={liveConnected ? 'success' : 'default'}>
-              {liveConnected ? 'Live data' : 'Polling'}
+              {liveConnected ? 'Live data' : 'Saved snapshot'}
             </Badge>
             <Badge variant={statusTone}>{running ? 'Syncing' : status === 'idle' ? 'Current' : status}</Badge>
           </>

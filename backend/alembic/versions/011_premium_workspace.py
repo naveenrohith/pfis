@@ -34,7 +34,7 @@ def upgrade() -> None:
             batch_op.create_index("ix_transactions_transfer_group_id", ["transfer_group_id"])
         if "is_transfer" not in transaction_columns:
             batch_op.add_column(
-                sa.Column("is_transfer", sa.Boolean(), nullable=False, server_default=sa.text("0"))
+                sa.Column("is_transfer", sa.Boolean(), nullable=False, server_default=sa.false())
             )
             batch_op.create_index("ix_transactions_is_transfer", ["is_transfer"])
 

@@ -23,7 +23,7 @@ def upgrade() -> None:
     )
     op.add_column(
         "gmail_accounts",
-        sa.Column("auto_sync_enabled", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("auto_sync_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
     )
     op.add_column(
         "gmail_accounts",

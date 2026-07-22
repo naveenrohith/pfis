@@ -6,11 +6,29 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from app.config import get_settings
 from app.database import Base
 from sqlalchemy import create_engine, inspect, text
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_alembic_revision_ids_fit_portable_version_column():
+    config = Config(str(ROOT / "backend" / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "backend" / "alembic"))
+    scripts = ScriptDirectory.from_config(config)
+
+    assert all(len(revision.revision) <= 32 for revision in scripts.walk_revisions())
+
+
+def test_migrations_use_portable_boolean_server_defaults():
+    """PostgreSQL rejects integer defaults on BOOLEAN columns."""
+    migration_dir = ROOT / "backend" / "alembic" / "versions"
+    source = "\n".join(path.read_text(encoding="utf-8") for path in migration_dir.glob("*.py"))
+
+    assert 'server_default=sa.text("1")' not in source
+    assert 'server_default=sa.text("0")' not in source
 
 
 def test_alembic_baseline_matches_orm_table_columns(tmp_path, monkeypatch):
@@ -42,6 +60,20 @@ def test_alembic_baseline_matches_orm_table_columns(tmp_path, monkeypatch):
                 for table_name in inspector.get_table_names()
                 if table_name != "alembic_version"
             }
+            merchant_rule_unique_names = {
+                constraint["name"]
+                for constraint in inspector.get_unique_constraints("user_merchant_rules")
+            }
+            merchant_rule_index_names = {
+                index["name"] for index in inspector.get_indexes("user_merchant_rules")
+            }
+            budget_unique_names = {
+                constraint["name"] for constraint in inspector.get_unique_constraints("budgets")
+            }
+            gmail_unique_names = {
+                constraint["name"]
+                for constraint in inspector.get_unique_constraints("gmail_accounts")
+            }
         finally:
             engine.dispose()
     finally:
@@ -53,6 +85,72 @@ def test_alembic_baseline_matches_orm_table_columns(tmp_path, monkeypatch):
     }
 
     assert migrated_columns == orm_columns
+    assert "uq_user_merchant_rule_descriptor" in merchant_rule_unique_names
+    assert {
+        "ix_user_merchant_rules_user_id",
+        "ix_user_merchant_rules_user_name",
+    } <= merchant_rule_index_names
+    assert "uq_budgets_user_category" in budget_unique_names
+    assert {
+        "uq_gmail_accounts_user",
+        "uq_gmail_accounts_google_account",
+    } <= gmail_unique_names
+
+
+def test_merchant_migration_repairs_local_create_all_partial_schema(tmp_path, monkeypatch):
+    """Migration 013 must repair a hot-reloaded local database.
+
+    A running development server can see the new ORM model before Alembic is
+    rerun. ``create_all`` then creates ``user_merchant_rules`` but cannot add
+    the new columns to the existing transactions table. The migration must
+    tolerate and complete that partial state without deleting local data.
+    """
+    db_path = tmp_path / "pfis-partial-merchant-schema.db"
+    async_url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+    sync_url = f"sqlite:///{db_path.as_posix()}"
+
+    monkeypatch.setenv("DATABASE_URL", async_url)
+    get_settings.cache_clear()
+    alembic_cfg = Config(str(ROOT / "backend" / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(ROOT / "backend" / "alembic"))
+    alembic_cfg.set_main_option("sqlalchemy.url", async_url)
+
+    try:
+        command.upgrade(alembic_cfg, "012_financial_rhythm")
+        engine = create_engine(sync_url)
+        try:
+            Base.metadata.create_all(engine)
+            inspector = inspect(engine)
+            assert "user_merchant_rules" in inspector.get_table_names()
+            assert "merchant_resolution_source" not in {
+                column["name"] for column in inspector.get_columns("transactions")
+            }
+        finally:
+            engine.dispose()
+
+        command.upgrade(alembic_cfg, "head")
+        engine = create_engine(sync_url)
+        try:
+            inspector = inspect(engine)
+            transaction_columns = {
+                column["name"] for column in inspector.get_columns("transactions")
+            }
+            with engine.connect() as connection:
+                revision = connection.execute(
+                    text("SELECT version_num FROM alembic_version")
+                ).scalar_one()
+        finally:
+            engine.dispose()
+    finally:
+        get_settings.cache_clear()
+
+    assert revision == "017_gmail_token_expiry"
+    assert {
+        "merchant_resolution_source",
+        "merchant_resolution_confidence",
+        "merchant_rule_id",
+        "merchant_resolver_version",
+    } <= transaction_columns
 
 
 def test_operational_composite_indexes_are_migrated(tmp_path, monkeypatch):
@@ -93,6 +191,21 @@ def test_payment_method_orm_type_matches_portable_migration_contract():
 
     assert payment_method_type.native_enum is False
     assert payment_method_type.length == 20
+
+
+def test_money_columns_use_fixed_scale_numeric_storage():
+    """Ledger values must never use binary floating-point persistence."""
+    expected = {
+        ("transactions", "amount"),
+        ("budgets", "monthly_limit"),
+        ("account_balance_snapshots", "amount"),
+        ("goals", "target_amount"),
+    }
+
+    for table_name, column_name in expected:
+        column_type = Base.metadata.tables[table_name].c[column_name].type
+        assert column_type.precision == 18
+        assert column_type.scale == 2
 
 
 def test_financial_account_backfill_supports_existing_non_null_created_at(tmp_path, monkeypatch):

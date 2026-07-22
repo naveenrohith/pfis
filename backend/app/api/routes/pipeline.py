@@ -49,9 +49,9 @@ async def trigger_processing(
     try:
         stats = await process_raw_emails(db, user_id, limit)
         return {"status": "completed", "stats": stats}
-    except Exception as e:
-        logger.error(f"Pipeline failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    except Exception as exc:
+        logger.error("Pipeline request failed: error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Pipeline processing failed") from exc
 
 
 @router.get("/metrics")

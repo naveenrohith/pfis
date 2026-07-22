@@ -14,6 +14,8 @@ class JobResponse(BaseModel):
     payload: dict[str, Any] = {}
     result: dict[str, Any] = {}
     error_message: str | None = None
+    attempt_count: int = 0
+    max_attempts: int = 3
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None

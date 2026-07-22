@@ -13,26 +13,17 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState, Skeleton } from '@/components/ui/Skeleton';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { useAuth } from '@/features/auth/AuthContext';
-import {
-  useCashFlow,
-  useFinancialHealth,
-  useGuidanceBrief,
-  useMonthComparison,
-  useWorkspaceSnapshot,
-} from '@/features/workspace/queries';
+import { useWorkspaceSnapshot } from '@/features/workspace/queries';
 import { useSync } from '@/features/workspace/SyncContext';
 import { formatCurrency, formatTime } from '@/lib/format';
 import type { CashFlowProjection } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { buildTodayBriefCopy } from './todayCopy';
 
 export function TodayExperience() {
   const { user } = useAuth();
   const { scrollTo } = useDashboardUi();
   const workspace = useWorkspaceSnapshot();
-  const brief = useGuidanceBrief();
-  const cashFlow = useCashFlow();
-  const comparison = useMonthComparison();
-  const health = useFinancialHealth();
   const { liveConnected, running } = useSync();
 
   if (workspace.isLoading && !workspace.data) return <TodaySkeleton />;
@@ -62,10 +53,9 @@ export function TodayExperience() {
   const currency = user?.currency ?? 'INR';
   const data = workspace.data;
   const snapshot = data?.snapshot;
-  const guidance = brief.data;
-  const projection = cashFlow.data;
-  const financialHealth = health.data;
-  const monthComparison = comparison.data;
+  const projection = data?.projection;
+  const financialHealth = data?.financial_health;
+  const monthComparison = data?.month_comparison;
   const name = firstName(user?.name || user?.email || 'there');
   const netCashFlow = snapshot?.net_cash_flow ?? 0;
   const spend = snapshot?.spend ?? 0;
@@ -73,25 +63,21 @@ export function TodayExperience() {
     ? monthComparison.previous_income - monthComparison.previous_spend
     : null;
   const netMovement = previousNet === null ? null : netCashFlow - previousNet;
-  const primaryAction = guidance?.actions[0] ?? data?.recommendations[0];
+  const primaryAction = data?.recommendations[0];
   const actionTarget = primaryAction?.target ?? 'insights';
-  const healthScore = financialHealth?.score ?? guidance?.health_score;
+  const healthScore = financialHealth?.monthly_stability;
   const recurringBurden = financialHealth?.recurring_burden;
-  const evidence = guidance?.changes?.length
-    ? guidance.changes.slice(0, 2).map((change) => ({
-        title: change,
-        description: 'Included in today’s deterministic financial brief.',
-        severity: 'info' as const,
-      }))
-    : (data?.insights ?? []).slice(0, 2);
-  const lowData = (snapshot?.transaction_count ?? 0) < 3;
+  const evidence = (data?.insights ?? []).slice(0, 2);
+  const lowData = financialHealth?.data_sufficiency === 'low';
+  const transactionCount = snapshot?.transaction_count ?? 0;
 
-  const headline = guidance?.headline || fallbackHeadline(netCashFlow, name);
-  const summary =
-    guidance?.summary ||
-    `You have ${netCashFlow >= 0 ? 'kept' : 'spent'} ${formatCurrency(Math.abs(netCashFlow), currency)} ${
-      netCashFlow >= 0 ? 'after spending' : 'more than you earned'
-    } this month.`;
+  const { headline, summary } = buildTodayBriefCopy({
+    transactionCount,
+    netCashFlow,
+    name,
+    currency,
+    recommendationTitle: primaryAction?.title,
+  });
 
   return (
     <div className="space-y-10">
@@ -118,7 +104,7 @@ export function TodayExperience() {
                 liveConnected ? 'bg-success' : 'bg-muted-foreground',
               )}
             />
-            {running ? 'Syncing' : liveConnected ? 'Live' : 'Polling'}
+            {running ? 'Syncing' : liveConnected ? 'Live' : 'Saved snapshot'}
           </Badge>
         }
       />
@@ -164,7 +150,7 @@ export function TodayExperience() {
             </div>
             {healthScore !== undefined ? (
               <div className="text-right">
-                <p className="text-xs text-muted-foreground">Financial health</p>
+                <p className="text-xs text-muted-foreground">Monthly stability</p>
                 <p
                   className={cn(
                     'money-value mt-1 text-3xl',
@@ -176,6 +162,9 @@ export function TodayExperience() {
                   )}
                 >
                   {Math.round(healthScore)}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Data confidence {financialHealth?.data_confidence ?? 0}
                 </p>
               </div>
             ) : null}
@@ -299,8 +288,8 @@ export function TodayExperience() {
       </section>
 
       <footer className="flex flex-col justify-between gap-3 border-t border-border/70 pt-5 text-xs text-muted-foreground sm:flex-row">
-        <p>
-          Based on activity through {guidance?.data_through || 'the selected period'} ·{' '}
+        <p data-testid="brief-data-through">
+          Based on activity through {projection?.data_through || 'the selected period'} ·{' '}
           {snapshot?.transaction_count ?? 0} transactions
           {data?.sync_summary.last_synced_at
             ? ` · Synced ${formatTime(data.sync_summary.last_synced_at)}`
@@ -365,16 +354,16 @@ function MoneyHorizon({
     {
       label: 'Recurring reserve',
       evidence: 'Calculated',
-      value: projection ? formatCurrency(projection.recurring_commitments, currency) : 'Preparing',
-      detail: 'Monthly commitments, not exact due dates',
+      value: projection ? formatCurrency(projection.confirmed_commitments, currency) : 'Preparing',
+      detail: 'Mature streams only; early signals stay separate',
     },
     {
       label: 'Month end',
       evidence: 'Forecast',
       value: projected === undefined ? 'Preparing' : formatCurrency(projected, currency),
       detail: projection
-        ? `${formatCurrency(projection.income - projection.projected_range_high, currency)} to ${formatCurrency(
-            projection.income - projection.projected_range_low,
+        ? `${formatCurrency(projection.expected_income - projection.projected_range_high, currency)} to ${formatCurrency(
+            projection.expected_income - projection.projected_range_low,
             currency,
           )}`
         : 'Waiting for projection evidence',
@@ -397,7 +386,11 @@ function MoneyHorizon({
           </h2>
         </div>
         <Badge variant={projected !== undefined && projected < 0 ? 'warning' : 'outline'}>
-          Forecast {daysRemaining === null ? 'pending' : `· ${daysRemaining} days`}
+          {projection
+            ? `Forecast · ${Math.round(projection.confidence * 100)}% confidence`
+            : daysRemaining === null
+              ? 'Forecast pending'
+              : `Forecast · ${daysRemaining} days`}
         </Badge>
       </div>
 
@@ -449,6 +442,11 @@ function MoneyHorizon({
               Ruleset <strong className="text-foreground">{projection.ruleset_version}</strong>
             </p>
             <ul className="list-disc space-y-1 pl-4">
+              {projection.evidence.map((item) => (
+                <li key={item.label}>
+                  <strong className="text-foreground">{item.label}:</strong> {item.value}
+                </li>
+              ))}
               {projection.assumptions.map((assumption) => (
                 <li key={assumption}>{assumption}</li>
               ))}
@@ -504,12 +502,6 @@ function greeting() {
   if (hour < 12) return 'Good morning';
   if (hour < 18) return 'Good afternoon';
   return 'Good evening';
-}
-
-function fallbackHeadline(netCashFlow: number, name: string) {
-  return netCashFlow >= 0
-    ? `Good work, ${name}. You are keeping more than you spend.`
-    : `Hello, ${name}. This month needs one clear adjustment.`;
 }
 
 function formatComparison(value?: number | null) {

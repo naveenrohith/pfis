@@ -1,7 +1,9 @@
-"""Health and lightweight operational visibility routes."""
+"""Health, readiness, and lightweight operational visibility routes."""
 
-from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -11,16 +13,28 @@ from app.services.job_service import get_active_task_count, get_job_status_count
 
 router = APIRouter(tags=["Health"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/health")
 async def health_check():
-    """System health check."""
+    """Process liveness check; intentionally does not depend on downstream services."""
     return {
         "status": "healthy",
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
     }
+
+
+@router.get("/health/ready")
+async def readiness_check(db: AsyncSession = Depends(get_db)):
+    """Report whether the application can execute database-backed requests."""
+    try:
+        await db.execute(text("SELECT 1"))
+    except Exception as exc:
+        logger.exception("Database readiness check failed")
+        raise HTTPException(status_code=503, detail="Database is not ready") from exc
+    return {"status": "ready", "database": "reachable"}
 
 
 @router.get("/health/ops")

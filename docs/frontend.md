@@ -1,16 +1,12 @@
 # PFIS Frontend Ownership
 
-PFIS has two frontend code paths during the migration window:
+PFIS has one canonical frontend: the React + TypeScript + Vite app under
+`frontend/`. Its production build (`frontend/dist`) is served by FastAPI at
+`/dashboard`.
 
-- Canonical UI: React + TypeScript + Vite app under `frontend/`. Its production
-  build (`frontend/dist`) is served by FastAPI at `/dashboard`.
-- Fallback UI: the legacy static dashboard under `backend/app/static`, served at
-  `/dashboard` only when no React build is present.
-
-The React app is the canonical product UI. The legacy static dashboard remains a
-safety fallback so the app keeps working before the first `npm run build`.
-Backend API changes must keep both paths working until the legacy dashboard is
-removed.
+The retired dashboard under `backend/app/static` is not served. When the React
+build is unavailable, local requests receive `503` and production startup fails
+closed. Backend API changes need to support only the typed React client.
 
 ## React App Rules
 
@@ -50,11 +46,10 @@ themes; update snapshots intentionally with `npm run test:e2e:update`.
   it installs dependencies when needed, builds `frontend/dist`, runs migrations,
   and starts FastAPI. The launcher requires Python 3.13+ and Node.js/npm 22+ on
   `PATH`.
-- When the React app is verified in production use, the legacy static dashboard
-  under `backend/app/static` can be removed; document the removal in the same
-  change and drop the FastAPI fallback branch in `main.py`.
+- Production images must include `frontend/dist/index.html`; startup validates it
+  before database initialization or background scheduler startup.
 
-## Legacy Static Dashboard
+## Retired Static Dashboard
 
-- Retained only as the no-build fallback.
-- Do not invest in new features here; new UI work goes in the React app.
+- Retained temporarily as reference while its unique behavior is audited.
+- It is not routed or authenticated by FastAPI. Do not add features to it.

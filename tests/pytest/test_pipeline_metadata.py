@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from app.models.email import RawEmail
 from app.models.sync import ParseFailure
+from app.models.transaction import Transaction
+from app.services.domain_events import domain_event_dispatcher
 from app.services.parser.pipeline import process_raw_emails
 from sqlalchemy import select
 
@@ -76,6 +78,50 @@ async def test_pipeline_result_includes_parser_metadata_for_invalid_parse(
     assert failure.parser_version == 2
     assert failure.resolved is False
     assert failure.error_message == "Invalid parse: amount=123.0, type=None"
+
+
+async def test_pipeline_rolls_back_ledger_when_post_parse_step_fails(
+    client,
+    test_session_factory,
+    monkeypatch,
+):
+    user = await create_user(client, "pipelineatomic")
+
+    secret = "simulated-event-secret-must-not-leak"
+
+    async def fail_publish(_event):
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(domain_event_dispatcher, "publish", fail_publish)
+
+    async with test_session_factory() as db:
+        email = RawEmail(
+            user_id=user["id"],
+            gmail_message_id=f"{user['id']}:atomic-failure",
+            sender="alerts@example-payments.test",
+            subject="Payment successful",
+            body=(
+                "Payment of Rs.750.00 paid to BOOKMYSHOW via UPI on 07-05-2026. "
+                "Ref No: 555555654321."
+            ),
+        )
+        db.add(email)
+        await db.commit()
+
+        stats = await process_raw_emails(db, user["id"])
+        transactions = list((await db.scalars(select(Transaction))).all())
+        failures = list((await db.scalars(select(ParseFailure))).all())
+        await db.refresh(email)
+
+    assert stats["stored"] == 0
+    assert stats["parsed_failed"] == 1
+    assert transactions == []
+    assert len(failures) == 1
+    assert failures[0].error_message == "Pipeline processing failed"
+    assert stats["results"][0]["error"] == "pipeline_processing_failed"
+    assert secret not in str(stats)
+    assert secret not in failures[0].error_message
+    assert email.processed_flag is True
 
 
 async def test_pipeline_duplicate_result_preserves_parse_metadata(

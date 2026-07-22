@@ -5,7 +5,8 @@ when create_all() is called. Order matters for foreign key resolution.
 """
 
 from app.models.account import AccountBalanceSnapshot, FinancialAccount
-from app.models.category import Category, Merchant
+from app.models.auth import AuthIdentity, AuthSession
+from app.models.category import Category, Merchant, UserMerchantRule
 from app.models.email import GmailAccount, RawEmail
 from app.models.summary import MonthlySummary
 from app.models.sync import (
@@ -25,10 +26,13 @@ from app.models.workspace import DashboardPreference, RecommendationState
 
 __all__ = [
     "User",
+    "AuthIdentity",
+    "AuthSession",
     "FinancialAccount",
     "AccountBalanceSnapshot",
     "Category",
     "Merchant",
+    "UserMerchantRule",
     "RawEmail",
     "GmailAccount",
     "MonthlySummary",

@@ -2,15 +2,20 @@
 
 import json
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workspace import DashboardPreference
 from app.schemas.preferences import (
+    BriefingCadence,
     DashboardPreferenceResponse,
     DashboardPreferenceUpdate,
     DashboardWidget,
+    DensityPreference,
+    OnboardingGoal,
+    ThemePreference,
 )
 
 DEFAULT_WIDGETS = [
@@ -134,10 +139,10 @@ class PreferencesService:
             user_id=user_id,
             layout_version=CURRENT_LAYOUT_VERSION,
             widgets=widgets or _goal_widgets(preference.onboarding_goal),
-            theme=preference.theme,
-            density=preference.density,
-            briefing_cadence=preference.briefing_cadence,
+            theme=cast(ThemePreference, preference.theme),
+            density=cast(DensityPreference, preference.density),
+            briefing_cadence=cast(BriefingCadence, preference.briefing_cadence),
             favorites=favorites,
-            onboarding_goal=preference.onboarding_goal,
+            onboarding_goal=cast(OnboardingGoal | None, preference.onboarding_goal),
             updated_at=preference.updated_at,
         )

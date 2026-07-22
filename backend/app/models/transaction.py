@@ -7,8 +7,21 @@ Includes confidence scoring, parser versioning, and dedup fingerprint.
 import enum
 import uuid
 from datetime import UTC, date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -34,6 +47,7 @@ class PaymentMethod(str, enum.Enum):
 class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_transactions_amount_positive"),
         Index("ix_txn_user_date", "user_id", "transaction_date"),
         Index("ix_txn_user_month_category", "user_id", "transaction_type", "category_id"),
         Index("ix_txn_user_review", "user_id", "reviewed_flag"),
@@ -43,7 +57,7 @@ class Transaction(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="INR")
     transaction_type: Mapped[TransactionType] = mapped_column(Enum(TransactionType), nullable=False)
     payment_method: Mapped[PaymentMethod] = mapped_column(
@@ -72,6 +86,12 @@ class Transaction(Base):
     reviewed_flag: Mapped[bool] = mapped_column(default=False, index=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     parser_version: Mapped[int] = mapped_column(Integer, default=1)
+    merchant_resolution_source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="manual"
+    )
+    merchant_resolution_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    merchant_rule_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    merchant_resolver_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     fingerprint: Mapped[str] = mapped_column(String(64), unique=True, nullable=True, index=True)
     source_email_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("raw_emails.id"), nullable=True
@@ -98,6 +118,12 @@ class Transaction(Base):
         """Timestamp of the source notification, when PFIS ingested from email."""
         source_email = self.__dict__.get("source_email")
         return source_email.received_at if source_email else None
+
+    @property
+    def category_name(self) -> str | None:
+        """Expose an eagerly loaded category label to response schemas."""
+        category = self.__dict__.get("category")
+        return category.name if category else None
 
     def __repr__(self) -> str:
         return f"<Transaction {self.merchant_normalized} ₹{self.amount}>"

@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.database import AsyncSessionLocal
 from app.models.email import GmailAccount
 from app.services.connectors.base import ConnectorErrorType
-from app.services.connectors.errors import classify_connector_exception
+from app.services.connectors.errors import classify_connector_exception, public_connector_error
 from app.services.gmail.sync_service import sync_gmail_emails_incremental
 from app.services.parser.pipeline import process_raw_emails
 from app.services.sync_events import sync_event_manager
@@ -143,14 +143,13 @@ async def _run_account_sync(gmail_account_id: str) -> None:
         )
     except Exception as exc:
         error_type = classify_connector_exception(exc)
-        if error_type == ConnectorErrorType.TRANSIENT:
-            logger.warning(
-                "Automatic sync transient failure for Gmail account %s: %s",
-                gmail_account_id,
-                exc,
-            )
-        else:
-            logger.exception("Automatic sync failed for Gmail account %s", gmail_account_id)
+        public_error = public_connector_error(error_type)
+        logger.warning(
+            "Automatic sync failed for Gmail account %s error_type=%s exception=%s",
+            gmail_account_id,
+            error_type.value,
+            type(exc).__name__,
+        )
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(GmailAccount).where(GmailAccount.id == gmail_account_id)
@@ -160,13 +159,13 @@ async def _run_account_sync(gmail_account_id: str) -> None:
                 account.auto_sync_status = (
                     "paused" if error_type == ConnectorErrorType.PERMANENT else "error"
                 )
-                account.auto_sync_error = str(exc)
+                account.auto_sync_error = public_error
                 account.last_sync_started_at = datetime.now(UTC)
                 await db.commit()
                 await sync_event_manager.broadcast(
                     account.user_id,
                     "sync_failed",
-                    {"error": str(exc), "error_type": error_type.value},
+                    {"error": public_error, "error_type": error_type.value},
                 )
     finally:
         _running_account_ids.discard(gmail_account_id)

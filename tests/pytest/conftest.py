@@ -21,8 +21,9 @@ import app.database as database_module
 import app.main as main_module
 import app.services.auto_sync_service as auto_sync_service_module
 import app.services.job_service as job_service_module
+from app.api.routes import ws as ws_routes_module
 from app.config import get_settings
-from app.database import Base, get_db
+from app.database import Base, enable_sqlite_foreign_keys, get_db
 from app.main import app
 from app.services.seed_service import run_seeds
 
@@ -41,6 +42,7 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         f"sqlite+aiosqlite:///{db_path}",
         connect_args={"check_same_thread": False},
     )
+    enable_sqlite_foreign_keys(engine.sync_engine)
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     _patch_settings(
@@ -52,6 +54,7 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         TOKEN_ENCRYPTION_KEY="",
         GOOGLE_ALLOWED_EMAILS=[],
     )
+    main_module.limiter.reset()
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -68,6 +71,7 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(database_module, "AsyncSessionLocal", session_factory, raising=False)
     monkeypatch.setattr(main_module, "AsyncSessionLocal", session_factory, raising=False)
     monkeypatch.setattr(job_service_module, "AsyncSessionLocal", session_factory, raising=False)
+    monkeypatch.setattr(ws_routes_module, "AsyncSessionLocal", session_factory, raising=False)
     monkeypatch.setattr(
         auto_sync_service_module, "AsyncSessionLocal", session_factory, raising=False
     )
@@ -81,6 +85,7 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         yield session_factory
     finally:
         app.dependency_overrides.clear()
+        main_module.limiter.reset()
         invalidate_merchant_cache()
         await engine.dispose()
 

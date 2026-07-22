@@ -9,6 +9,12 @@ async def test_health_endpoint_ok(client):
     assert "status" in response.json()
 
 
+async def test_readiness_endpoint_checks_database(client):
+    response = await client.get("/api/health/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "database": "reachable"}
+
+
 async def test_operational_health_exposes_safe_runtime_state(client):
     response = await client.get("/api/health/ops")
     assert response.status_code == 200
@@ -30,6 +36,9 @@ async def test_operational_health_exposes_safe_runtime_state(client):
 async def test_request_id_header_is_added(client):
     response = await client.get("/api/health")
     assert response.headers.get("X-Request-ID")
+    timing = response.headers.get("Server-Timing", "")
+    assert timing.startswith("app;dur=")
+    assert float(timing.removeprefix("app;dur=")) >= 0
 
 
 async def test_request_id_header_is_echoed_when_supplied(client):

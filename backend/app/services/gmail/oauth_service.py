@@ -9,8 +9,12 @@ Flow:
 4. Tokens stored in gmail_accounts table
 """
 
+import base64
+import hashlib
 import logging
 import re
+import secrets
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -27,15 +31,24 @@ settings = get_settings()
 _GOOGLE_CLIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$")
 
 # Gmail read-only scope — minimum access needed
-SCOPES = [
+IDENTITY_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
+]
+
+GMAIL_SCOPES = [
+    *IDENTITY_SCOPES,
     "https://www.googleapis.com/auth/gmail.readonly",
 ]
 
+SCOPES = GMAIL_SCOPES
 
-def create_oauth_flow(redirect_uri: str | None = None) -> Flow:
+
+def create_oauth_flow(
+    redirect_uri: str | None = None,
+    scopes: list[str] | None = None,
+) -> Flow:
     """
     Create a Google OAuth flow instance.
     Uses client ID/secret from environment (no credentials.json file needed).
@@ -55,7 +68,7 @@ def create_oauth_flow(redirect_uri: str | None = None) -> Flow:
 
     flow = Flow.from_client_config(
         client_config,
-        scopes=SCOPES,
+        scopes=scopes or GMAIL_SCOPES,
         redirect_uri=redirect_uri or settings.GOOGLE_REDIRECT_URI,
     )
 
@@ -80,32 +93,54 @@ def validate_google_oauth_settings() -> None:
         )
 
 
-def get_authorization_url(redirect_uri: str | None = None) -> tuple[str, str]:
+def get_authorization_url(
+    redirect_uri: str | None = None,
+    *,
+    scopes: list[str] | None = None,
+    offline: bool = True,
+) -> tuple[str, str, str, str]:
     """
     Generate the Google OAuth authorization URL.
     Returns (auth_url, state) tuple.
     """
     validate_google_oauth_settings()
 
-    flow = create_oauth_flow(redirect_uri=redirect_uri)
+    flow = create_oauth_flow(redirect_uri=redirect_uri, scopes=scopes or GMAIL_SCOPES)
+    code_verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    nonce = secrets.token_urlsafe(32)
 
     auth_url, state = flow.authorization_url(
-        access_type="offline",  # Get refresh token
-        include_granted_scopes="true",
-        prompt="consent",  # Always show consent (ensures refresh token)
+        access_type="offline" if offline else "online",
+        # Identity sign-in must not inherit an older Gmail grant. Besides
+        # preserving consent separation, this prevents OAuthLib from rejecting
+        # the callback when Google returns a broader, previously granted scope.
+        include_granted_scopes="true" if offline else "false",
+        prompt="consent" if offline else "select_account",
+        code_challenge=code_challenge,
+        code_challenge_method="S256",
+        nonce=nonce,
     )
 
-    logger.info(f"Generated OAuth URL (state={state[:8]}...)")
-    return auth_url, state
+    logger.info("Generated Google OAuth authorization URL")
+    return auth_url, state, code_verifier, nonce
 
 
-def exchange_code_for_tokens(code: str, redirect_uri: str | None = None) -> dict:
+def exchange_code_for_tokens(
+    code: str,
+    redirect_uri: str | None = None,
+    *,
+    scopes: list[str] | None = None,
+    code_verifier: str | None = None,
+) -> dict:
     """
     Exchange the authorization code for access and refresh tokens.
     Returns dict with access_token, refresh_token, expiry.
     """
-    flow = create_oauth_flow(redirect_uri=redirect_uri)
-    flow.fetch_token(code=code)
+    requested_scopes = scopes or GMAIL_SCOPES
+    flow = create_oauth_flow(redirect_uri=redirect_uri, scopes=requested_scopes)
+    flow.fetch_token(code=code, code_verifier=code_verifier)
 
     credentials = flow.credentials
 
@@ -114,14 +149,18 @@ def exchange_code_for_tokens(code: str, redirect_uri: str | None = None) -> dict
         "refresh_token": credentials.refresh_token,
         "id_token": credentials.id_token,
         "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
-        "scopes": list(credentials.scopes) if credentials.scopes else SCOPES,
+        "scopes": list(credentials.scopes) if credentials.scopes else requested_scopes,
     }
 
     logger.info("Successfully exchanged auth code for tokens")
     return token_data
 
 
-def verify_google_identity(token_data: dict[str, Any]) -> dict[str, Any]:
+def verify_google_identity(
+    token_data: dict[str, Any],
+    *,
+    expected_nonce: str | None = None,
+) -> dict[str, Any]:
     """
     Verify Google's ID token and return normalized profile fields.
     """
@@ -141,11 +180,17 @@ def verify_google_identity(token_data: dict[str, Any]) -> dict[str, Any]:
     email = str(payload.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(status_code=401, detail="Google account email is missing")
-    if payload.get("email_verified") is False:
+    if payload.get("email_verified") is not True:
         raise HTTPException(status_code=401, detail="Google account email is not verified")
+    if expected_nonce and payload.get("nonce") != expected_nonce:
+        raise HTTPException(status_code=401, detail="Invalid Google identity nonce")
+
+    subject = str(payload.get("sub") or "")
+    if not subject:
+        raise HTTPException(status_code=401, detail="Google account identifier is missing")
 
     return {
-        "google_account_id": str(payload.get("sub") or ""),
+        "google_account_id": subject,
         "email": email,
         "name": str(payload.get("name") or email.split("@")[0]),
         "picture": payload.get("picture"),
@@ -175,11 +220,18 @@ def refresh_access_token(refresh_token: str) -> dict:
     }
 
 
-def build_credentials(access_token: str, refresh_token: str) -> Credentials:
+def build_credentials(
+    access_token: str,
+    refresh_token: str,
+    expiry: datetime | None = None,
+) -> Credentials:
     """
     Build a Credentials object from stored tokens.
     Used to authenticate Gmail API calls.
     """
+    google_expiry = expiry
+    if google_expiry is not None and google_expiry.tzinfo is not None:
+        google_expiry = google_expiry.astimezone(UTC).replace(tzinfo=None)
     return Credentials(
         token=access_token,
         refresh_token=refresh_token,
@@ -187,4 +239,5 @@ def build_credentials(access_token: str, refresh_token: str) -> Credentials:
         client_id=settings.GOOGLE_CLIENT_ID,
         client_secret=settings.GOOGLE_CLIENT_SECRET,
         scopes=SCOPES,
+        expiry=google_expiry,
     )

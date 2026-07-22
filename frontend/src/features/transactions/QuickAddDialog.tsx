@@ -118,7 +118,6 @@ export function QuickAddDialog({ open, onClose }: { open: boolean; onClose: () =
         queryClient.invalidateQueries({ queryKey: queryKeys.summary(user.id, month, year) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.workspace(user.id, month, year) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.guidanceBrief(user.id, month, year) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.cashFlow(user.id, month, year) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.accounts(user.id) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.netWorth(user.id) }),
       ]);

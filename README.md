@@ -4,10 +4,11 @@ PFIS ingests financial emails, parses transaction data into structured records,
 deduplicates and categorizes them, and surfaces insights, budgets, and reports
 through a dashboard.
 
-- **Backend:** FastAPI (Python 3.13), async SQLAlchemy, SQLite locally.
+- **Backend:** FastAPI (Python 3.13), async SQLAlchemy, SQLite locally and
+  PostgreSQL in production/CI.
 - **Frontend:** React + TypeScript + Vite under `frontend/` (see its README). Built
-  output is served by FastAPI at `/dashboard`; the legacy static dashboard under
-  `backend/app/static` remains a fallback until a build is present.
+  output is served by FastAPI at `/dashboard`. FastAPI does not serve the retired
+  static dashboard when the React build is missing.
 - **Docs:** `docs/` is the source of truth (architecture, data model, API, parser, security).
 
 ## Quick start
@@ -69,12 +70,13 @@ With `make` (or run the underlying commands directly — see the `Makefile`):
 | `make lint` | Ruff lint |
 | `make format` | Auto-format (ruff --fix + black) |
 | `make format-check` | Verify formatting without writing |
-| `make typecheck` | Mypy (baseline, non-blocking) |
-| `make check` | Lint + format-check + tests (local gate) |
+| `make typecheck` | Run the blocking mypy gate |
+| `make check` | Lint + format-check + type-check + tests |
 | `make precommit` | Install git pre-commit hooks |
 
-CI runs the same lint/format/type/test gate on every push and pull request
-(`.github/workflows/ci.yml`).
+CI runs lint/format/type/tests, dependency audits, a real PostgreSQL migration
+and runtime gate, frontend build checks, and browser regression on every pull
+request (`.github/workflows/ci.yml`).
 
 ## Project layout
 

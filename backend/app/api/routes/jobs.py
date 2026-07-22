@@ -1,6 +1,8 @@
 """Background orchestration routes for sync, pipeline, and retry jobs."""
 
-from fastapi import APIRouter, Depends, Query, Request
+from typing import Any
+
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -19,11 +21,18 @@ async def enqueue_demo_sync_pipeline(
     request: Request,
     user_id: str = Query(...),
     limit: int = Query(50, ge=1, le=200),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key", max_length=200),
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     authorized_user_id = resolve_user_scope(user_id, current_user)
-    job = await create_job(db, "demo_sync_pipeline", authorized_user_id, {"limit": limit})
+    job = await create_job(
+        db,
+        "demo_sync_pipeline",
+        authorized_user_id,
+        {"limit": limit},
+        idempotency_key=idempotency_key,
+    )
     schedule_job(job.id)
     return serialize_job(job)
 
@@ -36,11 +45,12 @@ async def enqueue_gmail_sync_pipeline(
     max_results: int = Query(500, ge=1, le=5000),
     limit: int = Query(500, ge=1, le=5000),
     sync_all: bool = Query(False),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key", max_length=200),
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     authorized_user_id = resolve_user_scope(user_id, current_user)
-    payload = {"sync_all": sync_all}
+    payload: dict[str, Any] = {"sync_all": sync_all}
     if sync_all:
         payload.update({"max_results": None, "limit": None})
     else:
@@ -51,6 +61,7 @@ async def enqueue_gmail_sync_pipeline(
         "gmail_sync_pipeline",
         authorized_user_id,
         payload,
+        idempotency_key=idempotency_key,
     )
     schedule_job(job.id)
     return serialize_job(job)
@@ -62,11 +73,18 @@ async def enqueue_retry_parse_failures(
     request: Request,
     user_id: str = Query(...),
     limit: int = Query(20, ge=1, le=200),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key", max_length=200),
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     authorized_user_id = resolve_user_scope(user_id, current_user)
-    job = await create_job(db, "retry_parse_failures", authorized_user_id, {"limit": limit})
+    job = await create_job(
+        db,
+        "retry_parse_failures",
+        authorized_user_id,
+        {"limit": limit},
+        idempotency_key=idempotency_key,
+    )
     schedule_job(job.id)
     return serialize_job(job)
 

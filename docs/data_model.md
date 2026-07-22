@@ -9,7 +9,10 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 ## Main Entities
 
 - `User`: registered user profile, currency, auth status.
-- `GmailAccount`: connected Gmail account and encrypted token references.
+- `AuthIdentity`: external provider identity keyed by stable provider subject and linked to a user.
+- `AuthSession`: revocable server-side browser session containing only hashed session and CSRF tokens.
+- `GmailAccount`: connected Gmail account, encrypted token references, and the
+  access-token expiry used for proactive refresh.
 - `FinancialAccount`: user-owned account identity inferred from connector metadata.
 - `AccountBalanceSnapshot`: append-only dated balance for an asset or liability account.
 - `DashboardPreference`: versioned, user-owned widget layout, theme, density, favorites, onboarding goal, and in-app briefing cadence.
@@ -18,13 +21,16 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 - `RawEmail`: stored email subject/body/sender/received timestamp for traceability.
 - `Transaction`: parsed financial transaction with confidence, parser version, fingerprint, and optional source email.
 - `Category`: category hierarchy for spending groups.
-- `Merchant`: normalized merchant name, aliases, and default category.
+- `Merchant`: curated shared merchant name, aliases, and default category. User workflows do not
+  mutate this global catalog.
+- `UserMerchantRule`: exact, user-owned mapping from an imported merchant descriptor to the user's
+  preferred normalized name and category.
 - `Budget`: user/category monthly budget limit.
 - `SyncRun`: Gmail sync observability record.
 - `ParseFailure`: dead-letter queue for failed parser attempts.
 - `UserCorrection`: feedback loop for corrected merchant/category/amount fields.
 - `BackgroundJob`: async job tracking.
-- `OAuthState`: persisted OAuth state with expiry.
+- `OAuthState`: single-use OAuth transaction with expiry, flow type, browser binding, encrypted PKCE verifier, and encrypted OIDC nonce.
 
 Transactions may reference a `FinancialAccount` through the nullable
 `financial_account_id` field. Migration `009_financial_accounts` backfills
@@ -41,6 +47,23 @@ Migration `012_financial_rhythm` adds the non-null `briefing_cadence` preference
 with a backward-compatible `daily` default. Allowed API values are `daily`,
 `weekly`, and `monthly`; the value only controls the deterministic in-app brief
 period and does not schedule external notifications.
+
+Migration `014_auth_sessions` adds external identities and revocable browser
+sessions, and hardens OAuth transactions with browser binding, PKCE, and nonce
+references. Google identity and Gmail connector authorization remain separate
+records and separate consent flows.
+
+Migration `015_financial_integrity` moves ledger amounts, balances, budgets, and
+goal targets to `NUMERIC(18,2)`, rejects invalid monetary values, enforces one
+budget per user/category and one Gmail connection per user/account, and keys
+financial-account identity by user, institution, account type, and masked number.
+The migration refuses to guess when legacy duplicates or invalid amounts exist;
+operators must reconcile those rows before retrying.
+
+Migration `016_durable_jobs` turns `BackgroundJob` into a durable queue record
+with atomic leases, attempt limits, retry availability, and scoped idempotency
+keys. Queued work survives restarts; interrupted running leases are requeued
+until their attempt budget is exhausted.
 
 An atomic transfer creates debit and credit transactions with one
 `transfer_group_id`. Both rows have `is_transfer=true`, remain auditable in the
@@ -63,12 +86,17 @@ users' records. The indexes are managed by Alembic migration
 ## Rules
 
 - All user-owned entities must be queried with user scope or checked with ownership helpers.
-- Tokens and OAuth secrets must be encrypted before storage.
+- Raw session and CSRF tokens must never be stored; persist hashes only. OAuth tokens and transient OAuth secrets must be encrypted before storage.
 - Raw emails are retained to support reprocessing.
 - Transaction `fingerprint` protects deduplication.
+- Monetary API inputs accept at most two decimal places and monetary persistence
+  uses fixed-scale decimal columns rather than binary floating point.
 - Transfer legs must be created together and excluded from financial aggregates.
 - Dashboard preferences, recommendation state, accounts, and balances are always user scoped.
 - Parser changes must preserve `parser_version` traceability.
+- Merchant corrections must remain user scoped. They create or update `UserMerchantRule` rows;
+  they must not promote aliases or category preferences into the global `Merchant` catalog.
+- Transactions preserve merchant-resolution source, confidence, rule id, and resolver version.
 - Model changes require tests and migration review.
 - Local/demo startup may create tables automatically for convenience, but shared or production environments must use Alembic migrations as the schema control path.
 

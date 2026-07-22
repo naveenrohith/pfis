@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from app.models.email import GmailAccount
 from app.services import auto_sync_service
 from app.services.sync_events import SyncEventManager
+from sqlalchemy import select
 from starlette.websockets import WebSocketState
 
 from tests.pytest.helpers import create_user
@@ -72,11 +73,12 @@ async def test_sync_event_manager_broadcasts_only_to_target_user():
 
 
 async def test_auto_sync_scheduler_does_not_overlap_running_account(
-    test_session_factory, monkeypatch
+    client, test_session_factory, monkeypatch
 ):
+    user = await create_user(client, "autosync-overlap")
     async with test_session_factory() as db:
         account = GmailAccount(
-            user_id="user-1",
+            user_id=user["id"],
             google_account_id="gmail-test",
             access_token_ref="token",
             refresh_token_ref="refresh",
@@ -105,10 +107,13 @@ async def test_auto_sync_scheduler_does_not_overlap_running_account(
     assert scheduled == []
 
 
-async def test_auto_sync_scheduler_respects_error_cooldown(test_session_factory, monkeypatch):
+async def test_auto_sync_scheduler_respects_error_cooldown(
+    client, test_session_factory, monkeypatch
+):
+    user = await create_user(client, "autosync-cooldown")
     async with test_session_factory() as db:
         account = GmailAccount(
-            user_id="user-1",
+            user_id=user["id"],
             google_account_id="gmail-test",
             access_token_ref="token",
             refresh_token_ref="refresh",
@@ -130,3 +135,52 @@ async def test_auto_sync_scheduler_respects_error_cooldown(test_session_factory,
 
     assert due == 0
     assert scheduled == []
+
+
+async def test_auto_sync_failure_persists_and_broadcasts_only_safe_error(
+    client, test_session_factory, monkeypatch
+):
+    user = await create_user(client, "autosync-private-error")
+    secret = "invalid_grant refresh-token-must-not-leak"
+    async with test_session_factory() as db:
+        account = GmailAccount(
+            user_id=user["id"],
+            google_account_id="gmail-private-error",
+            access_token_ref="token",
+            refresh_token_ref="refresh",
+        )
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
+        account_id = account.id
+
+    async def fail_sync(_db, _user_id, _account_id):
+        raise RuntimeError(secret)
+
+    broadcasts: list[tuple[str, str, dict]] = []
+
+    async def capture_broadcast(user_id: str, event: str, payload: dict):
+        broadcasts.append((user_id, event, payload))
+
+    monkeypatch.setattr(auto_sync_service, "sync_gmail_emails_incremental", fail_sync)
+    monkeypatch.setattr(auto_sync_service.sync_event_manager, "broadcast", capture_broadcast)
+
+    await auto_sync_service._run_account_sync(account_id)
+
+    async with test_session_factory() as db:
+        stored = await db.scalar(select(GmailAccount).where(GmailAccount.id == account_id))
+
+    assert stored is not None
+    assert stored.auto_sync_status == "paused"
+    assert stored.auto_sync_error == "Gmail authorization is invalid or revoked"
+    assert secret not in stored.auto_sync_error
+    assert broadcasts == [
+        (
+            user["id"],
+            "sync_failed",
+            {
+                "error": "Gmail authorization is invalid or revoked",
+                "error_type": "permanent",
+            },
+        )
+    ]

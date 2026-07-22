@@ -2,8 +2,10 @@
 
 from datetime import date
 
+import app.database as database_module
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import event
 
 from tests.pytest.helpers import create_user
 
@@ -47,6 +49,10 @@ async def test_workspace_empty_month_returns_stable_shape(client: AsyncClient):
         "recommendations",
         "review_summary",
         "sync_summary",
+        "projection",
+        "month_comparison",
+        "financial_health",
+        "recurring_commitments",
     ):
         assert key in data
 
@@ -59,6 +65,31 @@ async def test_workspace_empty_month_returns_stable_shape(client: AsyncClient):
     assert snap["budget_risk_count"] == 0
     assert data["timeline"] == []
     assert data["recommendations"] == []
+    assert data["financial_health"]["monthly_stability"] == 0
+    assert data["financial_health"]["data_confidence"] == 0
+    assert data["financial_health"]["budget_adherence"] is None
+
+
+@pytest.mark.asyncio
+async def test_empty_workspace_stays_within_query_budget(client: AsyncClient):
+    """An empty dashboard must not fan out through the analytics query graph."""
+    user = await create_user(client)
+    today = date.today()
+    statements: list[str] = []
+
+    def count_statement(*args):
+        statements.append(args[2])
+
+    event.listen(database_module.engine.sync_engine, "before_cursor_execute", count_statement)
+    try:
+        response = await client.get(
+            f"/api/dashboard/workspace?user_id={user['id']}&month={today.month}&year={today.year}"
+        )
+    finally:
+        event.remove(database_module.engine.sync_engine, "before_cursor_execute", count_statement)
+
+    assert response.status_code == 200
+    assert len(statements) <= 2, statements
 
 
 @pytest.mark.asyncio

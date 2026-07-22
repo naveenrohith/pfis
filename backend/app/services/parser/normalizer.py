@@ -7,18 +7,36 @@ Includes TTL-based caching to avoid full table scans on every parse.
 import logging
 import re
 import time
+import unicodedata
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.category import Category, Merchant, parse_merchant_aliases
+from app.models.category import Category, Merchant, UserMerchantRule, parse_merchant_aliases
 
 logger = logging.getLogger(__name__)
 
 # Cache for merchant data (TTL-based)
 _merchant_cache: list = []
 _merchant_cache_time: float = 0.0
+_user_rule_cache: dict[str, tuple[float, list[UserMerchantRule]]] = {}
 _MERCHANT_CACHE_TTL: float = 60.0  # seconds
+_USER_RULE_CACHE_MAX_USERS = 256
+MERCHANT_RESOLVER_VERSION = 1
+
+
+@dataclass(frozen=True)
+class MerchantResolution:
+    """Explainable merchant resolution result used by ingestion and review flows."""
+
+    normalized_name: str
+    category_id: str | None
+    source: str
+    confidence: float
+    rule_id: str | None = None
+    resolver_version: int = MERCHANT_RESOLVER_VERSION
+
 
 GENERIC_MERCHANTS = {
     "UNKNOWN",
@@ -55,6 +73,13 @@ def _clean_merchant_name(raw: str) -> str:
     return cleaned.strip().title()
 
 
+def normalize_descriptor_key(raw: str) -> str:
+    """Build a deterministic exact-match key without retaining separator noise."""
+    normalized = unicodedata.normalize("NFKC", raw or "").casefold()
+    normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
 async def _get_cached_merchants(db: AsyncSession) -> list:
     """Return cached merchant list, refreshing if TTL expired."""
     global _merchant_cache, _merchant_cache_time
@@ -68,10 +93,30 @@ async def _get_cached_merchants(db: AsyncSession) -> list:
 
 
 def invalidate_merchant_cache() -> None:
-    """Invalidate the merchant cache (call after merchant table mutations)."""
-    global _merchant_cache, _merchant_cache_time
+    """Invalidate global and user-scoped merchant caches for deterministic refresh."""
+    global _merchant_cache, _merchant_cache_time, _user_rule_cache
     _merchant_cache = []
     _merchant_cache_time = 0.0
+    _user_rule_cache = {}
+
+
+def invalidate_user_merchant_rule_cache(user_id: str) -> None:
+    """Invalidate learned rules only for the user whose preferences changed."""
+    _user_rule_cache.pop(user_id, None)
+
+
+async def _get_cached_user_rules(db: AsyncSession, user_id: str) -> list[UserMerchantRule]:
+    now = time.time()
+    cached = _user_rule_cache.get(user_id)
+    if cached and (now - cached[0]) < _MERCHANT_CACHE_TTL:
+        return cached[1]
+    result = await db.execute(select(UserMerchantRule).where(UserMerchantRule.user_id == user_id))
+    rules = list(result.scalars().all())
+    if user_id not in _user_rule_cache and len(_user_rule_cache) >= _USER_RULE_CACHE_MAX_USERS:
+        oldest_user_id = min(_user_rule_cache, key=lambda key: _user_rule_cache[key][0])
+        _user_rule_cache.pop(oldest_user_id, None)
+    _user_rule_cache[user_id] = (now, rules)
+    return rules
 
 
 def _candidate_aliases(merchant: Merchant) -> list[str]:
@@ -80,26 +125,88 @@ def _candidate_aliases(merchant: Merchant) -> list[str]:
     return [candidate.strip() for candidate in candidates if candidate and candidate.strip()]
 
 
-async def normalize_merchant(db: AsyncSession, raw_merchant: str) -> tuple[str, str | None]:
-    """Returns (normalized_name, category_id)."""
+def _contains_candidate(raw_value: str, candidate: str) -> bool:
+    """Match a catalog candidate on token boundaries, never inside another word."""
+    return bool(
+        re.search(
+            rf"(?<!\w){re.escape(candidate.strip())}(?!\w)",
+            raw_value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+async def resolve_merchant(
+    db: AsyncSession,
+    raw_merchant: str,
+    *,
+    user_id: str | None = None,
+) -> MerchantResolution:
+    """Resolve a merchant with user rules taking precedence over shared catalog data."""
     if not raw_merchant:
-        return "Unknown", None
+        return MerchantResolution("Unknown", None, "fallback", 0.0)
+
+    descriptor_key = normalize_descriptor_key(raw_merchant)
+    if user_id and descriptor_key:
+        for rule in await _get_cached_user_rules(db, user_id):
+            if rule.descriptor_key == descriptor_key:
+                return MerchantResolution(
+                    normalized_name=rule.normalized_name,
+                    category_id=rule.category_id,
+                    source="user_rule",
+                    confidence=rule.confidence,
+                    rule_id=rule.id,
+                )
 
     raw_upper = raw_merchant.strip().upper()
     merchants = await _get_cached_merchants(db)
 
     for merchant in merchants:
         if raw_upper == merchant.normalized_name.upper():
-            return merchant.normalized_name, merchant.category_default_id
+            return MerchantResolution(
+                merchant.normalized_name,
+                merchant.category_default_id,
+                "canonical_name",
+                1.0,
+            )
         for alias in parse_merchant_aliases(merchant.aliases):
-            if alias.upper() == raw_upper or alias.upper() in raw_upper:
-                return merchant.normalized_name, merchant.category_default_id
+            if alias.upper() == raw_upper:
+                return MerchantResolution(
+                    merchant.normalized_name,
+                    merchant.category_default_id,
+                    "canonical_alias",
+                    0.98,
+                )
 
     for merchant in merchants:
-        if merchant.normalized_name.upper() in raw_upper:
-            return merchant.normalized_name, merchant.category_default_id
+        for alias in parse_merchant_aliases(merchant.aliases):
+            if _contains_candidate(raw_merchant, alias):
+                return MerchantResolution(
+                    merchant.normalized_name,
+                    merchant.category_default_id,
+                    "canonical_alias_contains",
+                    0.86,
+                )
+        if _contains_candidate(raw_merchant, merchant.normalized_name):
+            return MerchantResolution(
+                merchant.normalized_name,
+                merchant.category_default_id,
+                "canonical_contains",
+                0.8,
+            )
 
-    return _clean_merchant_name(raw_merchant), None
+    return MerchantResolution(_clean_merchant_name(raw_merchant), None, "cleaned_fallback", 0.5)
+
+
+async def normalize_merchant(
+    db: AsyncSession,
+    raw_merchant: str,
+    *,
+    user_id: str | None = None,
+) -> tuple[str, str | None]:
+    """Compatibility wrapper returning ``(normalized_name, category_id)``."""
+    resolution = await resolve_merchant(db, raw_merchant, user_id=user_id)
+    return resolution.normalized_name, resolution.category_id
 
 
 async def infer_merchant_from_text(

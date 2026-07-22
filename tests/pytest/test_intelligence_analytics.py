@@ -1,9 +1,14 @@
 """Regression tests for Phase 2-4 intelligence, analytics, goals, and explanations."""
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
+from app.models.category import Merchant, UserMerchantRule
+from app.models.sync import UserCorrection
+from app.models.transaction import Transaction
+from app.services.parser.normalizer import resolve_merchant
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from tests.pytest.helpers import create_user
 
@@ -58,7 +63,8 @@ async def test_merchant_and_category_intelligence(client: AsyncClient):
     merchants = merchants_resp.json()
     coffee = next(m for m in merchants if m["name"] == "Coffee Bar")
     assert coffee["transaction_count"] == 2
-    assert coffee["recurrence_likelihood"] >= 0.9
+    assert coffee["recurrence_likelihood"] == 0
+    assert coffee["recurrence_status"] == "candidate"
 
     detail_resp = await client.get(
         f"/api/merchants/Coffee%20Bar?user_id={user['id']}&month={today.month}&year={today.year}"
@@ -73,6 +79,170 @@ async def test_merchant_and_category_intelligence(client: AsyncClient):
     category_payload = category_resp.json()
     assert category_payload["categories"]
     assert any(c["top_merchants"] for c in category_payload["categories"])
+
+
+@pytest.mark.asyncio
+async def test_recurring_intelligence_uses_cadence_maturity_and_evidence(client: AsyncClient):
+    user = await create_user(client, "recurring-knowledge")
+    category_id = (await client.get("/api/categories/")).json()[0]["id"]
+    today = date.today()
+    for index, days_ago in enumerate((91, 61, 31, 1)):
+        await _seed_transaction(
+            client,
+            user["id"],
+            category_id,
+            merchant_normalized="Monthly Service",
+            amount=499 + index,
+            transaction_date=(today - timedelta(days=days_ago)).isoformat(),
+            reference_id=f"monthly-{index}",
+        )
+
+    response = await client.get(
+        f"/api/insights/?user_id={user['id']}&month={today.month}&year={today.year}"
+    )
+    assert response.status_code == 200
+    recurring = next(
+        item
+        for item in response.json()["recurring_payments"]
+        if item["merchant"] == "Monthly Service"
+    )
+    assert recurring["cadence"] == "monthly"
+    assert recurring["status"] == "mature"
+    assert recurring["confidence"] >= 0.8
+    assert recurring["monthly_equivalent"] > 0
+    assert recurring["evidence"]
+
+
+@pytest.mark.asyncio
+async def test_merchant_edit_is_user_scoped_and_preserves_ledger_invariants(
+    client: AsyncClient, test_session_factory
+):
+    first = await create_user(client, "merchant-edit-first")
+    second = await create_user(client, "merchant-edit-second")
+    categories = (await client.get("/api/categories/")).json()
+    food = next(category for category in categories if category["name"] == "Food")
+    shopping = next(category for category in categories if category["name"] == "Shopping")
+    today = date.today()
+
+    first_txn = await _seed_transaction(
+        client,
+        first["id"],
+        food["id"],
+        merchant_raw="COFFEE BAR BLR",
+        merchant_normalized="Coffee Bar",
+        amount=250.0,
+        reference_id="first-coffee",
+    )
+    second_txn = await _seed_transaction(
+        client,
+        second["id"],
+        food["id"],
+        merchant_raw="COFFEE BAR BLR",
+        merchant_normalized="Coffee Bar",
+        amount=250.0,
+        reference_id="second-coffee",
+    )
+
+    learned_rule_id = ""
+    async with test_session_factory() as db:
+        original_first_record = await db.get(Transaction, first_txn["id"])
+        assert original_first_record is not None
+        original_first_fingerprint = original_first_record.fingerprint
+
+    summary_before = await client.get(
+        f"/api/transactions/summary?user_id={first['id']}&month={today.month}&year={today.year}"
+    )
+    assert summary_before.status_code == 200
+
+    invalid_category = await client.patch(
+        f"/api/merchants/Coffee%20Bar?user_id={first['id']}&month={today.month}&year={today.year}",
+        json={"normalized_name": "Cafe Prime", "default_category_id": "missing-category"},
+    )
+    assert invalid_category.status_code == 409
+
+    response = await client.patch(
+        f"/api/merchants/Coffee%20Bar?user_id={first['id']}&month={today.month}&year={today.year}",
+        json={
+            "normalized_name": "Cafe Prime",
+            "default_category_id": shopping["id"],
+            "aliases": ["COFFEE PRIME BLR"],
+            "apply_existing": True,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == "Cafe Prime"
+    assert "COFFEE BAR BLR" in response.json()["aliases"]
+    assert "COFFEE PRIME BLR" in response.json()["aliases"]
+
+    first_rows = await client.get(f"/api/transactions/?user_id={first['id']}")
+    second_rows = await client.get(f"/api/transactions/?user_id={second['id']}")
+    assert first_rows.json()[0]["merchant_normalized"] == "Cafe Prime"
+    assert first_rows.json()[0]["category_id"] == shopping["id"]
+    assert first_rows.json()[0]["merchant_resolution_source"] == "user_rule"
+    assert second_rows.json()[0]["merchant_normalized"] == "Coffee Bar"
+    assert second_rows.json()[0]["category_id"] == food["id"]
+
+    summary_after = await client.get(
+        f"/api/transactions/summary?user_id={first['id']}&month={today.month}&year={today.year}"
+    )
+    assert summary_after.status_code == 200
+    assert summary_after.json()["top_merchants"][0]["name"] == "Cafe Prime"
+
+    async with test_session_factory() as db:
+        first_record = await db.get(Transaction, first_txn["id"])
+        second_record = await db.get(Transaction, second_txn["id"])
+        assert first_record is not None and second_record is not None
+        assert first_record.fingerprint != original_first_fingerprint
+        assert second_record.merchant_normalized == "Coffee Bar"
+
+        corrections = await db.execute(
+            select(UserCorrection).where(UserCorrection.transaction_id == first_txn["id"])
+        )
+        assert {row.field_corrected for row in corrections.scalars().all()} >= {
+            "merchant_normalized",
+            "category_id",
+        }
+
+        rules = await db.execute(
+            select(UserMerchantRule).where(UserMerchantRule.user_id == first["id"])
+        )
+        learned_rules = list(rules.scalars().all())
+        assert {rule.raw_descriptor for rule in learned_rules} >= {
+            "COFFEE BAR BLR",
+            "COFFEE PRIME BLR",
+        }
+        learned_rule_id = learned_rules[0].id
+        other_rules = await db.execute(
+            select(UserMerchantRule).where(UserMerchantRule.user_id == second["id"])
+        )
+        assert other_rules.scalars().all() == []
+
+        global_merchant = await db.execute(
+            select(Merchant).where(Merchant.normalized_name == "Cafe Prime")
+        )
+        assert global_merchant.scalar_one_or_none() is None
+
+        own_resolution = await resolve_merchant(db, "COFFEE PRIME BLR", user_id=first["id"])
+        other_resolution = await resolve_merchant(db, "COFFEE PRIME BLR", user_id=second["id"])
+        assert own_resolution.normalized_name == "Cafe Prime"
+        assert own_resolution.source == "user_rule"
+        assert other_resolution.normalized_name == "Coffee Prime Blr"
+        assert other_resolution.source == "cleaned_fallback"
+
+    listed_rules = await client.get(f"/api/merchants/learned-rules?user_id={first['id']}")
+    assert listed_rules.status_code == 200
+    assert {rule["raw_descriptor"] for rule in listed_rules.json()} >= {
+        "COFFEE BAR BLR",
+        "COFFEE PRIME BLR",
+    }
+    cannot_delete_other_user = await client.delete(
+        f"/api/merchants/learned-rules/{learned_rule_id}?user_id={second['id']}"
+    )
+    assert cannot_delete_other_user.status_code == 404
+    deleted = await client.delete(
+        f"/api/merchants/learned-rules/{learned_rule_id}?user_id={first['id']}"
+    )
+    assert deleted.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -155,6 +325,12 @@ async def test_analytics_goals_and_explain_endpoint(client: AsyncClient):
     )
     assert health.status_code == 200
     assert 0 <= health.json()["score"] <= 100
+    assert health.json()["score"] == health.json()["monthly_stability"]
+    assert 0 <= health.json()["data_confidence"] <= 100
+    assert health.json()["ruleset_version"] == "pfis-stability-1"
+    assert health.json()["budget_adherence"] is None
+    assert cash_flow.json()["ruleset_version"] == "pfis-cash-flow-3"
+    assert cash_flow.json()["evidence"]
 
     goal_resp = await client.post(
         f"/api/goals/?user_id={user['id']}",

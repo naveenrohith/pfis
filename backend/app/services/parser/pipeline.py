@@ -9,6 +9,7 @@ import json
 import logging
 from collections.abc import Iterable
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from time import perf_counter
 from typing import Any
 
@@ -27,9 +28,10 @@ from app.services.parser.base_parser import BaseParser, ParseResult
 from app.services.parser.confidence import score_parse_result
 from app.services.parser.identity import build_identity
 from app.services.parser.normalizer import (
+    MerchantResolution,
     get_default_category_id,
     infer_merchant_from_text,
-    normalize_merchant,
+    resolve_merchant,
 )
 from app.services.parser.registry import get_parser_registry
 from app.services.parser.validation import (
@@ -218,24 +220,32 @@ def _legacy_validation_error_message(
 
 async def _resolve_transaction_category(
     db: AsyncSession,
+    user_id: str,
     parse_result: ParseResult,
     inferred_category_id: str | None,
     default_category_id: str | None,
-) -> tuple[str, str | None]:
+) -> MerchantResolution:
     """Resolve normalized merchant and category for a parsed transaction."""
-    merchant_normalized, category_id = await normalize_merchant(db, parse_result.merchant_raw or "")
+    resolution = await resolve_merchant(db, parse_result.merchant_raw or "", user_id=user_id)
+    category_id = resolution.category_id
     if not category_id and inferred_category_id:
         category_id = inferred_category_id
     if not category_id:
         category_id = default_category_id
-    return merchant_normalized, category_id
+    return MerchantResolution(
+        normalized_name=resolution.normalized_name,
+        category_id=category_id,
+        source=resolution.source,
+        confidence=resolution.confidence,
+        rule_id=resolution.rule_id,
+        resolver_version=resolution.resolver_version,
+    )
 
 
 def _build_transaction_create(
     email: RawEmail,
     parse_result: ParseResult,
-    merchant_normalized: str,
-    category_id: str | None,
+    resolution: MerchantResolution,
 ) -> TransactionCreate:
     """Build the transaction create schema from a valid parse result."""
     if parse_result.amount is None or parse_result.transaction_type is None:
@@ -244,21 +254,26 @@ def _build_transaction_create(
         raise ValueError("Cannot build transaction without a transaction date")
 
     return TransactionCreate(
-        amount=parse_result.amount,
+        amount=Decimal(str(parse_result.amount)),
         currency=parse_result.currency,
         transaction_type=TransactionSchemaType(parse_result.transaction_type.value),
         payment_method=PaymentMethodEnum(parse_result.payment_method),
         transaction_status=parse_result.transaction_status,
         transaction_timestamp=parse_result.transaction_timestamp,
         merchant_raw=parse_result.merchant_raw,
-        merchant_normalized=merchant_normalized,
-        category_id=category_id,
+        merchant_normalized=resolution.normalized_name,
+        category_id=resolution.category_id,
         transaction_date=parse_result.date,
         account_last4=parse_result.account_last4,
         reference_id=parse_result.reference_id,
         confidence_score=parse_result.confidence_score,
         parser_version=parse_result.parser_version,
+        merchant_resolution_source=resolution.source,
+        merchant_resolution_confidence=resolution.confidence,
+        merchant_rule_id=resolution.rule_id,
+        merchant_resolver_version=resolution.resolver_version,
         source_email_id=email.id,
+        financial_account_id=None,
     )
 
 
@@ -346,8 +361,9 @@ async def _process_email_batch(
     default_category_id = await get_default_category_id(db)
 
     for email in emails:
+        email_id = email.id
         email_result: dict[str, Any] = {
-            "email_id": email.id,
+            "email_id": email_id,
             "subject": (email.subject or "")[:60],
             "sender": email.sender,
         }
@@ -466,16 +482,22 @@ async def _process_email_batch(
             if email_result.get("parser_fallback"):
                 stats["fallback_parsed"] += 1
 
-            merchant_normalized, category_id = await _resolve_transaction_category(
+            resolution = await _resolve_transaction_category(
                 db,
+                user_id,
                 parse_result,
                 inferred_category_id,
                 default_category_id,
             )
+            merchant_normalized = resolution.normalized_name
+            category_id = resolution.category_id
 
             email_result["merchant_normalized"] = merchant_normalized
             email_result["category_id"] = category_id
+            email_result["merchant_resolution_source"] = resolution.source
+            email_result["merchant_resolution_confidence"] = resolution.confidence
             email_result["confidence"] = parse_result.confidence_score
+            assert parse_result.date is not None
             identity = build_identity(
                 user_id=user_id,
                 amount=parse_result.amount or 0,
@@ -499,18 +521,20 @@ async def _process_email_batch(
                     "identity_level": identity.level,
                     "reference_present": bool(identity.reference_key),
                     "fuzzy_ready": bool(identity.fuzzy_key),
+                    "merchant_resolution_source": resolution.source,
+                    "merchant_resolution_confidence": resolution.confidence,
+                    "merchant_resolver_version": resolution.resolver_version,
                 },
             )
 
             txn_data = _build_transaction_create(
                 email,
                 parse_result,
-                merchant_normalized,
-                category_id,
+                resolution,
             )
 
             try:
-                txn = await txn_service.create_transaction(user_id, txn_data)
+                txn = await txn_service.create_transaction(user_id, txn_data, commit=False)
                 stats["stored"] += 1
                 email_result["status"] = "stored"
                 email_result["transaction_id"] = txn.id
@@ -552,29 +576,46 @@ async def _process_email_batch(
             email.processed_flag = True
             await db.commit()
 
-        except Exception as e:
+        except Exception as exc:
+            # The transaction row, email state, corrections, summary invalidation,
+            # and pipeline events are one per-email unit of work. Never commit a
+            # partially processed ledger entry from the error path.
+            await db.rollback()
+            if email_result.get("status") == "stored":
+                stats["stored"] -= 1
             stats["parsed_failed"] += 1
             email_result["status"] = "error"
-            email_result["error"] = str(e)
-            logger.error(f"Pipeline error for email {email.id}: {e}")
+            email_result["error"] = "pipeline_processing_failed"
+            logger.error(
+                "Pipeline record failed: email_id=%s error_type=%s",
+                email_id,
+                type(exc).__name__,
+            )
+
+            recovered_email = await db.get(RawEmail, email_id)
+            if recovered_email is None:
+                logger.error("Raw email %s disappeared while recording pipeline failure", email_id)
+                stats["results"].append(email_result)
+                continue
+            email = recovered_email
 
             await _record_parse_failure(
                 db,
                 email,
-                str(e),
+                "Pipeline processing failed",
                 parser_version=1,
                 failure_stage="pipeline",
                 failure_code="unexpected_error",
-                diagnostic={"error_type": type(e).__name__},
+                diagnostic={"error_type": type(exc).__name__},
             )
             _record_pipeline_event(
                 db,
                 user_id=user_id,
-                email_id=email.id,
+                email_id=email_id,
                 event_type="ParseFailed",
                 stage="pipeline",
                 status="error",
-                payload={"error_type": type(e).__name__},
+                payload={"error_type": type(exc).__name__},
             )
             email.processed_flag = True
             await db.commit()

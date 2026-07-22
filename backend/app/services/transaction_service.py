@@ -8,20 +8,24 @@ import hashlib
 import json
 import logging
 from datetime import UTC, date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import asc, delete, desc, extract, func, or_, select
+from sqlalchemy import asc, delete, desc, extract, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.account import FinancialAccount
-from app.models.category import Category, Merchant, parse_merchant_aliases
+from app.models.category import Category, UserMerchantRule
+from app.models.email import RawEmail
 from app.models.summary import MonthlySummary
-from app.models.sync import UserCorrection
+from app.models.sync import PipelineEvent, UserCorrection
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionUpdate
 
 logger = logging.getLogger(__name__)
 AUTO_REVIEW_THRESHOLD = 0.85
+MONEY_QUANTUM = Decimal("0.01")
 
 
 class DuplicateTransactionError(ValueError):
@@ -44,7 +48,7 @@ class TransactionService:
     @staticmethod
     def compute_fingerprint(
         user_id: str,
-        amount: float,
+        amount: Decimal | float,
         transaction_date: date,
         merchant: str | None,
         reference_id: str | None,
@@ -54,10 +58,11 @@ class TransactionService:
         Compute SHA-256 fingerprint for deduplication.
         Uses: user + amount + date + merchant + ref_id + account
         """
+        canonical_amount = Decimal(str(amount)).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
         raw = "|".join(
             [
                 user_id,
-                str(amount),
+                format(canonical_amount, "f"),
                 str(transaction_date),
                 (merchant or "unknown").lower().strip(),
                 reference_id or "",
@@ -93,56 +98,88 @@ class TransactionService:
                 )
             )
 
+    async def upsert_user_merchant_rule(
+        self,
+        *,
+        user_id: str,
+        raw_descriptor: str,
+        normalized_name: str,
+        category_id: str | None,
+        source: str,
+        source_transaction_id: str | None = None,
+    ) -> UserMerchantRule | None:
+        """Create or refresh an exact user-owned merchant normalization rule."""
+        from app.services.parser.normalizer import (
+            invalidate_user_merchant_rule_cache,
+            normalize_descriptor_key,
+        )
+
+        raw_descriptor = raw_descriptor.strip()
+        normalized_name = normalized_name.strip()
+        descriptor_key = normalize_descriptor_key(raw_descriptor)
+        if not descriptor_key or not normalized_name:
+            return None
+
+        result = await self.db.execute(
+            select(UserMerchantRule).where(
+                UserMerchantRule.user_id == user_id,
+                UserMerchantRule.descriptor_key == descriptor_key,
+            )
+        )
+        rule = result.scalar_one_or_none()
+        now = datetime.now(UTC)
+        if rule is None:
+            rule = UserMerchantRule(
+                user_id=user_id,
+                raw_descriptor=raw_descriptor,
+                descriptor_key=descriptor_key,
+                normalized_name=normalized_name,
+                category_id=category_id,
+                source=source,
+                confidence=1.0,
+                source_transaction_id=source_transaction_id,
+                created_at=now,
+                updated_at=now,
+            )
+            self.db.add(rule)
+        else:
+            rule.raw_descriptor = raw_descriptor
+            rule.normalized_name = normalized_name
+            rule.category_id = category_id
+            rule.source = source
+            rule.confidence = 1.0
+            if source_transaction_id is not None:
+                rule.source_transaction_id = source_transaction_id
+            rule.updated_at = now
+
+        await self.db.flush()
+        invalidate_user_merchant_rule_cache(user_id)
+        return rule
+
     async def _learn_from_correction(
         self,
         txn: Transaction,
         changed_fields: set[str],
-    ) -> None:
-        """Feed merchant/category corrections back into normalization defaults."""
+    ) -> UserMerchantRule | None:
+        """Feed merchant/category corrections into an exact user-owned rule."""
         if not ({"merchant_normalized", "category_id"} & changed_fields):
-            return
+            return None
 
         normalized_name = (txn.merchant_normalized or "").strip()
         if not normalized_name:
-            return
-
-        result = await self.db.execute(
-            select(Merchant).where(func.lower(Merchant.normalized_name) == normalized_name.lower())
-        )
-        merchant = result.scalar_one_or_none()
+            return None
 
         raw_alias = (txn.merchant_raw or "").strip()
-        if merchant is None:
-            aliases = [raw_alias] if raw_alias else []
-            self.db.add(
-                Merchant(
-                    normalized_name=normalized_name,
-                    aliases=json.dumps(aliases),
-                    category_default_id=txn.category_id,
-                )
-            )
-            return
-
-        aliases = parse_merchant_aliases(merchant.aliases)
-
-        alias_keys = {
-            alias.strip().upper() for alias in aliases if isinstance(alias, str) and alias.strip()
-        }
-        if (
-            raw_alias
-            and raw_alias.upper() not in alias_keys
-            and raw_alias.upper() != merchant.normalized_name.upper()
-        ):
-            aliases.append(raw_alias)
-            merchant.aliases = json.dumps(aliases)
-
-        if txn.category_id:
-            merchant.category_default_id = txn.category_id
-
-        # Invalidate normalizer cache since we mutated merchant data
-        from app.services.parser.normalizer import invalidate_merchant_cache
-
-        invalidate_merchant_cache()
+        if not raw_alias:
+            return None
+        return await self.upsert_user_merchant_rule(
+            user_id=txn.user_id,
+            raw_descriptor=raw_alias,
+            normalized_name=normalized_name,
+            category_id=txn.category_id,
+            source="transaction_correction",
+            source_transaction_id=txn.id,
+        )
 
     async def _invalidate_monthly_summary(self, user_id: str, transaction_date: date) -> None:
         """Remove the affected aggregate snapshot before committing a mutation."""
@@ -156,8 +193,30 @@ class TransactionService:
 
     # --- CRUD ---
 
-    async def create_transaction(self, user_id: str, data: TransactionCreate) -> Transaction:
-        """Create a new transaction with dedup fingerprint."""
+    async def create_transaction(
+        self,
+        user_id: str,
+        data: TransactionCreate,
+        *,
+        commit: bool = True,
+    ) -> Transaction:
+        """Create a transaction, optionally joining the caller's unit of work."""
+
+        if data.category_id is not None:
+            category = await self.db.scalar(
+                select(Category.id).where(Category.id == data.category_id)
+            )
+            if category is None:
+                raise ValueError("Category not found")
+        if data.source_email_id is not None:
+            source_email = await self.db.scalar(
+                select(RawEmail.id).where(
+                    RawEmail.id == data.source_email_id,
+                    RawEmail.user_id == user_id,
+                )
+            )
+            if source_email is None:
+                raise ValueError("Source email not found")
 
         fingerprint = self.compute_fingerprint(
             user_id=user_id,
@@ -184,13 +243,18 @@ class TransactionService:
                     FinancialAccount.user_id == user_id,
                 )
             )
-            if account_result.scalar_one_or_none() is None:
+            account = account_result.scalar_one_or_none()
+            if account is None:
                 raise ValueError("Financial account not found")
+            if account.currency != data.currency:
+                raise ValueError("Transaction currency must match the financial account currency")
         elif data.account_last4:
             masked_number = f"****{data.account_last4}"
             account_result = await self.db.execute(
                 select(FinancialAccount).where(
                     FinancialAccount.user_id == user_id,
+                    FinancialAccount.institution_name == "Unknown",
+                    FinancialAccount.account_type == "unknown",
                     FinancialAccount.masked_number == masked_number,
                 )
             )
@@ -205,6 +269,8 @@ class TransactionService:
                 )
                 self.db.add(account)
                 await self.db.flush()
+            elif account.currency != data.currency:
+                raise ValueError("Transaction currency must match the financial account currency")
             financial_account_id = account.id
 
         txn = Transaction(
@@ -223,6 +289,10 @@ class TransactionService:
             reference_id=data.reference_id,
             confidence_score=data.confidence_score,
             parser_version=data.parser_version,
+            merchant_resolution_source=data.merchant_resolution_source,
+            merchant_resolution_confidence=data.merchant_resolution_confidence,
+            merchant_rule_id=data.merchant_rule_id,
+            merchant_resolver_version=data.merchant_resolver_version,
             reviewed_flag=data.confidence_score >= AUTO_REVIEW_THRESHOLD,
             reviewed_at=(
                 datetime.now(UTC) if data.confidence_score >= AUTO_REVIEW_THRESHOLD else None
@@ -234,8 +304,21 @@ class TransactionService:
 
         self.db.add(txn)
         await self._invalidate_monthly_summary(user_id, data.transaction_date)
-        await self.db.commit()
-        await self.db.refresh(txn)
+        try:
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            duplicate = await self.db.scalar(
+                select(Transaction.id).where(Transaction.fingerprint == fingerprint)
+            )
+            if duplicate is not None:
+                raise DuplicateTransactionError("Duplicate transaction detected") from exc
+            raise ValueError("Transaction conflicts with a database integrity rule") from exc
+        if commit:
+            await self.db.refresh(txn)
 
         logger.info(
             f"Transaction created: {txn.merchant_normalized} ₹{txn.amount} "
@@ -297,10 +380,7 @@ class TransactionService:
         order = asc(sort_column) if direction == "asc" else desc(sort_column)
         query = query.order_by(order, Transaction.id.desc()).limit(limit).offset(offset)
         result = await self.db.execute(query)
-        transactions = list(result.scalars().all())
-        for txn in transactions:
-            txn.category_name = txn.category.name if txn.category else None
-        return transactions
+        return list(result.scalars().all())
 
     async def get_transaction_by_id(self, txn_id: str) -> Transaction | None:
         """Get a single transaction by ID."""
@@ -310,8 +390,6 @@ class TransactionService:
             .where(Transaction.id == txn_id)
         )
         txn = result.scalar_one_or_none()
-        if txn:
-            txn.category_name = txn.category.name if txn.category else None
         return txn
 
     async def update_transaction(self, txn_id: str, data: TransactionUpdate) -> Transaction | None:
@@ -323,6 +401,23 @@ class TransactionService:
         update_data = data.model_dump(exclude_unset=True)
         if not update_data:
             return txn
+
+        protected_transfer_fields = {
+            "amount",
+            "transaction_type",
+            "payment_method",
+            "transaction_status",
+        }
+        attempted_transfer_fields = protected_transfer_fields.intersection(update_data)
+        if txn.is_transfer and attempted_transfer_fields:
+            fields = ", ".join(sorted(attempted_transfer_fields))
+            raise ValueError(f"Transfer ledger fields cannot be edited individually: {fields}")
+
+        category_id = update_data.get("category_id")
+        if category_id is not None:
+            category = await self.db.scalar(select(Category.id).where(Category.id == category_id))
+            if category is None:
+                raise ValueError("Category not found")
 
         changed_fields: dict[str, tuple[object, object]] = {}
         now = datetime.now(UTC)
@@ -369,16 +464,149 @@ class TransactionService:
                 txn.fingerprint = new_fingerprint
 
         await self._record_corrections(txn.id, changed_fields)
-        await self._learn_from_correction(txn, set(changed_fields))
+        learned_rule = await self._learn_from_correction(txn, set(changed_fields))
+        if learned_rule is not None:
+            txn.merchant_resolution_source = "user_rule"
+            txn.merchant_resolution_confidence = learned_rule.confidence
+            txn.merchant_rule_id = learned_rule.id
+            txn.merchant_resolver_version = 1
         await self._invalidate_monthly_summary(txn.user_id, txn.transaction_date)
 
         await self.db.commit()
         await self.db.refresh(txn)
         if txn.category_id:
             await self.db.refresh(txn, attribute_names=["category"])
-        txn.category_name = txn.category.name if txn.category else None
         logger.info(f"Transaction updated: {txn_id} fields={list(changed_fields.keys())}")
         return txn
+
+    async def bulk_correct_merchant(
+        self,
+        *,
+        user_id: str,
+        current_name: str,
+        normalized_name: str,
+        category_id: str | None,
+        rule_category_id: str | None,
+        aliases: list[str],
+        apply_existing: bool,
+    ) -> int:
+        """Apply a user-scoped merchant correction atomically and preserve ledger invariants."""
+        normalized_name = normalized_name.strip()
+        if not normalized_name:
+            raise ValueError("Normalized merchant name is required")
+        category_ids = {value for value in (category_id, rule_category_id) if value is not None}
+        for candidate_category_id in category_ids:
+            category_result = await self.db.execute(
+                select(Category.id).where(Category.id == candidate_category_id)
+            )
+            if category_result.scalar_one_or_none() is None:
+                raise ValueError("Category not found")
+
+        transactions: list[Transaction] = []
+        if apply_existing:
+            result = await self.db.execute(
+                select(Transaction).where(
+                    Transaction.user_id == user_id,
+                    or_(
+                        func.lower(Transaction.merchant_normalized) == current_name.lower(),
+                        func.lower(Transaction.merchant_raw) == current_name.lower(),
+                    ),
+                )
+            )
+            transactions = list(result.scalars().all())
+
+        planned_fingerprints: dict[str, str] = {}
+        for txn in transactions:
+            if txn.merchant_normalized == normalized_name:
+                continue
+            fingerprint = self.compute_fingerprint(
+                user_id=txn.user_id,
+                amount=txn.amount,
+                transaction_date=txn.transaction_date,
+                merchant=normalized_name,
+                reference_id=txn.reference_id,
+                account_last4=txn.account_last4,
+            )
+            owner = planned_fingerprints.get(fingerprint)
+            if owner is not None and owner != txn.id:
+                raise DuplicateTransactionError(
+                    "Merchant correction would create duplicate transactions"
+                )
+            planned_fingerprints[fingerprint] = txn.id
+
+        if planned_fingerprints:
+            existing = await self.db.execute(
+                select(Transaction.id, Transaction.fingerprint).where(
+                    Transaction.fingerprint.in_(planned_fingerprints),
+                    Transaction.id.not_in([txn.id for txn in transactions]),
+                )
+            )
+            if existing.first() is not None:
+                raise DuplicateTransactionError(
+                    "Merchant correction would create a duplicate transaction"
+                )
+
+        affected_periods: set[tuple[int, int]] = set()
+        for txn in transactions:
+            changes: dict[str, tuple[object, object]] = {}
+            if txn.merchant_normalized != normalized_name:
+                changes["merchant_normalized"] = (txn.merchant_normalized, normalized_name)
+                txn.merchant_normalized = normalized_name
+                txn.fingerprint = self.compute_fingerprint(
+                    user_id=txn.user_id,
+                    amount=txn.amount,
+                    transaction_date=txn.transaction_date,
+                    merchant=normalized_name,
+                    reference_id=txn.reference_id,
+                    account_last4=txn.account_last4,
+                )
+            if category_id is not None and txn.category_id != category_id:
+                changes["category_id"] = (txn.category_id, category_id)
+                txn.category_id = category_id
+            if not changes:
+                continue
+
+            if not txn.reviewed_flag:
+                changes["reviewed_flag"] = (False, True)
+                txn.reviewed_flag = True
+                txn.reviewed_at = datetime.now(UTC)
+            await self._record_corrections(txn.id, changes)
+            rule = await self.upsert_user_merchant_rule(
+                user_id=user_id,
+                raw_descriptor=txn.merchant_raw or current_name,
+                normalized_name=normalized_name,
+                category_id=txn.category_id,
+                source="merchant_edit",
+                source_transaction_id=txn.id,
+            )
+            if rule is not None:
+                txn.merchant_resolution_source = "user_rule"
+                txn.merchant_resolution_confidence = rule.confidence
+                txn.merchant_rule_id = rule.id
+                txn.merchant_resolver_version = 1
+            affected_periods.add((txn.transaction_date.month, txn.transaction_date.year))
+
+        rule_inputs = {current_name, *aliases}
+        for raw_descriptor in sorted(value.strip() for value in rule_inputs if value.strip()):
+            await self.upsert_user_merchant_rule(
+                user_id=user_id,
+                raw_descriptor=raw_descriptor,
+                normalized_name=normalized_name,
+                category_id=rule_category_id,
+                source="merchant_edit",
+            )
+
+        for month, year in affected_periods:
+            await self.db.execute(
+                delete(MonthlySummary).where(
+                    MonthlySummary.user_id == user_id,
+                    MonthlySummary.month == month,
+                    MonthlySummary.year == year,
+                )
+            )
+
+        await self.db.commit()
+        return len(transactions)
 
     async def bulk_update_transactions(
         self,
@@ -434,15 +662,48 @@ class TransactionService:
     # --- Aggregations ---
 
     async def delete_transaction(self, txn_id: str) -> bool:
-        """Delete a transaction by ID. Returns True if deleted."""
+        """Delete a transaction, including both legs when it is a transfer."""
         result = await self.db.execute(select(Transaction).where(Transaction.id == txn_id))
         txn = result.scalar_one_or_none()
         if not txn:
             return False
-        await self._invalidate_monthly_summary(txn.user_id, txn.transaction_date)
-        await self.db.delete(txn)
-        await self.db.commit()
-        logger.info(f"Transaction deleted: {txn_id}")
+
+        transactions = [txn]
+        if txn.is_transfer and txn.transfer_group_id:
+            pair_result = await self.db.execute(
+                select(Transaction).where(
+                    Transaction.user_id == txn.user_id,
+                    Transaction.transfer_group_id == txn.transfer_group_id,
+                    Transaction.is_transfer.is_(True),
+                )
+            )
+            transactions = list(pair_result.scalars().all())
+
+        transaction_ids = [candidate.id for candidate in transactions]
+        affected_periods = {
+            (candidate.user_id, candidate.transaction_date) for candidate in transactions
+        }
+        try:
+            await self.db.execute(
+                update(PipelineEvent)
+                .where(PipelineEvent.transaction_id.in_(transaction_ids))
+                .values(transaction_id=None)
+            )
+            await self.db.execute(
+                delete(UserCorrection).where(UserCorrection.transaction_id.in_(transaction_ids))
+            )
+            await self.db.execute(delete(Transaction).where(Transaction.id.in_(transaction_ids)))
+            for user_id, transaction_date in affected_periods:
+                await self._invalidate_monthly_summary(user_id, transaction_date)
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+        logger.info(
+            "Transaction deletion completed: requested_id=%s deleted_count=%d",
+            txn_id,
+            len(transaction_ids),
+        )
         return True
 
     async def get_transaction_count(
@@ -481,7 +742,7 @@ class TransactionService:
             amount_max=amount_max,
         )
         result = await self.db.execute(query)
-        return int(result.scalar())
+        return int(result.scalar() or 0)
 
     @staticmethod
     def _apply_list_filters(
@@ -555,7 +816,7 @@ class TransactionService:
                 extract("year", Transaction.transaction_date) == year,
             )
         )
-        total_spend = float(spend_result.scalar())
+        total_spend = float(spend_result.scalar() or 0)
 
         # Total income (credits)
         income_result = await self.db.execute(
@@ -567,7 +828,7 @@ class TransactionService:
                 extract("year", Transaction.transaction_date) == year,
             )
         )
-        total_income = float(income_result.scalar())
+        total_income = float(income_result.scalar() or 0)
 
         # Transaction count
         count_result = await self.db.execute(
@@ -577,7 +838,7 @@ class TransactionService:
                 extract("year", Transaction.transaction_date) == year,
             )
         )
-        count = int(count_result.scalar())
+        count = int(count_result.scalar() or 0)
 
         # Category breakdown
         cat_result = await self.db.execute(

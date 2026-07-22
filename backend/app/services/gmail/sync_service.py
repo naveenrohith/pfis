@@ -12,6 +12,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import TypedDict
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,14 +25,23 @@ from app.services.ingestion import IngestionCoordinator, IngestionMode
 logger = logging.getLogger(__name__)
 
 
+class DemoSyncStats(TypedDict):
+    emails_fetched: int
+    emails_stored: int
+    emails_skipped_otp: int
+    emails_skipped_promo: int
+    emails_skipped_duplicate: int
+    classifications: list[dict[str, object]]
+
+
 async def demo_sync_gmail_emails(
     db: AsyncSession,
     user_id: str,
-) -> dict:
+) -> DemoSyncStats:
     """Simulate Gmail sync using deterministic sample emails for demo/testing."""
     from app.services.gmail.demo_data import SAMPLE_EMAILS
 
-    stats = {
+    stats: DemoSyncStats = {
         "emails_fetched": len(SAMPLE_EMAILS),
         "emails_stored": 0,
         "emails_skipped_otp": 0,
@@ -44,6 +54,7 @@ async def demo_sync_gmail_emails(
     db.add(sync_run)
     await db.commit()
     await db.refresh(sync_run)
+    sync_run_id = sync_run.id
 
     try:
         for email_data in SAMPLE_EMAILS:
@@ -107,11 +118,21 @@ async def demo_sync_gmail_emails(
         sync_run.emails_processed = stats["emails_stored"]
         await db.commit()
         return stats
-    except Exception as e:
-        sync_run.status = SyncStatus.FAILED
-        sync_run.end_time = datetime.now(UTC)
-        sync_run.errors = json.dumps([{"error": str(e)}])
+    except Exception as exc:
+        await db.rollback()
+        failed_run = await db.scalar(
+            select(SyncRun).where(SyncRun.id == sync_run_id, SyncRun.user_id == user_id)
+        )
+        if failed_run is not None:
+            failed_run.status = SyncStatus.FAILED
+            failed_run.end_time = datetime.now(UTC)
+            failed_run.errors = json.dumps([{"error": f"demo_sync_{type(exc).__name__.lower()}"}])
         await db.commit()
+        logger.warning(
+            "Demo Gmail sync failed user=%s exception=%s",
+            user_id[:8],
+            type(exc).__name__,
+        )
         raise
 
 

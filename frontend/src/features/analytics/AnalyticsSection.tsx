@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, Plus, Target, TrendingUp } from 'lucide-react';
+import { Activity, CalendarClock, Plus, Target, TrendingUp } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -9,19 +9,21 @@ import { EmptyState, Skeleton } from '@/components/ui/Skeleton';
 import { SectionTitle } from '@/components/SectionTitle';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
-import { queryKeys, useCashFlow, useFinancialHealth, useGoals } from '@/features/workspace/queries';
+import { queryKeys, useGoals, useWorkspaceSnapshot } from '@/features/workspace/queries';
 import { useToast } from '@/components/ui/Toast';
-import { ExplainAction } from '@/features/ai/ExplainAction';
 import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
-import type { Goal, GoalType } from '@/lib/types';
+import type { Goal, GoalType, RecurringPayment } from '@/lib/types';
 import { ScenarioStudio } from './ScenarioStudio';
+
+const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 
 export function AnalyticsSection({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const { month, year } = useWorkspace();
-  const cashFlow = useCashFlow();
-  const health = useFinancialHealth();
+  const workspace = useWorkspaceSnapshot();
+  const cashFlow = workspace.data?.projection;
+  const health = workspace.data?.financial_health;
   const goals = useGoals();
   const currency = user?.currency ?? 'INR';
 
@@ -31,11 +33,11 @@ export function AnalyticsSection({ embedded = false }: { embedded?: boolean } = 
         <SectionTitle
           eyebrow="Analytics"
           title="Outlook and goals"
-          description="Forward-looking cash flow, financial health, and progress toward the outcomes you set."
+          description="Forward-looking cash flow, monthly stability, data confidence, and progress toward the outcomes you set."
           action={
-            health.data ? (
-              <Badge variant={health.data.score >= 70 ? 'success' : 'warning'}>
-                Health {health.data.score}
+            health ? (
+              <Badge variant={health.monthly_stability >= 70 ? 'success' : 'warning'}>
+                Stability {health.monthly_stability}
               </Badge>
             ) : undefined
           }
@@ -48,53 +50,43 @@ export function AnalyticsSection({ embedded = false }: { embedded?: boolean } = 
             <h3 className="flex items-center gap-2 font-bold">
               <TrendingUp className="h-4 w-4 text-info" /> Cash-flow projection
             </h3>
-            {cashFlow.isLoading ? (
+            {workspace.isLoading ? (
               <Skeleton className="h-36" />
-            ) : cashFlow.data ? (
+            ) : cashFlow ? (
               <>
                 <div className="grid grid-cols-2 gap-2">
                   <Metric
                     label="Net to date"
-                    value={formatCurrency(cashFlow.data.net_to_date, currency)}
+                    value={formatCurrency(cashFlow.net_to_date, currency)}
                   />
                   <Metric
                     label="Projected net"
-                    value={formatCurrency(cashFlow.data.projected_net, currency)}
+                    value={formatCurrency(cashFlow.projected_net, currency)}
                   />
                   <Metric
                     label="Spend/day"
-                    value={formatCurrency(cashFlow.data.daily_spend_rate, currency)}
+                    value={formatCurrency(cashFlow.daily_spend_rate, currency)}
                   />
                   <Metric
-                    label="Projected spend"
-                    value={formatCurrency(cashFlow.data.projected_spend, currency)}
+                    label="Expected income"
+                    value={formatCurrency(cashFlow.expected_income, currency)}
                   />
                   <Metric
-                    label="Recurring commitments"
-                    value={formatCurrency(cashFlow.data.recurring_commitments, currency)}
+                    label="Confirmed commitments"
+                    value={formatCurrency(cashFlow.confirmed_commitments, currency)}
                   />
                   <Metric
-                    label="Budget remaining"
-                    value={formatCurrency(cashFlow.data.budgeted_remaining, currency)}
+                    label="Flexible projection"
+                    value={formatCurrency(cashFlow.flexible_spend_projection, currency)}
                   />
                 </div>
                 <div className="rounded-xl border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-                  Expected spend range:{' '}
-                  {formatCurrency(cashFlow.data.projected_range_low, currency)}–
-                  {formatCurrency(cashFlow.data.projected_range_high, currency)}.{' '}
-                  {cashFlow.data.assumptions[2]}
+                  Expected spend range: {formatCurrency(cashFlow.projected_range_low, currency)}–
+                  {formatCurrency(cashFlow.projected_range_high, currency)} ·{' '}
+                  {Math.round(cashFlow.confidence * 100)}% confidence · {cashFlow.historical_months}{' '}
+                  comparable months
                 </div>
-                <ExplainAction
-                  payload={{
-                    surface: 'cash flow',
-                    title: 'Cash-flow projection',
-                    description: `Projected month-end net is ${formatCurrency(cashFlow.data.projected_net, currency)}.`,
-                    metrics: {
-                      net_to_date: formatCurrency(cashFlow.data.net_to_date, currency),
-                      daily_spend_rate: formatCurrency(cashFlow.data.daily_spend_rate, currency),
-                    },
-                  }}
-                />
+                <p className="text-xs leading-5 text-muted-foreground">{cashFlow.assumptions[2]}</p>
               </>
             ) : null}
           </CardContent>
@@ -103,50 +95,49 @@ export function AnalyticsSection({ embedded = false }: { embedded?: boolean } = 
         <Card>
           <CardContent className="grid gap-3 p-4 sm:p-5">
             <h3 className="flex items-center gap-2 font-bold">
-              <Activity className="h-4 w-4 text-success" /> Financial health
+              <Activity className="h-4 w-4 text-success" /> Stability & data confidence
             </h3>
-            {health.isLoading ? (
+            {workspace.isLoading ? (
               <Skeleton className="h-36" />
-            ) : health.data ? (
+            ) : health ? (
               <>
-                <div className="flex items-end justify-between">
-                  <span className="text-5xl font-extrabold">{health.data.score}</span>
-                  <Badge variant={health.data.score >= 70 ? 'success' : 'warning'}>
-                    {health.data.score >= 70 ? 'Stable' : 'Needs attention'}
-                  </Badge>
+                <div className="grid grid-cols-2 divide-x divide-border border-y border-border py-4">
+                  <Metric label="Monthly stability" value={String(health.monthly_stability)} />
+                  <div className="pl-4">
+                    <Metric label="Data confidence" value={String(health.data_confidence)} />
+                  </div>
                 </div>
                 <div className="grid gap-1.5">
-                  {health.data.signals.map((signal) => (
+                  {health.signals.map((signal) => (
                     <div key={signal.label} className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground">{signal.label}</span>
-                      <Badge variant={signal.severity}>{signal.value}%</Badge>
+                      <Badge variant={signal.severity}>
+                        {signal.value == null ? 'Not configured' : `${signal.value}%`}
+                      </Badge>
                     </div>
                   ))}
                 </div>
-                <ExplainAction
-                  payload={{
-                    surface: 'financial health',
-                    title: `Financial health score ${health.data.score}`,
-                    metrics: {
-                      savings_rate: `${health.data.savings_rate}%`,
-                      budget_adherence: `${health.data.budget_adherence}%`,
-                      recurring_burden: `${health.data.recurring_burden}%`,
-                      review_cleanliness: `${health.data.review_cleanliness}%`,
-                    },
-                  }}
-                />
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Stability measures the month. Data confidence measures how much PFIS can trust the
+                  underlying classifications; it does not improve the stability score.
+                </p>
               </>
             ) : null}
           </CardContent>
         </Card>
       </div>
 
+      <CommitmentLedger
+        commitments={workspace.data?.recurring_commitments ?? []}
+        currency={currency}
+      />
+
       <ScenarioStudio
         userId={user?.id ?? ''}
         month={month}
         year={year}
         currency={currency}
-        baseline={cashFlow.data}
+        baseline={cashFlow}
       />
 
       <GoalBoard
@@ -158,6 +149,71 @@ export function AnalyticsSection({ embedded = false }: { embedded?: boolean } = 
         loading={goals.isLoading}
       />
     </div>
+  );
+}
+
+function CommitmentLedger({
+  commitments,
+  currency,
+}: {
+  commitments: RecurringPayment[];
+  currency: string;
+}) {
+  const active = commitments.filter((item) => item.status !== 'inactive');
+  return (
+    <section aria-labelledby="commitment-rhythm-title" className="mt-6 border-y border-border py-5">
+      <div className="mb-4 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+        <div>
+          <p className="text-xs font-bold text-muted-foreground">Commitment rhythm</p>
+          <h3 id="commitment-rhythm-title" className="mt-1 text-xl font-extrabold">
+            Confirmed commitments & early signals
+          </h3>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Expected dates appear only when cadence evidence supports them.
+        </p>
+      </div>
+      {active.length ? (
+        <div className="divide-y divide-border">
+          {active.map((item) => (
+            <div
+              key={`${item.merchant}-${item.cadence ?? 'irregular'}`}
+              className="grid min-w-0 gap-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-bold">{item.merchant}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {item.cadence || 'Irregular'} · {Math.round(item.confidence * 100)}% confidence ·{' '}
+                  {item.occurrences} observations
+                </p>
+              </div>
+              <div className="text-left sm:text-right">
+                <p className="font-bold tabular-nums">
+                  {formatCurrency(item.monthly_equivalent, currency)} / month
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {item.status === 'mature'
+                    ? 'Confirmed'
+                    : item.status === 'missed'
+                      ? 'Possibly missed'
+                      : 'Early signal'}
+                </p>
+              </div>
+              <Badge variant={item.status === 'mature' ? 'success' : 'warning'}>
+                <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
+                {item.next_expected_date
+                  ? DATE_FORMAT.format(new Date(`${item.next_expected_date}T00:00:00`))
+                  : 'Date withheld'}
+              </Badge>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          No cadence has enough evidence to plan around yet.
+        </p>
+      )}
+    </section>
   );
 }
 

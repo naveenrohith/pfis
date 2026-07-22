@@ -46,7 +46,7 @@ def upgrade() -> None:
             sa.Column("masked_number", sa.String(32), nullable=False),
             sa.Column("currency", sa.String(3), nullable=False, server_default="INR"),
             sa.Column("connector_account_id", sa.String(36), nullable=True),
-            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
             sa.UniqueConstraint(
                 "user_id", "masked_number", name="uq_financial_accounts_user_masked"

@@ -30,7 +30,7 @@ def upgrade() -> None:
             sa.Column("target_key", sa.String(160), nullable=True),
             sa.Column("target_month", sa.Integer(), nullable=True),
             sa.Column("target_year", sa.Integer(), nullable=True),
-            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
         )
 

@@ -15,7 +15,6 @@ export type SessionMode = 'auth' | 'demo';
 
 export interface Session {
   mode: SessionMode;
-  token: string | null;
   expiresAt: number | null; // epoch ms
   user: User;
 }
@@ -106,7 +105,31 @@ export interface RecurringPayment {
   merchant: string;
   occurrences: number;
   avg_amount: number;
+  monthly_equivalent: number;
   is_consistent?: boolean;
+  cadence?: string | null;
+  median_interval_days?: number | null;
+  cadence_confidence: number;
+  amount_confidence: number;
+  confidence: number;
+  status: 'candidate' | 'early' | 'mature' | 'missed' | 'inactive';
+  last_seen: string;
+  next_expected_date?: string | null;
+  data_sufficiency: 'low' | 'medium' | 'high';
+  ruleset_version: string;
+  evidence: Array<{ label: string; value: string }>;
+  signal?: {
+    kind: string;
+    status: 'observed' | 'calculated' | 'forecast' | 'recommendation';
+    value: Record<string, unknown>;
+    confidence: number;
+    data_sufficiency: 'low' | 'medium' | 'high';
+    sample_size: number;
+    ruleset: { key: string; version: string };
+    evidence: Array<{ label: string; value: string }>;
+    assumptions: string[];
+    data_through?: string | null;
+  };
 }
 
 export interface InsightsResponse {
@@ -200,9 +223,10 @@ export interface Job {
   error_message?: string | null;
 }
 
-export interface AuthTokenResponse {
-  access_token: string;
+export interface AuthSessionResponse {
   expires_in: number;
+  mode: SessionMode;
+  csrf_cookie_name: string;
   user: User;
 }
 
@@ -286,6 +310,10 @@ export interface WorkspaceResponse {
   recommendations: WorkspaceRecommendation[];
   review_summary: ReviewSummary;
   sync_summary: SyncSummary;
+  projection: CashFlowProjection;
+  month_comparison: MonthComparison;
+  financial_health: FinancialHealthScore;
+  recurring_commitments: RecurringPayment[];
 }
 
 export interface TransactionPreview {
@@ -309,6 +337,11 @@ export interface MerchantSummary {
   category?: string | null;
   category_id?: string | null;
   recurrence_likelihood: number;
+  recurrence_status: 'candidate' | 'early' | 'mature' | 'missed' | 'inactive';
+  recurrence_cadence?: string | null;
+  recurrence_confidence: number;
+  next_expected_date?: string | null;
+  data_sufficiency: 'low' | 'medium' | 'high';
   latest_transaction_date?: string | null;
 }
 
@@ -316,6 +349,18 @@ export interface MerchantDetail extends MerchantSummary {
   aliases: string[];
   default_category_id?: string | null;
   latest_transactions: TransactionPreview[];
+}
+
+export interface LearnedMerchantRule {
+  id: string;
+  raw_descriptor: string;
+  normalized_name: string;
+  category_id?: string | null;
+  source: string;
+  confidence: number;
+  source_transaction_id?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CategoryTopMerchant {
@@ -356,10 +401,17 @@ export interface CashFlowProjection {
   days_elapsed: number;
   days_in_month: number;
   recurring_commitments: number;
+  confirmed_commitments: number;
+  expected_income: number;
+  flexible_spend_projection: number;
   budgeted_remaining: number;
   projected_range_low: number;
   projected_range_high: number;
   assumptions: string[];
+  evidence: Array<{ label: string; value: string }>;
+  confidence: number;
+  data_sufficiency: 'low' | 'medium' | 'high';
+  historical_months: number;
   data_through?: string | null;
   ruleset_version: string;
 }
@@ -412,13 +464,18 @@ export interface MonthComparison {
 
 export interface FinancialHealthScore {
   score: number;
+  monthly_stability: number;
+  data_confidence: number;
+  data_sufficiency: 'low' | 'medium' | 'high';
   savings_rate: number;
-  budget_adherence: number;
+  budget_adherence?: number | null;
   recurring_burden: number;
   review_cleanliness: number;
+  spending_volatility: number;
+  ruleset_version: string;
   signals: Array<{
     label: string;
-    value: number;
+    value: number | null;
     severity: 'info' | 'success' | 'warning' | 'danger';
   }>;
 }

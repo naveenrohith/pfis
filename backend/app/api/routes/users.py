@@ -11,21 +11,27 @@ from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
 from app.schemas.user import UserCreate, UserResponse
-from app.security import get_current_user_optional, resolve_user_scope
+from app.security import get_current_user_optional, normalize_email, resolve_user_scope
 
 router = APIRouter(prefix="/users", tags=["Users"])
 settings = get_settings()
 
 
 @router.post("/", response_model=UserResponse, status_code=201)
-async def create_user(data: UserCreate, db: AsyncSession = Depends(get_db)):
-    """Create a new user."""
+async def create_user(
+    data: UserCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a local fixture user; disabled when production auth is required."""
+    if settings.is_production:
+        raise HTTPException(status_code=404, detail="Not found")
+    email = normalize_email(str(data.email))
     # Check if email already exists
-    result = await db.execute(select(User).where(User.email == data.email))
+    result = await db.execute(select(User).where(User.email == email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="User with this email already exists")
 
-    user = User(email=data.email, name=data.name, currency=data.currency)
+    user = User(email=email, name=data.name, currency=data.currency)
     db.add(user)
     await db.commit()
     await db.refresh(user)

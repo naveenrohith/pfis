@@ -12,8 +12,9 @@ Endpoints:
 
 import logging
 from datetime import UTC, datetime, timedelta
+from secrets import token_urlsafe
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -24,10 +25,18 @@ from app.database import get_db
 from app.models.email import GmailAccount, RawEmail
 from app.models.sync import ConnectorAuditEvent, OAuthState, SyncRun
 from app.models.user import User
-from app.security import encrypt_secret, get_current_user_optional, resolve_user_scope
+from app.security import (
+    decrypt_secret,
+    encrypt_secret,
+    get_current_user_optional,
+    hash_session_token,
+    resolve_user_scope,
+)
 from app.services.gmail.oauth_service import (
+    GMAIL_SCOPES,
     exchange_code_for_tokens,
     get_authorization_url,
+    verify_google_identity,
 )
 from app.services.gmail.sync_service import demo_sync_gmail_emails, sync_gmail_emails
 
@@ -59,6 +68,15 @@ def _serialize_auto_sync(account: GmailAccount) -> dict:
     }
 
 
+def _parse_token_expiry(value: object) -> datetime | None:
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 # ─── OAuth Flow ───
 
 
@@ -74,25 +92,48 @@ async def gmail_connect(
     """
     user_id = resolve_user_scope(user_id, current_user)
     try:
-        auth_url, state = get_authorization_url(redirect_uri=settings.GMAIL_OAUTH_REDIRECT_URI)
+        auth_url, state, code_verifier, nonce = get_authorization_url(
+            redirect_uri=settings.GMAIL_OAUTH_REDIRECT_URI,
+            scopes=GMAIL_SCOPES,
+            offline=True,
+        )
+        browser_token = token_urlsafe(32)
         # Persist state in DB
         oauth_state = OAuthState(
             state=state,
             user_id=user_id,
             flow_type="gmail_connect",
+            browser_token_hash=hash_session_token(browser_token),
+            code_verifier_ref=encrypt_secret(code_verifier),
+            nonce_ref=encrypt_secret(nonce),
             expires_at=datetime.now(UTC) + timedelta(minutes=_OAUTH_STATE_TTL_MINUTES),
         )
         db.add(oauth_state)
         await db.commit()
         logger.info(f"OAuth flow started for user {user_id[:8]}...")
-        return RedirectResponse(url=auth_url)
-    except Exception as e:
-        logger.error(f"Failed to start OAuth: {e}")
-        raise HTTPException(status_code=500, detail=f"OAuth initialization failed: {str(e)}") from e
+        redirect = RedirectResponse(url=auth_url)
+        redirect.set_cookie(
+            settings.OAUTH_COOKIE_NAME,
+            browser_token,
+            max_age=_OAUTH_STATE_TTL_MINUTES * 60,
+            httponly=True,
+            secure=settings.SESSION_COOKIE_SECURE,
+            samesite="lax",
+            path="/api/auth",
+        )
+        return redirect
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to start Gmail OAuth exception=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=500, detail="Gmail connection could not be started"
+        ) from exc
 
 
 @auth_router.get("/callback")
 async def gmail_callback(
+    request: Request,
     code: str = Query(...),
     state: str = Query(...),
     db: AsyncSession = Depends(get_db),
@@ -102,46 +143,78 @@ async def gmail_callback(
     Exchange auth code for tokens and store them.
     """
     # Verify state from DB
-    result = await db.execute(select(OAuthState).where(OAuthState.state == state))
-    oauth_state = result.scalar_one_or_none()
+    oauth_state_result = await db.execute(select(OAuthState).where(OAuthState.state == state))
+    oauth_state = oauth_state_result.scalar_one_or_none()
     now_utc = datetime.now(UTC)
-    expires = oauth_state.expires_at if oauth_state else None
-    if expires and expires.tzinfo is None:
+    expires = oauth_state.expires_at if oauth_state is not None else None
+    if expires is not None and expires.tzinfo is None:
         now_utc = now_utc.replace(tzinfo=None)
-    if not oauth_state or expires < now_utc:
+    browser_token = request.cookies.get(settings.OAUTH_COOKIE_NAME)
+    browser_matches = bool(
+        oauth_state
+        and browser_token
+        and oauth_state.browser_token_hash
+        and oauth_state.browser_token_hash == hash_session_token(browser_token)
+    )
+    if (
+        not oauth_state
+        or expires is None
+        or expires < now_utc
+        or oauth_state.flow_type != "gmail_connect"
+        or not browser_matches
+    ):
         if oauth_state:
             await db.delete(oauth_state)
             await db.commit()
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
     user_id = oauth_state.user_id
+    code_verifier_ref = oauth_state.code_verifier_ref
+    nonce_ref = oauth_state.nonce_ref
     await db.delete(oauth_state)
-    await db.flush()
+    await db.commit()
 
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid OAuth state — missing user")
 
     try:
         # Exchange code for tokens
-        token_data = exchange_code_for_tokens(code, redirect_uri=settings.GMAIL_OAUTH_REDIRECT_URI)
+        token_data = exchange_code_for_tokens(
+            code,
+            redirect_uri=settings.GMAIL_OAUTH_REDIRECT_URI,
+            scopes=GMAIL_SCOPES,
+            code_verifier=decrypt_secret(code_verifier_ref),
+        )
+        profile = verify_google_identity(
+            token_data,
+            expected_nonce=decrypt_secret(nonce_ref),
+        )
+        token_expires_at = _parse_token_expiry(token_data.get("expiry"))
 
         # Check if Gmail account already exists for this user
-        result = await db.execute(select(GmailAccount).where(GmailAccount.user_id == user_id))
-        existing = result.scalar_one_or_none()
+        account_result = await db.execute(
+            select(GmailAccount).where(GmailAccount.user_id == user_id)
+        )
+        existing = account_result.scalar_one_or_none()
 
         if existing:
             # Update tokens
             existing.access_token_ref = encrypt_secret(token_data["access_token"])
-            existing.refresh_token_ref = encrypt_secret(token_data["refresh_token"])
+            refresh_token = encrypt_secret(token_data.get("refresh_token"))
+            if refresh_token:
+                existing.refresh_token_ref = refresh_token
+            existing.token_expires_at = token_expires_at
+            existing.google_account_id = profile["google_account_id"]
             gmail_account_id = existing.id
             logger.info(f"Updated Gmail tokens for user {user_id[:8]}...")
         else:
             # Create new Gmail account link
             gmail_account = GmailAccount(
                 user_id=user_id,
-                google_account_id=f"gmail_{user_id[:8]}",
+                google_account_id=profile["google_account_id"],
                 access_token_ref=encrypt_secret(token_data["access_token"]),
-                refresh_token_ref=encrypt_secret(token_data["refresh_token"]),
+                refresh_token_ref=encrypt_secret(token_data.get("refresh_token")),
+                token_expires_at=token_expires_at,
             )
             db.add(gmail_account)
             await db.flush()
@@ -157,16 +230,19 @@ async def gmail_callback(
             {"status": "connected"},
         )
 
-        return {
-            "status": "connected",
-            "message": "Gmail account connected successfully",
-            "gmail_account_id": gmail_account_id,
-            "user_id": user_id,
-        }
+        response = RedirectResponse(url="/dashboard?gmail_auth=success", status_code=303)
+        response.delete_cookie(settings.OAUTH_COOKIE_NAME, path="/api/auth")
+        return response
 
-    except Exception as e:
-        logger.error(f"OAuth callback failed: {e}")
-        raise HTTPException(status_code=500, detail=f"OAuth callback failed: {str(e)}") from e
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as exc:
+        await db.rollback()
+        logger.error("Gmail OAuth callback failed exception=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=500, detail="Gmail connection could not be completed"
+        ) from exc
 
 
 # ─── Gmail Operations ───
@@ -204,9 +280,9 @@ async def trigger_sync(
             "status": "completed",
             "stats": stats,
         }
-    except Exception as e:
-        logger.error(f"Sync failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}") from e
+    except Exception as exc:
+        logger.error("Gmail sync route failed exception=%s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Gmail synchronization failed") from exc
 
 
 @gmail_router.get("/status")

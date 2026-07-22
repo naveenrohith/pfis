@@ -35,6 +35,12 @@ class User(Base):
     goals = relationship("Goal", back_populates="user", lazy="select")
     pipeline_events = relationship("PipelineEvent", back_populates="user", lazy="select")
     financial_accounts = relationship("FinancialAccount", back_populates="user", lazy="select")
+    auth_identities = relationship(
+        "AuthIdentity", back_populates="user", lazy="select", cascade="all, delete-orphan"
+    )
+    auth_sessions = relationship(
+        "AuthSession", back_populates="user", lazy="select", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<User {self.email}>"

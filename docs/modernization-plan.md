@@ -10,9 +10,12 @@ PLANNER -> CODE -> TEST -> QUALITY -> REVIEW -> FIX
 
 ## Current Phase
 
-Phase 10: Financial domain and read-performance foundation.
+Phase 16: Pipeline failure privacy.
 
-Status: implementation pass in progress. Phase 9 evolves the parser pipeline without replacing the existing parser registry or introducing external queue infrastructure. Phase 10 adds account identity and cached monthly aggregates without changing the local/demo operating model.
+Status: complete. All repository-owned modernization phases are implemented and
+validated. Phase 16 removes raw pipeline exception text from responses, logs,
+per-record results, and durable parse-failure messages while retaining stable
+error categories and exception types.
 
 Goal: keep modernization work phased, tested, and reversible while preserving the local/demo developer path.
 
@@ -35,8 +38,14 @@ Goal: keep modernization work phased, tested, and reversible while preserving th
 | 4 | Reliability and operations | Job error classification and operational health counters complete |
 | 5 | Production hardening | Production config validation and deployment runbook complete |
 | 6 | Connector platform expansion | SourceRecord contract complete |
-| 9 | Parser pipeline observability and replay | Active |
-| 10 | Financial accounts and cached monthly summaries | Active |
+| 9 | Parser pipeline observability and replay | Complete |
+| 10 | Financial accounts and cached monthly summaries | Complete |
+| 11 | Coverage enforcement and ingestion privacy | Complete |
+| 12 | Realtime channel security and backpressure | Complete |
+| 13 | Gmail token lifecycle and provider contracts | Complete |
+| 14 | Financial account, currency, budget, and transfer invariants | Complete |
+| 15 | Paired-transfer mutation and deletion integrity | Complete |
+| 16 | Pipeline failure privacy and stable errors | Complete |
 
 ## Phase 0 Scope
 
@@ -102,7 +111,8 @@ Remaining Phase 1 follow-up:
 - Job failure categories are persisted in job results.
 - Operational health exposes non-secret runtime posture and job status counters.
 - Real Gmail calls remain excluded from tests.
-- Durable queue/worker selection remains deferred until a deployment target is chosen.
+- Database-backed job leases, retries, idempotency, and restart recovery protect
+  hosted background work without requiring a separate broker.
 
 ## Phase 5 Acceptance Criteria
 
@@ -116,12 +126,15 @@ Remaining Phase 1 follow-up:
 - Gmail remains the first connector and current behavior remains unchanged.
 - Connector fixture tests protect the source-record contract.
 
-## Deferred Production Decisions
+## Deployment-Owned Decisions
 
-- Durable background worker or queue implementation.
-- Production database provider and backup tooling.
-- Svelte dashboard promotion and static dashboard retirement.
-- Hosted observability stack and alert routing.
+- Production database provider, backup schedule, and restore-drill ownership.
+- Hosted log/metrics platform and alert routing.
+- TLS termination, network policy, and infrastructure scaling policy.
+
+These are release gates rather than unfinished source phases. They require the
+selected production provider and named operational owners; source code cannot
+truthfully provision or certify them.
 
 ## Phase 10 Acceptance Criteria
 
@@ -130,7 +143,40 @@ Remaining Phase 1 follow-up:
 - New transactions reuse the inferred financial account from their existing last-four metadata.
 - Monthly dashboard/report summaries persist after their first calculation and are invalidated by transaction mutations.
 - Dashboard feature sections load as users approach them, keeping the overview bundle small.
-- A durable queue remains deferred: cached aggregates and local background-job records are sufficient until a production deployment target is selected.
+- Cached aggregates and durable database-backed jobs remain compatible with the
+  local developer profile and a multi-replica PostgreSQL deployment.
+
+## Phase 11 Acceptance Criteria
+
+- Backend CI measures statement and branch coverage and rejects regressions below 70%.
+- Ingestion validates user and source ownership inside the service boundary.
+- A source record and its stored event are handled atomically per record.
+- Connector and job failures persist, audit, and broadcast stable public errors;
+  provider exception text is restricted to non-secret classifications.
+- Ownership, rollback, duplicate, and exception-privacy failure paths have
+  regression tests.
+
+## Phase 12 Acceptance Criteria
+
+- Production WebSocket upgrades require an explicitly allowed HTTPS origin and
+  a revocable session cookie; credentials in query strings are rejected.
+- Per-user connection and inbound-frame limits are configuration-bounded.
+- Broadcasts send concurrently with a timeout so one slow client cannot block
+  other users or sockets.
+- Disconnect, cross-user, origin, session, capacity, frame-size, slow-client,
+  and connection-establishment behavior has regression coverage.
+
+## Phase 13 Acceptance Criteria
+
+- Gmail access-token expiry is persisted through a reversible migration and
+  used for proactive refresh; legacy rows refresh once when expiry is unknown.
+- Repeated Gmail page tokens terminate safely instead of looping indefinitely.
+- Malformed individual messages produce non-secret record failures without
+  swallowing retryable or credential-wide provider failures.
+- Demo sync rolls back partial email storage and persists only a stable failure
+  category when a batch fails.
+- OAuth, migration, pagination, token refresh, message isolation, and rollback
+  behavior is protected by offline regression tests.
 
 ## Phase 9 Acceptance Criteria
 

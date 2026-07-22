@@ -36,3 +36,12 @@ def classify_connector_exception(exc: Exception) -> ConnectorErrorType:
     ):
         return ConnectorErrorType.TRANSIENT
     return ConnectorErrorType.UNKNOWN
+
+
+def public_connector_error(error_type: ConnectorErrorType) -> str:
+    """Return a stable client-safe message without exposing provider details."""
+    if error_type == ConnectorErrorType.PERMANENT:
+        return "Gmail authorization is invalid or revoked"
+    if error_type == ConnectorErrorType.TRANSIENT:
+        return "Gmail is temporarily unavailable"
+    return "Gmail synchronization failed"
