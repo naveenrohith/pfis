@@ -4,6 +4,7 @@ from datetime import date
 from unittest.mock import AsyncMock
 
 import pytest
+from app.models.sync import PipelineEvent, UserCorrection
 from app.models.transaction import Transaction
 from app.schemas.account import TransferCreate
 from app.services.account_service import AccountService
@@ -244,3 +245,105 @@ async def test_transfer_rolls_back_both_ledger_entries_on_commit_failure(
         )
 
     assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_transfer_ledger_fields_cannot_be_edited_individually(client: AsyncClient):
+    user = await create_user(client, "protected-transfer")
+    first = await _create_account(client, user["id"], "1010")
+    second = await _create_account(client, user["id"], "1011")
+    transfer = await client.post(
+        f"/api/transfers?user_id={user['id']}",
+        json={
+            "from_account_id": first["id"],
+            "to_account_id": second["id"],
+            "amount": 25,
+            "currency": "INR",
+            "transaction_date": date.today().isoformat(),
+        },
+    )
+    debit_id = transfer.json()["debit_transaction_id"]
+
+    response = await client.patch(f"/api/transactions/{debit_id}", json={"amount": 99})
+    listed = await client.get(f"/api/transactions/?user_id={user['id']}")
+
+    assert response.status_code == 409
+    assert "cannot be edited individually" in response.json()["error"]["message"]
+    assert {item["amount"] for item in listed.json()} == {25}
+
+
+@pytest.mark.asyncio
+async def test_deleting_one_transfer_leg_deletes_the_pair(client: AsyncClient):
+    user = await create_user(client, "delete-transfer")
+    first = await _create_account(client, user["id"], "1012")
+    second = await _create_account(client, user["id"], "1013")
+    transfer = await client.post(
+        f"/api/transfers?user_id={user['id']}",
+        json={
+            "from_account_id": first["id"],
+            "to_account_id": second["id"],
+            "amount": 25,
+            "currency": "INR",
+            "transaction_date": date.today().isoformat(),
+        },
+    )
+
+    response = await client.delete(f"/api/transactions/{transfer.json()['credit_transaction_id']}")
+    listed = await client.get(f"/api/transactions/?user_id={user['id']}")
+
+    assert response.status_code == 204
+    assert listed.json() == []
+
+
+@pytest.mark.asyncio
+async def test_deleting_corrected_transaction_cleans_history_and_detaches_events(
+    client: AsyncClient, test_session_factory
+):
+    user = await create_user(client, "delete-corrected")
+    created = await client.post(
+        f"/api/transactions/?user_id={user['id']}",
+        json={
+            "amount": 10,
+            "transaction_type": "debit",
+            "transaction_date": date.today().isoformat(),
+            "merchant_raw": "Original merchant",
+        },
+    )
+    transaction_id = created.json()["id"]
+    corrected = await client.patch(
+        f"/api/transactions/{transaction_id}", json={"merchant_normalized": "Corrected merchant"}
+    )
+    assert corrected.status_code == 200
+
+    async with test_session_factory() as session:
+        session.add(
+            PipelineEvent(
+                user_id=user["id"],
+                transaction_id=transaction_id,
+                event_type="test_event",
+                stage="test",
+                status="completed",
+            )
+        )
+        await session.commit()
+
+    response = await client.delete(f"/api/transactions/{transaction_id}")
+    assert response.status_code == 204
+
+    async with test_session_factory() as session:
+        transaction_count = await session.scalar(
+            select(func.count(Transaction.id)).where(Transaction.id == transaction_id)
+        )
+        correction_count = await session.scalar(
+            select(func.count(UserCorrection.id)).where(
+                UserCorrection.transaction_id == transaction_id
+            )
+        )
+        event = await session.scalar(
+            select(PipelineEvent).where(PipelineEvent.event_type == "test_event")
+        )
+
+    assert transaction_count == 0
+    assert correction_count == 0
+    assert event is not None
+    assert event.transaction_id is None

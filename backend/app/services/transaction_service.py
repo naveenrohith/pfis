@@ -10,7 +10,7 @@ import logging
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import asc, delete, desc, extract, func, or_, select
+from sqlalchemy import asc, delete, desc, extract, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -19,7 +19,7 @@ from app.models.account import FinancialAccount
 from app.models.category import Category, UserMerchantRule
 from app.models.email import RawEmail
 from app.models.summary import MonthlySummary
-from app.models.sync import UserCorrection
+from app.models.sync import PipelineEvent, UserCorrection
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionUpdate
 
@@ -402,6 +402,17 @@ class TransactionService:
         if not update_data:
             return txn
 
+        protected_transfer_fields = {
+            "amount",
+            "transaction_type",
+            "payment_method",
+            "transaction_status",
+        }
+        attempted_transfer_fields = protected_transfer_fields.intersection(update_data)
+        if txn.is_transfer and attempted_transfer_fields:
+            fields = ", ".join(sorted(attempted_transfer_fields))
+            raise ValueError(f"Transfer ledger fields cannot be edited individually: {fields}")
+
         category_id = update_data.get("category_id")
         if category_id is not None:
             category = await self.db.scalar(select(Category.id).where(Category.id == category_id))
@@ -651,15 +662,48 @@ class TransactionService:
     # --- Aggregations ---
 
     async def delete_transaction(self, txn_id: str) -> bool:
-        """Delete a transaction by ID. Returns True if deleted."""
+        """Delete a transaction, including both legs when it is a transfer."""
         result = await self.db.execute(select(Transaction).where(Transaction.id == txn_id))
         txn = result.scalar_one_or_none()
         if not txn:
             return False
-        await self._invalidate_monthly_summary(txn.user_id, txn.transaction_date)
-        await self.db.delete(txn)
-        await self.db.commit()
-        logger.info(f"Transaction deleted: {txn_id}")
+
+        transactions = [txn]
+        if txn.is_transfer and txn.transfer_group_id:
+            pair_result = await self.db.execute(
+                select(Transaction).where(
+                    Transaction.user_id == txn.user_id,
+                    Transaction.transfer_group_id == txn.transfer_group_id,
+                    Transaction.is_transfer.is_(True),
+                )
+            )
+            transactions = list(pair_result.scalars().all())
+
+        transaction_ids = [candidate.id for candidate in transactions]
+        affected_periods = {
+            (candidate.user_id, candidate.transaction_date) for candidate in transactions
+        }
+        try:
+            await self.db.execute(
+                update(PipelineEvent)
+                .where(PipelineEvent.transaction_id.in_(transaction_ids))
+                .values(transaction_id=None)
+            )
+            await self.db.execute(
+                delete(UserCorrection).where(UserCorrection.transaction_id.in_(transaction_ids))
+            )
+            await self.db.execute(delete(Transaction).where(Transaction.id.in_(transaction_ids)))
+            for user_id, transaction_date in affected_periods:
+                await self._invalidate_monthly_summary(user_id, transaction_date)
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+        logger.info(
+            "Transaction deletion completed: requested_id=%s deleted_count=%d",
+            txn_id,
+            len(transaction_ids),
+        )
         return True
 
     async def get_transaction_count(
