@@ -10,12 +10,13 @@ PLANNER -> CODE -> TEST -> QUALITY -> REVIEW -> FIX
 
 ## Current Phase
 
-Phase 16: Pipeline failure privacy.
+Phase 17: Executable production release gates.
 
 Status: complete. All repository-owned modernization phases are implemented and
-validated. Phase 16 removes raw pipeline exception text from responses, logs,
-per-record results, and durable parse-failure messages while retaining stable
-error categories and exception types.
+validated. Phase 17 provides fail-closed PostgreSQL restore-drill and deployed
+release verification automation, including named ownership, provider-control
+identifiers, fresh database-matched restore evidence, HTTPS, health payload,
+HSTS, latency, and non-weakenable error-rate checks.
 
 Goal: keep modernization work phased, tested, and reversible while preserving the local/demo developer path.
 
@@ -46,6 +47,7 @@ Goal: keep modernization work phased, tested, and reversible while preserving th
 | 14 | Financial account, currency, budget, and transfer invariants | Complete |
 | 15 | Paired-transfer mutation and deletion integrity | Complete |
 | 16 | Pipeline failure privacy and stable errors | Complete |
+| 17 | Backup/restore and deployed release verification gates | Complete |
 
 ## Phase 0 Scope
 

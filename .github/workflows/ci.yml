@@ -27,13 +27,13 @@ jobs:
           pip install -r backend/requirements-dev.txt
 
       - name: Ruff (lint)
-        run: ruff check backend/app tests
+        run: ruff check backend/app scripts tests
 
       - name: Black (format check)
-        run: black --check backend/app tests
+        run: black --check backend/app scripts tests
 
       - name: Mypy (type check)
-        run: mypy backend/app
+        run: mypy backend/app scripts/release_gate.py scripts/postgres_restore_drill.py
 
       - name: Audit Python dependencies
         run: pip-audit -r backend/requirements.txt

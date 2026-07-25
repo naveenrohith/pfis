@@ -71,6 +71,27 @@ Minimum production-candidate checklist:
 
 SQLite local/demo data can be backed up by copying the database file while the app is stopped. Server databases should use the provider's native backup tooling.
 
+### Executable restore drill
+
+Install the PostgreSQL client tools (`pg_dump` and `pg_restore`), create an empty
+disposable restore database, and set:
+
+- `DATABASE_URL` to the source PostgreSQL database.
+- `RESTORE_DATABASE_URL` to the disposable restore database.
+- `RESTORE_DATABASE_NAME` to the exact disposable database name as destructive confirmation.
+- `RELEASE_EVIDENCE_DIR` to a protected artifact directory.
+
+Then run `make restore-drill`, or invoke `scripts/postgres_restore_drill.py`
+directly on Windows. The command refuses a restore target matching the source,
+never prints connection URLs, restores with owner/privilege portability, and
+uses a single restore transaction with fail-fast error handling. It compares
+the Alembic revision and critical table row counts. Run it during a quiescent
+window: it fails if the source revision or critical row counts change while
+the backup is created. A passing run writes `restore-evidence.json`; retain it
+with the release record. The final release gate accepts evidence only for the
+named production database and only when the drill completed within the previous
+24 hours.
+
 ## Health And Monitoring
 
 Use:
@@ -101,3 +122,32 @@ Monitor:
 - Restore from backup if migration rollback cannot safely recover data.
 - Revert phase-scoped commits rather than mixing unrelated fixes.
 - Keep local/demo settings separate from production controls.
+
+## Final Release Gate
+
+Set `INCIDENT_OWNER`, `DATA_RECOVERY_OWNER`, and `SECURITY_OWNER` to real,
+deployment-owned contacts. Set `DATABASE_RESOURCE_ID`, `BACKUP_POLICY_ID`,
+`MONITORING_DASHBOARD_ID`, `ALERT_POLICY_ID`, `TLS_POLICY_ID`, and
+`NETWORK_POLICY_ID` to the corresponding provider resource identifiers. Set
+`PRODUCTION_DATABASE_NAME` to the exact source database named in the restore
+evidence. Also set `PFIS_PRODUCTION_URL` and `RELEASE_EVIDENCE_DIR`. Run:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\release_gate.py `
+  --base-url $env:PFIS_PRODUCTION_URL `
+  --restore-evidence "$env:RELEASE_EVIDENCE_DIR\restore-evidence.json" `
+  --output "$env:RELEASE_EVIDENCE_DIR\release-evidence.json"
+```
+
+The gate fails unless the target uses HTTPS with a valid certificate, liveness
+and readiness return their documented payloads, required security headers
+including HSTS are present, fresh restore evidence matches the production
+database, all operational owners are named, the probe sends at least 200
+requests, errors stay at or below 0.5%, and readiness p95 stays at or below
+750 ms. The CLI permits more traffic and tighter thresholds but rejects weaker
+release criteria.
+
+TLS termination, firewall/network policy, managed backup schedules, hosted log
+shipping, and alert routing remain provider controls. The release gate requires
+their identifiers in its evidence so they cannot be silently omitted; never
+commit credentials or fabricated ownership names.
