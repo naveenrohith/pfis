@@ -13,12 +13,12 @@ Run all tests:
 Run the blocking backend static-analysis gates:
 
 ```powershell
-.\.venv\Scripts\python.exe -m ruff check backend\app tests
-.\.venv\Scripts\python.exe -m black --check backend\app tests
-.\.venv\Scripts\python.exe -m mypy backend\app
+.\.venv\Scripts\python.exe -m ruff check backend\app scripts tests
+.\.venv\Scripts\python.exe -m black --check backend\app scripts tests
+.\.venv\Scripts\python.exe -m mypy backend\app scripts\release_gate.py scripts\postgres_restore_drill.py
 ```
 
-Mypy checks all 98 backend modules in CI, including bodies of functions without
+Mypy checks all 100 backend and operational-script source files in CI, including bodies of functions without
 fully annotated signatures. New typing errors and unused suppressions fail the
 build.
 

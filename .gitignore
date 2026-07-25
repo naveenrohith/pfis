@@ -41,6 +41,7 @@ Thumbs.db
 .pytest_cache/
 .test-tmp/
 .test-run/
+/tmp/
 
 # Tooling caches & coverage
 .ruff_cache/

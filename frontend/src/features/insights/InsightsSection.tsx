@@ -19,7 +19,7 @@ import { InsightCard } from '@/components/cards/InsightCard';
 import { useInsights, useSummary, useWorkspaceSnapshot } from '@/features/workspace/queries';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { useAuth } from '@/features/auth/AuthContext';
-import { formatCurrency, formatCompact } from '@/lib/format';
+import { formatChartCurrency, formatCompact, formatCurrency } from '@/lib/format';
 import { CHART_COLORS } from '@/lib/colors';
 
 export function InsightsSection({ embedded = false }: { embedded?: boolean } = {}) {
@@ -116,7 +116,7 @@ export function InsightsSection({ embedded = false }: { embedded?: boolean } = {
                       ))}
                     </Pie>
                     <Tooltip
-                      formatter={(value: number) => formatCurrency(value, currency)}
+                      formatter={(value) => formatChartCurrency(value, currency)}
                       contentStyle={{
                         background: 'hsl(var(--card))',
                         border: '1px solid hsl(var(--border))',
@@ -213,7 +213,7 @@ export function InsightsSection({ embedded = false }: { embedded?: boolean } = {
                     tickFormatter={(v) => formatCompact(v)}
                   />
                   <Tooltip
-                    formatter={(value: number) => formatCurrency(value, currency)}
+                    formatter={(value) => formatChartCurrency(value, currency)}
                     contentStyle={{
                       background: 'hsl(var(--card))',
                       border: '1px solid hsl(var(--border))',
