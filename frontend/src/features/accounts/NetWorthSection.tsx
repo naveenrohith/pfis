@@ -13,7 +13,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/features/auth/AuthContext';
 import { queryKeys, useAccounts, useNetWorth } from '@/features/workspace/queries';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/format';
+import { formatChartCurrency, formatCurrency } from '@/lib/format';
 
 function todayValue() {
   const now = new Date();
@@ -115,7 +115,7 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
                           tickFormatter={(value) => `${Math.round(value / 1000)}k`}
                         />
                         <Tooltip
-                          formatter={(value: number) => formatCurrency(value, currency)}
+                          formatter={(value) => formatChartCurrency(value, currency)}
                           contentStyle={{
                             background: 'hsl(var(--card))',
                             border: '1px solid hsl(var(--border))',

@@ -8,6 +8,12 @@ export function formatCurrency(value: number | null | undefined, currency = 'INR
   }).format(value ?? 0);
 }
 
+export function formatChartCurrency(value: unknown, currency = 'INR'): string {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  const numeric = typeof candidate === 'number' ? candidate : Number(candidate);
+  return formatCurrency(Number.isFinite(numeric) ? numeric : 0, currency);
+}
+
 export function formatCompact(value: number | null | undefined): string {
   const n = value ?? 0;
   if (Math.abs(n) >= 10_000_000) return `${(n / 10_000_000).toFixed(1)}Cr`;

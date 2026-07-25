@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatChartCurrency,
   formatCurrency,
   formatCompact,
   formatSignedAmount,
@@ -15,6 +16,12 @@ describe('format helpers', () => {
   it('compacts large numbers', () => {
     expect(formatCompact(1500)).toBe('1.5k');
     expect(formatCompact(250000)).toBe('2.5L');
+  });
+
+  it('formats chart values without trusting third-party payload types', () => {
+    expect(formatChartCurrency(1234, 'INR')).toContain('1,234');
+    expect(formatChartCurrency('1234', 'INR')).toContain('1,234');
+    expect(formatChartCurrency(undefined, 'INR')).toContain('0');
   });
 
   it('signs amounts by type', () => {
