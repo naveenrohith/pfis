@@ -40,7 +40,6 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
 @router.get("/health/ops")
 async def operational_health(db: AsyncSession = Depends(get_db)):
     """Return non-secret operational state for local and deployment checks."""
-    database_profile = "sqlite" if settings.DATABASE_URL.startswith("sqlite") else "server"
     sync_metrics = await _sync_metrics(db)
     return {
         "status": "healthy",
@@ -48,7 +47,7 @@ async def operational_health(db: AsyncSession = Depends(get_db)):
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
         "auth_required": settings.AUTH_REQUIRED,
-        "database_profile": database_profile,
+        "database_profile": "postgresql",
         "jobs": {
             "active_in_process": get_active_task_count(),
             "persisted_by_status": await get_job_status_counts(db),

@@ -1,0 +1,18 @@
+{
+  "name": "pfis-repository-tools",
+  "private": true,
+  "scripts": {
+    "supabase": "supabase",
+    "supabase:init": "supabase init",
+    "supabase:start": "supabase start --exclude edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector",
+    "supabase:start:full": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status",
+    "db:migrate:legacy": "python scripts/migrate_sqlite_to_postgres.py",
+    "db:migrate:legacy:apply": "python scripts/migrate_sqlite_to_postgres.py --apply",
+    "db:migrate:hosted": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/migrate_hosted_supabase.ps1"
+  },
+  "devDependencies": {
+    "supabase": "2.109.1"
+  }
+}

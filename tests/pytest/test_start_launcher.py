@@ -33,7 +33,7 @@ def test_ensure_env_file_creates_generated_secret_from_example(monkeypatch, tmp_
     backend_dir = patch_env_paths(monkeypatch, module, tmp_path)
     monkeypatch.setattr(module.secrets, "token_urlsafe", lambda _: "generated-local-secret")
     module.ENV_EXAMPLE.write_text(
-        "DATABASE_URL=sqlite+aiosqlite:///./pfis.db\n"
+        "DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres\n"
         f"SECRET_KEY={module.EXAMPLE_SECRET_KEY}\n"
         "AUTH_REQUIRED=true\n",
         encoding="utf-8",
@@ -115,3 +115,34 @@ def test_find_free_port_returns_none_when_all_taken(monkeypatch):
     monkeypatch.setattr(module, "_is_port_free", lambda host, port: False)
     result = module._find_free_port("127.0.0.1", 9000, attempts=5)
     assert result is None
+
+
+def test_configured_database_url_prefers_process_environment(monkeypatch, tmp_path):
+    module = load_start_module()
+    patch_env_paths(monkeypatch, module, tmp_path)
+    module.ENV_FILE.write_text(
+        "DATABASE_URL=postgresql+asyncpg://file-value/db\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://environment-value/db")
+
+    assert module.configured_database_url() == "postgresql+asyncpg://environment-value/db"
+
+
+def test_ensure_local_supabase_starts_only_for_standard_local_port(monkeypatch):
+    module = load_start_module()
+    commands = []
+    monkeypatch.setattr(
+        module,
+        "configured_database_url",
+        lambda: "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres",
+    )
+    monkeypatch.setattr(module, "ensure_node_available", lambda: None)
+    monkeypatch.setattr(module, "run", lambda command: commands.append(command))
+
+    module.ensure_local_supabase(skip_supabase=False)
+
+    assert commands
+    assert commands[0][1:3] == ["supabase", "start"]
+    assert commands[0][3] == "--exclude"
+    assert "studio" in commands[0][4]

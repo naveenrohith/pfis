@@ -38,7 +38,7 @@ root `AGENTS.md` workflow.
 The following are local or generated artifacts and must never be committed:
 
 - Python caches, coverage files, test scratch directories, virtual environments,
-  and local SQLite databases.
+  and database exports or legacy local database files.
 - Node modules, Vite builds, TypeScript build-info files, Playwright reports,
   Lighthouse reports, and temporary logs.
 - `.env` files, OAuth credentials, user data exports, and backups.

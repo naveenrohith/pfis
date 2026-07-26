@@ -4,8 +4,8 @@ PFIS ingests financial emails, parses transaction data into structured records,
 deduplicates and categorizes them, and surfaces insights, budgets, and reports
 through a dashboard.
 
-- **Backend:** FastAPI (Python 3.13), async SQLAlchemy, SQLite locally and
-  PostgreSQL in production/CI.
+- **Backend:** FastAPI (Python 3.13), async SQLAlchemy, and PostgreSQL 17 through
+  Supabase in local, CI, and hosted environments.
 - **Frontend:** React + TypeScript + Vite under `frontend/` (see its README). Built
   output is served by FastAPI at `/dashboard`. FastAPI does not serve the retired
   static dashboard when the React build is missing.
@@ -15,7 +15,8 @@ through a dashboard.
 
 From the repository root, run one command:
 
-Prerequisites: Python 3.13+ and Node.js/npm 22+ available on `PATH`.
+Prerequisites: Python 3.13+, Node.js/npm 22+, and Docker Desktop with WSL 2
+available on `PATH`.
 
 ```powershell
 # Windows PowerShell. If script execution is blocked, use Command Prompt: run
@@ -34,8 +35,10 @@ python scripts/start.py
 
 The launcher creates `.venv` if needed, installs backend dependencies when
 requirements changed, creates `backend/.env` from the example if missing,
-installs frontend dependencies when needed, builds the React dashboard, applies
-local Alembic migrations, and starts FastAPI.
+installs frontend dependencies when needed, builds the React dashboard, starts
+the local Supabase PostgreSQL service, applies Alembic migrations, and starts
+FastAPI. Optional Supabase API and Studio services are not required by PFIS;
+start them explicitly with `npm run supabase:start:full` when needed.
 
 Then open:
 
@@ -53,6 +56,8 @@ python -m venv .venv
 pip install -r backend/requirements-dev.txt
 copy backend\.env.example backend\.env    # Windows, if missing
 # cp backend/.env.example backend/.env     # macOS/Linux, if missing
+npm install
+npm run supabase:start
 cd frontend && npm install && npm run build && cd ..
 cd backend && alembic upgrade head
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
@@ -93,10 +98,29 @@ docs/                Source-of-truth documentation
 tests/pytest/        Test suite
 ```
 
+## Database migration
+
+Alembic is the single source of truth for the PFIS application schema. Supabase
+CLI migrations and seeds are disabled to prevent two competing migration
+histories.
+
+To inventory the retained legacy SQLite database without changing anything:
+
+```bash
+npm run db:migrate:legacy
+```
+
+After the PostgreSQL target has been migrated to Alembic head and is empty, set
+`DATABASE_URL` securely and run `npm run db:migrate:legacy:apply`. The importer
+opens SQLite read-only, performs the PostgreSQL import in one transaction, and
+verifies every table count before committing. Keep `backend/pfis.db` as a backup
+until application and business-level validation is complete.
+
+For the linked hosted Supabase project, run `npm run db:migrate:hosted`. The
+operator script reads the linked session-pooler address and prompts securely for
+the database password; it does not echo, log, or persist the password.
+
 ## Notes
 
-- This configuration targets **local / single-user** use. Production hardening
-  (containerization, Postgres, reverse proxy, secrets management) is intentionally
-  out of scope for now.
 - Never commit a real `.env`; never log secrets, tokens, OAuth codes, or full
   email bodies.

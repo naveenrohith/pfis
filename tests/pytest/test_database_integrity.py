@@ -5,14 +5,13 @@ from __future__ import annotations
 import pytest
 from app.models.email import GmailAccount, RawEmail
 from app.models.sync import Budget
-from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from tests.pytest.helpers import create_user
 
 
 @pytest.mark.asyncio
-async def test_sqlite_test_runtime_enforces_foreign_keys(test_session_factory):
+async def test_postgres_runtime_enforces_foreign_keys(test_session_factory):
     async with test_session_factory() as session:
         session.add(
             Budget(
@@ -24,10 +23,6 @@ async def test_sqlite_test_runtime_enforces_foreign_keys(test_session_factory):
         with pytest.raises(IntegrityError):
             await session.commit()
         await session.rollback()
-
-        enabled = await session.scalar(text("PRAGMA foreign_keys"))
-
-    assert enabled == 1
 
 
 @pytest.mark.asyncio

@@ -21,7 +21,7 @@ async def test_operational_health_exposes_safe_runtime_state(client):
     body = response.json()
     assert body["status"] == "healthy"
     assert body["environment"] == "local"
-    assert body["database_profile"] == "sqlite"
+    assert body["database_profile"] == "postgresql"
     assert body["jobs"]["active_in_process"] >= 0
     assert set(body["jobs"]["persisted_by_status"]) == {
         "queued",

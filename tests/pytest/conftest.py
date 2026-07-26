@@ -4,12 +4,15 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,7 +26,7 @@ import app.services.auto_sync_service as auto_sync_service_module
 import app.services.job_service as job_service_module
 from app.api.routes import ws as ws_routes_module
 from app.config import get_settings
-from app.database import Base, enable_sqlite_foreign_keys, get_db
+from app.database import Base, get_db, normalize_async_database_url
 from app.main import app
 from app.services.seed_service import run_seeds
 
@@ -36,13 +39,23 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch, **overrides) -> None:
 
 
 @pytest_asyncio.fixture
-async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    db_path = tmp_path / "pfis-test.db"
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{db_path}",
-        connect_args={"check_same_thread": False},
+async def test_session_factory(monkeypatch: pytest.MonkeyPatch):
+    database_url = os.getenv(
+        "TEST_DATABASE_URL",
+        "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres",
     )
-    enable_sqlite_foreign_keys(engine.sync_engine)
+    normalized_url = normalize_async_database_url(database_url)
+    schema_name = f"pfis_test_{uuid.uuid4().hex}"
+    admin_engine = create_async_engine(normalized_url, pool_pre_ping=True)
+    async with admin_engine.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA "{schema_name}"'))
+    await admin_engine.dispose()
+
+    engine = create_async_engine(
+        normalized_url,
+        pool_pre_ping=True,
+        connect_args={"server_settings": {"search_path": schema_name}},
+    )
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     _patch_settings(
@@ -88,6 +101,12 @@ async def test_session_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         main_module.limiter.reset()
         invalidate_merchant_cache()
         await engine.dispose()
+        cleanup_engine = create_async_engine(normalized_url, pool_pre_ping=True)
+        try:
+            async with cleanup_engine.begin() as connection:
+                await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        finally:
+            await cleanup_engine.dispose()
 
 
 @pytest_asyncio.fixture

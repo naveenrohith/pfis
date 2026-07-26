@@ -28,7 +28,8 @@ settings = get_settings()
 
 def _get_url() -> str:
     """Get the database URL, ensuring it uses the async driver."""
-    return normalize_async_database_url(settings.DATABASE_URL)
+    configured_url = config.attributes.get("database_url")
+    return normalize_async_database_url(configured_url or settings.DATABASE_URL)
 
 
 def run_migrations_offline() -> None:
@@ -39,7 +40,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_as_batch=True,  # Required for SQLite ALTER TABLE support
+        compare_type=True,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -49,7 +50,7 @@ def do_run_migrations(connection):
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        render_as_batch=True,  # Required for SQLite ALTER TABLE support
+        compare_type=True,
     )
     with context.begin_transaction():
         context.run_migrations()

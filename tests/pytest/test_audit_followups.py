@@ -120,7 +120,7 @@ async def test_init_db_skips_create_all_in_production(monkeypatch):
     await database_module.init_db()  # returns without touching the engine
 
 
-async def test_init_db_runs_create_all_locally(monkeypatch):
+async def test_init_db_leaves_local_schema_to_alembic(monkeypatch):
     calls = []
 
     class _Local:
@@ -145,7 +145,7 @@ async def test_init_db_runs_create_all_locally(monkeypatch):
 
     await database_module.init_db()
 
-    assert calls, "create_all should run in the local profile"
+    assert not calls, "create_all must not bypass Alembic in the local profile"
 
 
 async def test_pipeline_tracks_fallback_parser_usage(client, test_session_factory):

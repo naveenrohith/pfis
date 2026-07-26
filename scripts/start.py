@@ -43,6 +43,21 @@ FRONTEND_BUILD_INPUTS = (
     "vite.config.ts",
     "src",
 )
+SUPABASE_DATABASE_ONLY_EXCLUDES = (
+    "edge-runtime",
+    "gotrue",
+    "imgproxy",
+    "kong",
+    "logflare",
+    "mailpit",
+    "postgres-meta",
+    "postgrest",
+    "realtime",
+    "storage-api",
+    "studio",
+    "supavisor",
+    "vector",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -68,6 +83,11 @@ def parse_args() -> argparse.Namespace:
         "--skip-migrations",
         action="store_true",
         help="Skip the local Alembic migration step.",
+    )
+    parser.add_argument(
+        "--skip-supabase",
+        action="store_true",
+        help="Do not start the local Supabase stack.",
     )
     return parser.parse_args()
 
@@ -176,6 +196,43 @@ def ensure_node_available() -> None:
             + ", ".join(missing)
             + ". Install Node.js 22+ and rerun this command."
         )
+
+
+def configured_database_url() -> str:
+    """Read the effective database URL without loading application secrets."""
+    if database_url := os.environ.get("DATABASE_URL"):
+        return database_url
+    for env_path in (ENV_FILE, ROOT_ENV_FILE):
+        if not env_path.exists():
+            continue
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("DATABASE_URL="):
+                return line.partition("=")[2].strip().strip("\"'")
+    return ""
+
+
+def ensure_local_supabase(skip_supabase: bool) -> None:
+    """Start Supabase when PFIS targets its standard local PostgreSQL port."""
+    if skip_supabase:
+        return
+    database_url = configured_database_url()
+    if not any(
+        local_address in database_url for local_address in ("127.0.0.1:54322", "localhost:54322")
+    ):
+        return
+
+    ensure_node_available()
+    npx_command = "npx.cmd" if os.name == "nt" else "npx"
+    print("[PFIS] Starting local Supabase PostgreSQL ...")
+    run(
+        [
+            npx_command,
+            "supabase",
+            "start",
+            "--exclude",
+            ",".join(SUPABASE_DATABASE_ONLY_EXCLUDES),
+        ]
+    )
 
 
 def frontend_dependencies_stale() -> bool:
@@ -316,6 +373,7 @@ def main() -> int:
     ensure_backend_dependencies(python_path, args.skip_install)
     ensure_frontend_dependencies(args.skip_install)
     build_frontend_if_needed(args.force_build)
+    ensure_local_supabase(args.skip_supabase)
     run_migrations(python_path, args.skip_migrations)
     port = check_port(args.host, int(args.port))
     return start_backend(

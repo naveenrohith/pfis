@@ -119,7 +119,7 @@ Remaining Phase 1 follow-up:
 ## Phase 5 Acceptance Criteria
 
 - Production mode fails closed for unsafe secret, auth, database, or CORS settings.
-- Local/demo mode remains simple and keeps SQLite available.
+- Local/demo mode uses the same PostgreSQL engine as hosted deployments.
 - Deployment, backup, restore, and monitoring expectations are documented.
 
 ## Phase 6 Acceptance Criteria

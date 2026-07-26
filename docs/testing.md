@@ -15,7 +15,7 @@ Run the blocking backend static-analysis gates:
 ```powershell
 .\.venv\Scripts\python.exe -m ruff check backend\app scripts tests
 .\.venv\Scripts\python.exe -m black --check backend\app scripts tests
-.\.venv\Scripts\python.exe -m mypy backend\app scripts\release_gate.py scripts\postgres_restore_drill.py
+.\.venv\Scripts\python.exe -m mypy backend\app scripts\release_gate.py scripts\postgres_restore_drill.py scripts\migrate_sqlite_to_postgres.py
 ```
 
 Mypy checks all 100 backend and operational-script source files in CI, including bodies of functions without
@@ -45,10 +45,9 @@ Run targeted suites:
 .\.venv\Scripts\python.exe -m pytest tests/pytest/test_reports.py
 ```
 
-The CI database gate starts PostgreSQL 17, applies every Alembic migration, and
-runs `tests/pytest/test_postgres_runtime.py`. Local SQLite tests enable
-`PRAGMA foreign_keys=ON` so invalid ownership references fail during development
-instead of appearing only after deployment.
+All backend and browser regression jobs run against PostgreSQL 17. The migration
+gate creates an isolated PostgreSQL database, applies every Alembic revision, and
+compares the resulting schema, constraints, and indexes with ORM metadata.
 
 The workspace regression suite also enforces a database-query budget for the
 zero-data dashboard path. This guards against accidentally invoking every

@@ -1,19 +1,25 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const e2ePort = process.env.PFIS_E2E_PORT ?? '8000';
+if (!/^\d{1,5}$/.test(e2ePort) || Number(e2ePort) > 65_535) {
+  throw new Error('PFIS_E2E_PORT must be a valid TCP port');
+}
+const e2eServerUrl = `http://127.0.0.1:${e2ePort}`;
+
 export default defineConfig({
   testDir: './e2e',
   workers: 1,
   timeout: 30_000,
   expect: { timeout: 8_000, toHaveScreenshot: { maxDiffPixelRatio: 0.02 } },
   use: {
-    baseURL: process.env.PFIS_E2E_BASE_URL ?? 'http://127.0.0.1:8000/dashboard',
+    baseURL: process.env.PFIS_E2E_BASE_URL ?? `${e2eServerUrl}/dashboard`,
     trace: 'retain-on-failure',
   },
   webServer: process.env.CI
     ? {
         command:
-          'python -m uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port 8000',
-        url: 'http://127.0.0.1:8000/api/health',
+          `python -m uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port ${e2ePort}`,
+        url: `${e2eServerUrl}/api/health`,
         reuseExistingServer: false,
         timeout: 120_000,
       }

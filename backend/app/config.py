@@ -15,7 +15,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 APP_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = APP_DIR.parent
 ROOT_DIR = BACKEND_DIR.parent
-DEFAULT_SQLITE_DB = BACKEND_DIR / "pfis.db"
+LOCAL_SUPABASE_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres"
 DEFAULT_SECRET_KEY = "pfis-dev-secret-change-me-please-32bytes"
 EXAMPLE_SECRET_KEY = "change-me-in-production-with-at-least-32-characters"
 
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     ENVIRONMENT: str = "local"
     DEBUG: bool = False
-    DATABASE_URL: str = "sqlite+aiosqlite:///./pfis.db"
+    DATABASE_URL: str = LOCAL_SUPABASE_DATABASE_URL
     SECRET_KEY: str = DEFAULT_SECRET_KEY
     TOKEN_ENCRYPTION_KEY: str = ""
     # 30 days: the session persists until the user explicitly logs out.
@@ -63,27 +63,15 @@ class Settings(BaseSettings):
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
-    def resolve_database_url(cls, value: Any) -> str:
-        """Resolve relative SQLite paths against the backend directory."""
+    def validate_database_url(cls, value: Any) -> str:
+        """Require PostgreSQL for every PFIS runtime profile."""
         if value is None or value == "":
-            return f"sqlite+aiosqlite:///{DEFAULT_SQLITE_DB.as_posix()}"
+            return LOCAL_SUPABASE_DATABASE_URL
         if not isinstance(value, str):
             raise ValueError("Invalid DATABASE_URL value")
-
-        prefix = "sqlite+aiosqlite:///"
-        if not value.startswith(prefix):
-            return value
-
-        raw_path = value[len(prefix) :]
-        if raw_path in {":memory:", "/:memory:"}:
-            return value
-
-        candidate = Path(raw_path)
-        if candidate.is_absolute() or (len(raw_path) >= 3 and raw_path[1:3] in {":\\", ":/"}):
-            return f"{prefix}{candidate.as_posix()}"
-
-        resolved = (BACKEND_DIR / candidate).resolve()
-        return f"{prefix}{resolved.as_posix()}"
+        if not value.startswith(("postgres://", "postgresql://", "postgresql+asyncpg://")):
+            raise ValueError("PFIS requires a PostgreSQL DATABASE_URL")
+        return value
 
     @field_validator("DEBUG", mode="before")
     @classmethod
@@ -140,8 +128,6 @@ class Settings(BaseSettings):
                 raise ValueError("Production requires a unique SECRET_KEY")
             if not self.AUTH_REQUIRED:
                 raise ValueError("Production requires AUTH_REQUIRED=true")
-            if self.DATABASE_URL.startswith("sqlite"):
-                raise ValueError("Production requires a non-SQLite DATABASE_URL")
             local_origins = {"http://localhost:8000", "http://127.0.0.1:8000"}
             if set(self.CORS_ORIGINS) <= local_origins:
                 raise ValueError("Production requires explicit non-local CORS_ORIGINS")
