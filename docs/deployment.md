@@ -66,8 +66,10 @@ Minimum production-candidate checklist:
 - Test restoring a backup into a clean database before go-live.
 - Record restore time and any manual commands used.
 
-Use Supabase/PostgreSQL-native backup tooling. The retained `backend/pfis.db`
-file is a temporary, read-only migration source and must not be used by the app.
+Use Supabase/PostgreSQL-native backup tooling. The ignored `backend/pfis.db`
+file is a quarantined rollback artifact from the completed legacy cutover. It
+must not be used by the app and may be deleted only after the agreed backup
+retention period and a successful PostgreSQL restore drill.
 
 ### Executable restore drill
 

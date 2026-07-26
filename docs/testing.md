@@ -15,12 +15,12 @@ Run the blocking backend static-analysis gates:
 ```powershell
 .\.venv\Scripts\python.exe -m ruff check backend\app scripts tests
 .\.venv\Scripts\python.exe -m black --check backend\app scripts tests
-.\.venv\Scripts\python.exe -m mypy backend\app scripts\release_gate.py scripts\postgres_restore_drill.py scripts\migrate_sqlite_to_postgres.py
+.\.venv\Scripts\python.exe -m mypy backend\app scripts\release_gate.py scripts\postgres_restore_drill.py
 ```
 
-Mypy checks all 100 backend and operational-script source files in CI, including bodies of functions without
-fully annotated signatures. New typing errors and unused suppressions fail the
-build.
+Mypy checks the backend and production operational scripts in CI, including
+bodies of functions without fully annotated signatures. New typing errors and
+unused suppressions fail the build.
 
 The full backend suite measures statement and branch coverage together and
 enforces a 70% minimum. This is a regression floor, not a target: new work must

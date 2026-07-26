@@ -98,27 +98,26 @@ docs/                Source-of-truth documentation
 tests/pytest/        Test suite
 ```
 
-## Database migration
+## Database operations
 
 Alembic is the single source of truth for the PFIS application schema. Supabase
 CLI migrations and seeds are disabled to prevent two competing migration
 histories.
 
-To inventory the retained legacy SQLite database without changing anything:
+The legacy-data cutover to local and hosted PostgreSQL is complete. Its one-time
+import tooling is intentionally no longer part of the active repository. Keep
+the ignored `backend/pfis.db` file only as a quarantined rollback artifact until
+the agreed backup-retention period ends; the application never reads it.
 
-```bash
-npm run db:migrate:legacy
+Apply schema changes with Alembic:
+
+```powershell
+Set-Location backend
+..\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-After the PostgreSQL target has been migrated to Alembic head and is empty, set
-`DATABASE_URL` securely and run `npm run db:migrate:legacy:apply`. The importer
-opens SQLite read-only, performs the PostgreSQL import in one transaction, and
-verifies every table count before committing. Keep `backend/pfis.db` as a backup
-until application and business-level validation is complete.
-
-For the linked hosted Supabase project, run `npm run db:migrate:hosted`. The
-operator script reads the linked session-pooler address and prompts securely for
-the database password; it does not echo, log, or persist the password.
+Never delete or rewrite an Alembic revision that has been applied to a shared
+database. Add a new forward migration for every subsequent schema change.
 
 ## Notes
 
