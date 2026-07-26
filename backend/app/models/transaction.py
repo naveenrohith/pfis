@@ -59,7 +59,13 @@ class Transaction(Base):
     )
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="INR")
-    transaction_type: Mapped[TransactionType] = mapped_column(Enum(TransactionType), nullable=False)
+    transaction_type: Mapped[TransactionType] = mapped_column(
+        Enum(
+            TransactionType,
+            values_callable=lambda enum_type: [member.value for member in enum_type],
+        ),
+        nullable=False,
+    )
     payment_method: Mapped[PaymentMethod] = mapped_column(
         Enum(
             PaymentMethod,

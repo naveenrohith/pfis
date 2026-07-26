@@ -29,7 +29,8 @@ If REVIEW finds no issues, FIX may be skipped. TEST and QUALITY must still run f
 ## PFIS Technical Identity
 
 - Backend: Python FastAPI application under `backend/app`.
-- Database: async SQLAlchemy models with `AsyncSession`; SQLite in local development, PostgreSQL-compatible design for production.
+- Database: async SQLAlchemy models with `AsyncSession`; PostgreSQL through
+  Supabase in local development, CI, and hosted environments.
 - API: routers under `backend/app/api/routes`, mounted with `/api`.
 - Services: Gmail sync, parser pipeline, transaction service, insights, jobs, seed data.
 - Frontend: canonical React/Vite app under `frontend/`; production requires its build artifact.

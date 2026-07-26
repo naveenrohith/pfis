@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime
 from typing import cast
 from urllib.parse import unquote
 
-from sqlalchemy import case, extract, func, or_, select
+from sqlalchemy import case, extract, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category, Merchant, UserMerchantRule, parse_merchant_aliases
@@ -81,7 +81,9 @@ class IntelligenceService:
         result = await self.db.execute(
             select(
                 func.coalesce(
-                    Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown"
+                    Transaction.merchant_normalized,
+                    Transaction.merchant_raw,
+                    literal_column("'Unknown'"),
                 ).label("merchant"),
                 Category.id.label("category_id"),
                 Category.name.label("category_name"),
@@ -101,7 +103,11 @@ class IntelligenceService:
                 extract("year", Transaction.transaction_date) == year,
             )
             .group_by(
-                func.coalesce(Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown"),
+                func.coalesce(
+                    Transaction.merchant_normalized,
+                    Transaction.merchant_raw,
+                    literal_column("'Unknown'"),
+                ),
                 Category.id,
                 Category.name,
             )
@@ -755,7 +761,9 @@ class IntelligenceService:
         result = await self.db.execute(
             select(
                 func.coalesce(
-                    Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown"
+                    Transaction.merchant_normalized,
+                    Transaction.merchant_raw,
+                    literal_column("'Unknown'"),
                 ).label("merchant"),
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
             )
@@ -767,7 +775,11 @@ class IntelligenceService:
                 extract("year", Transaction.transaction_date) == year,
             )
             .group_by(
-                func.coalesce(Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown")
+                func.coalesce(
+                    Transaction.merchant_normalized,
+                    Transaction.merchant_raw,
+                    literal_column("'Unknown'"),
+                )
             )
         )
         return {_merchant_key(row.merchant).lower(): float(row.total or 0) for row in result.all()}
@@ -796,7 +808,7 @@ class IntelligenceService:
     ) -> dict[str, float]:
         result = await self.db.execute(
             select(
-                func.coalesce(Category.name, "Uncategorized").label("category"),
+                func.coalesce(Category.name, literal_column("'Uncategorized'")).label("category"),
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
             )
             .join(Category, Transaction.category_id == Category.id, isouter=True)
@@ -807,7 +819,7 @@ class IntelligenceService:
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
-            .group_by(func.coalesce(Category.name, "Uncategorized"))
+            .group_by(func.coalesce(Category.name, literal_column("'Uncategorized'")))
         )
         return {row.category: float(row.total or 0) for row in result.all()}
 
@@ -818,7 +830,9 @@ class IntelligenceService:
             select(
                 Transaction.category_id,
                 func.coalesce(
-                    Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown"
+                    Transaction.merchant_normalized,
+                    Transaction.merchant_raw,
+                    literal_column("'Unknown'"),
                 ).label("merchant"),
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
                 func.count(Transaction.id).label("transaction_count"),
@@ -832,7 +846,11 @@ class IntelligenceService:
             )
             .group_by(
                 Transaction.category_id,
-                func.coalesce(Transaction.merchant_normalized, Transaction.merchant_raw, "Unknown"),
+                func.coalesce(
+                    Transaction.merchant_normalized,
+                    Transaction.merchant_raw,
+                    literal_column("'Unknown'"),
+                ),
             )
             .order_by(Transaction.category_id, func.sum(Transaction.amount).desc())
         )

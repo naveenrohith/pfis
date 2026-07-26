@@ -47,7 +47,7 @@ _OAUTH_STATE_TTL_MINUTES = 10
 
 
 def _as_utc(value: datetime) -> datetime:
-    """Normalize timestamps returned by SQLite to timezone-aware UTC."""
+    """Normalize a database timestamp to timezone-aware UTC."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 

@@ -17,7 +17,8 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 - Store OAuth tokens encrypted through `encrypt_secret`.
 - Rotate any credentials that were committed or shared.
 - Set `ENVIRONMENT=production` for deployed environments so startup validates production-safe settings.
-- Production requires a unique `SECRET_KEY`, `AUTH_REQUIRED=true`, a non-SQLite `DATABASE_URL`, non-local `CORS_ORIGINS`, secure cookies, and demo login disabled.
+- Production requires a unique `SECRET_KEY`, `AUTH_REQUIRED=true`, a PostgreSQL
+  `DATABASE_URL`, non-local `CORS_ORIGINS`, secure cookies, and demo login disabled.
 
 ## Browser Sessions and Passwords
 
@@ -73,6 +74,7 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 
 ## Local Versus Production Mode
 
-Local/demo mode keeps SQLite and optional auth available for fast development.
-Production mode is explicit and fail-closed. Do not disable production validation
-to work around deployment misconfiguration; fix the environment values instead.
+Local/demo mode uses local Supabase PostgreSQL and may keep authentication
+optional for fast development. Production mode is explicit and fail-closed. Do
+not disable production validation to work around deployment misconfiguration;
+fix the environment values instead.

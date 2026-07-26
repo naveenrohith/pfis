@@ -45,7 +45,9 @@ user's connector.
 
 ## Database
 
-Local development uses SQLite through async SQLAlchemy. Production design should remain PostgreSQL-compatible.
+Local development, CI, and hosted deployments use PostgreSQL 17. The local
+database is provided by Supabase CLI; hosted environments use Supabase
+PostgreSQL. Alembic remains the single application-schema authority.
 
 ## Dashboard
 

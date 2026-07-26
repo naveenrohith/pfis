@@ -62,7 +62,13 @@ class SyncRun(Base):
     emails_processed: Mapped[int] = mapped_column(Integer, default=0)
     emails_failed: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[str] = mapped_column(Text, default="[]")  # JSON array
-    status: Mapped[SyncStatus] = mapped_column(Enum(SyncStatus), default=SyncStatus.RUNNING)
+    status: Mapped[SyncStatus] = mapped_column(
+        Enum(
+            SyncStatus,
+            values_callable=lambda enum_type: [member.value for member in enum_type],
+        ),
+        default=SyncStatus.RUNNING,
+    )
 
     # Relationships
     user = relationship("User", back_populates="sync_runs")
@@ -198,7 +204,13 @@ class BackgroundJob(Base):
         String(36), ForeignKey("users.id"), nullable=True, index=True
     )
     job_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.QUEUED)
+    status: Mapped[JobStatus] = mapped_column(
+        Enum(
+            JobStatus,
+            values_callable=lambda enum_type: [member.value for member in enum_type],
+        ),
+        default=JobStatus.QUEUED,
+    )
     payload_json: Mapped[str] = mapped_column(Text, default="{}")
     result_json: Mapped[str] = mapped_column(Text, default="{}")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

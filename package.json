@@ -1,0 +1,15 @@
+{
+  "name": "pfis-repository-tools",
+  "private": true,
+  "scripts": {
+    "supabase": "supabase",
+    "supabase:init": "supabase init",
+    "supabase:start": "supabase start --exclude edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector",
+    "supabase:start:full": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status"
+  },
+  "devDependencies": {
+    "supabase": "2.109.1"
+  }
+}

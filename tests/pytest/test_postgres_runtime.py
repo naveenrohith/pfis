@@ -30,7 +30,8 @@ def test_database_url_normalization_supports_common_deployment_urls():
     assert normalize_async_database_url("postgresql://user:pass@db/pfis") == (
         "postgresql+asyncpg://user:pass@db/pfis"
     )
-    assert normalize_async_database_url("sqlite:///./pfis.db") == ("sqlite+aiosqlite:///./pfis.db")
+    with pytest.raises(ValueError, match="PostgreSQL only"):
+        normalize_async_database_url("sqlite:///./pfis.db")
 
 
 @pytest.mark.asyncio

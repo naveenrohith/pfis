@@ -1,6 +1,7 @@
 # PFIS Deployment Runbook
 
-PFIS is local/demo by default. Use this runbook only for production-candidate or shared environments.
+PFIS uses PostgreSQL in local, CI, and hosted environments. Use this runbook for
+production-candidate or shared deployments.
 
 ## Required Production Settings
 
@@ -42,14 +43,10 @@ authentication or availability fallback.
 ## Database Operations
 
 - Use Alembic migrations under `backend/alembic/versions` as the schema path.
-- Do not rely on `Base.metadata.create_all` outside local/demo mode.
+- Do not rely on `Base.metadata.create_all`; Alembic owns every environment.
 - Run `tests/pytest/test_migration_discipline.py` after model or migration changes.
-- Keep the PostgreSQL migration/runtime CI job green; SQLite remains a local
-  convenience and is not sufficient database validation for a release.
+- Keep the PostgreSQL migration/runtime CI jobs green.
 - Take a database backup before applying migrations to shared environments.
-- Migration 009 safely removes an empty `_alembic_tmp_transactions` table left by an interrupted
-  local SQLite batch migration, but refuses to remove it when it contains rows. Backfill inserts
-  always populate `financial_accounts.created_at` for compatibility with ORM-initialized databases.
 - Migration 015 intentionally stops if it finds duplicate budgets, duplicate
   Gmail ownership, or invalid monetary values. Reconcile those records from a
   backup-reviewed copy before retrying; the migration never deletes financial data.
@@ -69,7 +66,10 @@ Minimum production-candidate checklist:
 - Test restoring a backup into a clean database before go-live.
 - Record restore time and any manual commands used.
 
-SQLite local/demo data can be backed up by copying the database file while the app is stopped. Server databases should use the provider's native backup tooling.
+Use Supabase/PostgreSQL-native backup tooling. The ignored `backend/pfis.db`
+file is a quarantined rollback artifact from the completed legacy cutover. It
+must not be used by the app and may be deleted only after the agreed backup
+retention period and a successful PostgreSQL restore drill.
 
 ### Executable restore drill
 
