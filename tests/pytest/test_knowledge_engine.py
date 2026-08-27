@@ -29,7 +29,7 @@ def test_monthly_stream_becomes_mature_with_evidence():
     assert pattern.data_sufficiency == "high"
     signal = pattern.as_dict()["signal"]
     assert signal["kind"] == "recurring_pattern"
-    assert signal["ruleset"]["version"] == "pfis-recurring-2"
+    assert signal["ruleset"]["version"] == "pfis-recurring-4"
     assert signal["sample_size"] == 4
 
 
@@ -60,3 +60,27 @@ def test_variable_monthly_bill_keeps_cadence_and_lower_amount_confidence():
     assert pattern is not None
     assert pattern.cadence == "monthly"
     assert pattern.cadence_confidence > pattern.amount_confidence
+    assert pattern.amount_low == 900.0
+    assert pattern.amount_high == 1600.0
+    assert pattern.as_dict()["signal"]["value"]["amount_low"] == 900.0
+
+
+def test_variable_monthly_intervals_expose_a_bounded_next_date_window():
+    pattern = _pattern(
+        [date(2026, 4, 1), date(2026, 4, 29), date(2026, 5, 31), date(2026, 6, 30)]
+    )
+
+    assert pattern is not None
+    assert pattern.cadence == "monthly"
+    assert pattern.next_expected_date == date(2026, 7, 30)
+    assert pattern.next_expected_date_low == date(2026, 7, 28)
+    assert pattern.next_expected_date_high == date(2026, 8, 1)
+    assert pattern.as_dict()["next_expected_date_low"] == "2026-07-28"
+
+
+def test_monthly_recurrence_preserves_calendar_day_at_month_end():
+    pattern = _pattern([date(2026, 1, 30), date(2026, 2, 28), date(2026, 3, 30)])
+
+    assert pattern is not None
+    assert pattern.cadence == "monthly"
+    assert pattern.next_expected_date == date(2026, 4, 30)

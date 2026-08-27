@@ -1,5 +1,14 @@
 # PFIS Product Feature Roadmap
 
+> The current prioritization, evidence gates, and path to 85% intelligence are
+> defined in
+> [the 85% intelligence reassessment](audit/14-85-intelligence-product-reassessment.md).
+> This document remains the detailed feature-domain record.
+
+> Implementation mapping, release evidence, and the validated HDFC import
+> record are maintained in
+> [financial-position-roadmap-implementation.md](financial-position-roadmap-implementation.md).
+
 This is the consolidated record of the product discussion. It preserves every
 feature idea discussed so far, while separating the approved core direction
 from enabling capabilities, later opportunities, and ideas deliberately not
@@ -66,8 +75,11 @@ alerts as later activity, and user review for uncertain matches.
 - A card payment represented as a transfer from the paying bank account to the
   card liability, not as a second expense.
 - Purchases, payments, and refunds after the statement date.
-- A post-statement balance only when labelled **estimated**, with the statement
-  date and matched activity behind the estimate visible.
+- A verified statement-date liability anchor plus a post-statement **estimated
+  current outstanding**, with settled movement, pending activity, cutoff date,
+  confidence, and matched activity visible.
+- Estimated utilization calculated from current outstanding, kept separate from
+  issuer-reported statement utilization and available credit.
 
 **Why it matters:** It prevents missed payments, confusion about card dues, and
 double-counted spending.
@@ -274,8 +286,10 @@ widget.
 - Credit-utilisation guardrails chosen by the user.
 - Card payment planner: total/minimum due, selected paying bank account, and
   intended payment amount.
-- Card payment routing comparison for multiple cards, based only on explicit
-  user-entered reward/cashback rules.
+- Card purchase-routing preview for multiple cards, based only on explicit
+  user-entered reward/cashback rules and current utilization evidence (the
+  read-only `/api/cards/portfolio/spend-routing` surface now covers this
+  bounded slice). A bank-cash/payment-execution optimizer remains future work.
 - Statement-to-ledger coverage score: matched, new, and review counts.
 - Card renewal, annual-fee, fee-reversal, and milestone-spend calendar.
 - Transaction dispute tracker with complaint date, reference number, and status.
