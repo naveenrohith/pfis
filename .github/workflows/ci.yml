@@ -47,6 +47,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements-dev.txt
 
+      - name: Validate integration packet ownership
+        run: python scripts/check_worktree_inventory.py --workspace . --output worktree-inventory.json
+
       - name: Ruff (lint)
         run: ruff check backend/app scripts tests
 
@@ -54,7 +57,28 @@ jobs:
         run: black --check backend/app scripts tests
 
       - name: Mypy (type check)
-        run: mypy backend/app scripts/release_gate.py scripts/postgres_restore_drill.py
+        run: mypy backend/app scripts/release_gate.py scripts/postgres_restore_drill.py scripts/evaluate_parser_corpus.py scripts/evaluate_anomaly_quality.py scripts/export_anomaly_evidence.py scripts/export_forecast_evidence.py scripts/export_balance_reconciliation_evidence.py scripts/export_recommendation_evidence.py scripts/intelligence_release_gate.py scripts/intelligence_scorecard.py scripts/build_promotion_manifest.py scripts/check_migration_parity.py scripts/check_worktree_inventory.py
+
+      - name: Parser intelligence quality gate
+        run: python scripts/evaluate_parser_corpus.py --baseline tests/parser_corpus/quality_baseline.json --output parser-quality-report.json
+
+      - name: Intelligence release posture
+        run: >-
+          python scripts/intelligence_release_gate.py
+          --parser-report parser-quality-report.json
+          --output intelligence-release-report.json
+
+      - name: Canonical intelligence scorecard
+        run: >-
+          python scripts/intelligence_scorecard.py
+          --output intelligence-scorecard-report.json
+
+      - name: Assemble promotion handoff manifest
+        run: >-
+          python scripts/build_promotion_manifest.py
+          --scorecard-report intelligence-scorecard-report.json
+          --evidence-root release-evidence
+          --output promotion-manifest.json
 
       - name: Audit Python dependencies
         run: pip-audit -r backend/requirements.txt
@@ -62,6 +86,12 @@ jobs:
       - name: Apply backend test migrations
         working-directory: backend
         run: alembic upgrade head
+
+      - name: Verify PostgreSQL migration parity
+        run: python scripts/check_migration_parity.py --database pfis_test --output migration-parity.json
+
+      - name: Operational and observability contract
+        run: pytest tests/pytest/test_endpoints_smoke.py tests/pytest/test_release_gates.py -q
 
       - name: Pytest with coverage
         run: pytest --cov --cov-branch --cov-fail-under=70 --cov-report=term-missing --cov-report=xml
@@ -71,6 +101,48 @@ jobs:
         with:
           name: coverage-xml
           path: coverage.xml
+        if: always()
+
+      - name: Upload parser quality artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parser-quality-report
+          path: parser-quality-report.json
+        if: always()
+
+      - name: Upload intelligence release posture
+        uses: actions/upload-artifact@v4
+        with:
+          name: intelligence-release-report
+          path: intelligence-release-report.json
+        if: always()
+
+      - name: Upload canonical intelligence scorecard
+        uses: actions/upload-artifact@v4
+        with:
+          name: intelligence-scorecard-report
+          path: intelligence-scorecard-report.json
+        if: always()
+
+      - name: Upload promotion handoff manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: promotion-manifest
+          path: promotion-manifest.json
+        if: always()
+
+      - name: Upload integration inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: worktree-inventory
+          path: worktree-inventory.json
+        if: always()
+
+      - name: Upload migration parity
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-parity
+          path: migration-parity.json
         if: always()
 
   frontend:
@@ -217,6 +289,12 @@ jobs:
           SECRET_KEY: ci-e2e-secret-key-not-used-outside-tests
         run: alembic upgrade head
 
+      - name: Verify browser migration parity
+        env:
+          DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@localhost:5432/pfis_e2e
+          SECRET_KEY: ci-e2e-secret-key-not-used-outside-tests
+        run: python scripts/check_migration_parity.py --database pfis_e2e --output migration-parity-e2e.json
+
       - name: Run functional browser regression
         working-directory: frontend
         env:
@@ -233,3 +311,10 @@ jobs:
         with:
           name: playwright-report
           path: frontend/playwright-report
+
+      - name: Upload browser migration parity
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-parity-e2e
+          path: migration-parity-e2e.json

@@ -245,6 +245,12 @@ async def verify_release(args: argparse.Namespace) -> dict:
             raise RuntimeError("Readiness endpoint did not report a reachable database")
         validate_security_headers(readiness.headers)
 
+        operational_url = urljoin(base_url, "api/health/ops")
+        operational = await client.get(operational_url)
+        operational.raise_for_status()
+        operational_payload = validate_health_payload(operational, "healthy")
+        validate_security_headers(operational.headers)
+
         load = await run_load_probe(
             client,
             readiness_url,
@@ -266,6 +272,11 @@ async def verify_release(args: argparse.Namespace) -> dict:
             "completed_at": restore_evidence.get("completed_at"),
             "source_database": restore_evidence.get("source_database"),
             "restore_database": restore_evidence.get("restore_database"),
+        },
+        "operational_health": {
+            "status": operational_payload.get("status"),
+            "status_reasons": operational_payload.get("status_reasons", []),
+            "data_warnings": operational_payload.get("data_warnings", []),
         },
         "load": asdict(load),
     }

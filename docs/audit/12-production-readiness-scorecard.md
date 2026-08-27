@@ -1,5 +1,11 @@
 # Report 12: Production Readiness Scorecard
 
+> Historical application-foundation scorecard. Its 8/10 score measures code and
+> deployment scaffolding, not financial-intelligence quality or current
+> product-stage readiness. Use
+> [PFIS 85% Intelligence and Product-Stage Reassessment](14-85-intelligence-product-reassessment.md)
+> for the canonical current assessment and release gates.
+
 ## Executive Summary
 
 PFIS has moved beyond its structured-MVP baseline and now has a production-candidate
