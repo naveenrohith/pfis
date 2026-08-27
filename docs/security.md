@@ -34,12 +34,21 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 
 - Google sign-in requests identity scopes only (`openid`, email, profile). It does not request Gmail access.
 - Gmail connection is a later, explicit workflow that separately requests read-only Gmail scope and offline access.
+- Gmail disconnect attempts provider revocation, always removes the local
+  connector grant, stops future sync, and records only non-secret outcome
+  metadata. Imported evidence is retained explicitly rather than silently
+  deleted with the connection.
 - Persist state in `OAuthState`, bind it to a short-lived `HttpOnly` browser cookie, enforce expiry and flow type, and delete it before exchanging the authorization code.
 - Use PKCE for both Google flows and verify the OpenID Connect nonce, issuer/audience, stable `sub`, and `email_verified` claim.
 - Link Google identities by provider `sub`, never by email alone. An existing password account requires an explicit account-linking flow.
 - Keep both redirect URIs configured through settings and registered exactly with Google.
 
 ## Frontend Safety
+
+Sync WebSockets accept configured origins or the exact HTTP host serving PFIS;
+production same-host origins must use HTTPS. Session ownership remains mandatory,
+query tokens remain rejected in production, per-user connection limits apply,
+and client heartbeats remain size limited.
 
 - Escape server-controlled values before HTML insertion.
 - Do not inject raw email content into dashboard HTML.
@@ -54,6 +63,71 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 - Recommendation state and dashboard preferences store only stable identifiers and validated settings.
 - Account, balance, net-worth, transfer, preference, and guidance-state operations must resolve user ownership.
 - Balance snapshots are append-only; corrections require a new dated snapshot rather than silent history edits.
+- Balance-provider connections persist only provider type, consent status/expiry,
+  refresh timestamps, stable error codes, and a one-way consent-reference hash;
+  raw consent artifacts and credentials never enter PFIS. Typed card issuer
+  facts are append-only, source-scoped, and current outstanding is the only
+  field allowed to update the liability position.
+- Provider account mappings are separate from Gmail and other generic connector
+  identities. They contain only the opaque provider account key needed to
+  verify observation lineage, are unique within a user's provider connection,
+  and are available only to that user. Discovery adapters return masked/display
+  candidates; full account or card numbers are not accepted as mapping inputs.
+- Forecast capture is an explicit user-scoped write. Snapshots preserve the
+  original aggregate prediction/evidence without raw source content; outcomes
+  are separate one-to-one records and cannot overwrite predictions. Both are
+  included in portable export and owned account deletion.
+- Recommendation decisions are accepted only for a currently recomputed,
+  user-owned recommendation ID. Preserved evidence is aggregate-only; free-form
+  decision/outcome notes are bounded to 500 characters. Outcomes require the
+  same owner and cannot be overwritten with a different result.
+- Statement PDFs follow extract-then-delete retention. PFIS prefers embedded
+  text and, when enabled, renders a bounded page set for local OCR entirely in
+  memory. It stores structured values, SHA-256 fingerprint, extractor version,
+  and review evidence only; it does not retain PDF bytes, rendered images,
+  passwords, full card numbers, addresses, or contact data. OCR output still
+  has to pass the strict issuer/generic extractor before any ledger write.
+- Statement imports, line review, card plans/disputes, account positions,
+  commitments, reserves, liabilities, bills, and household resources all
+  resolve the authenticated user scope before reads or writes.
+- Statement-review decisions and confirmed liability schedules are append-only
+  evidence. Existing decisions/schedules are not destructively replaced.
+- Household data is a separate annotation/settlement domain. Another member
+  cannot see private accounts, transactions, source emails, statement lines, or
+  transaction evidence through household APIs. Viewer members cannot mutate.
+- Household deletion and member removal are owner-only and are blocked until
+  affected planned settlements are resolved.
+- Portable exports require authenticated user-scope resolution and CSRF
+  protection, are rate-limited, and return `Cache-Control: no-store`. Their
+  versioned manifest exposes the complete exported field inventory and
+  checksums. Password hashes, auth sessions, OAuth state/verifiers/nonces,
+  Gmail credentials, and transient worker leases are excluded by explicit
+  allowlists rather than post-generation redaction.
+- Shared-household export is limited to the annotation/settlement domain.
+  Other members' identifiers are replaced with stable archive-local aliases;
+  their accounts, transactions, emails, statements, and evidence are never
+  traversed.
+- Processed raw-email content follows an owned, versioned retention policy.
+  New users default to 365 days and may choose 30/90/180/365 days or explicit
+  keep-until-deleted. Shortening the policy requires a destructive confirmation.
+- Retention clears sender, subject, and body irreversibly but preserves source
+  IDs, timestamps, parser evidence, and transaction lineage. Unresolved parse
+  failures are never redacted; each completed redaction writes a non-secret,
+  idempotent audit event without copying source content into logs or payloads.
+- Account deletion is CSRF-protected, limited to 3 attempts/hour, bound to the
+  authenticated user, and requires a non-demo browser session created within
+  15 minutes plus the exact `DELETE <email>` phrase. Bearer-only authorization
+  is insufficient for this irreversible operation.
+- Deletion first commits a user-scoped write fence. Authentication and new jobs
+  reject that user, registered in-flight jobs/manual ingestion are cancelled,
+  and automatic sync is disabled before provider revocation or erasure begins.
+  Deletion never logs decrypted credentials, removes every
+  identity/session/private record, and clears browser cookies. Provider
+  unavailability is reported without blocking local erasure.
+- Shared household evidence retains only a non-login participant tombstone.
+  Its personal profile and all private ledger/source data are erased; remaining
+  members keep auditable expenses and settlements. No account recovery is
+  available after the deletion transaction commits.
 
 ## API Safety
 

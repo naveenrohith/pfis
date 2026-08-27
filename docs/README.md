@@ -12,6 +12,7 @@ This directory is the source of truth for PFIS agent and Copilot work.
 - [security.md](security.md) - auth, ownership, secrets, OAuth, frontend safety
 - [testing.md](testing.md) - pytest strategy and validation commands
 - [modernization-plan.md](modernization-plan.md) - phased modernization implementation tracker
+- [audit/14-85-intelligence-product-reassessment.md](audit/14-85-intelligence-product-reassessment.md) - canonical intelligence, product-stage, balance-position, and validation roadmap
 - [deployment.md](deployment.md) - production-candidate deployment, backup, and health runbook
 - [frontend.md](frontend.md) - canonical React/Vite workspace ownership and release gates
 - [repository-standards.md](repository-standards.md) - source ownership, placement rules, and generated-file policy
