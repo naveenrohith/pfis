@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from datetime import date
+from enum import Enum
 from pathlib import Path
 
 import pytest
@@ -29,6 +31,20 @@ def test_sanitized_parser_corpus(case: dict):
     assert result.merchant_raw == expected["merchant_raw"]
     assert result.confidence_score >= expected["min_confidence"]
 
-    for field in ("account_last4", "payment_method"):
+    for field in (
+        "date",
+        "account_last4",
+        "reference_id",
+        "payment_method",
+        "payment_rail",
+        "card_event",
+        "transaction_status",
+        "used_fallback",
+    ):
         if field in expected:
-            assert getattr(result, field) == expected[field]
+            actual = getattr(result, field)
+            if isinstance(actual, Enum):
+                actual = actual.value
+            elif isinstance(actual, date):
+                actual = actual.isoformat()
+            assert actual == expected[field]

@@ -8,6 +8,14 @@ These are realistic Indian bank email formats used to:
 3. Verify end-to-end pipeline
 """
 
+from __future__ import annotations
+
+import re
+from datetime import date
+
+_DEMO_ANCHOR_DATE = date(2026, 5, 5)
+_DEMO_DATE_PATTERN = re.compile(r"\b(?P<day>\d{2})-(?P<month>\d{2})-(?P<year>\d{4})\b")
+
 SAMPLE_EMAILS = [
     # ─── HDFC Bank ───
     {
@@ -151,3 +159,27 @@ SAMPLE_EMAILS = [
         ),
     },
 ]
+
+
+def sample_emails_for_date(as_of: date) -> list[dict[str, str]]:
+    """Return demo messages shifted so a fresh sync stays in a useful period.
+
+    ``SAMPLE_EMAILS`` remains fixed for parser regression fixtures. Runtime demo
+    syncs shift the embedded evidence dates by the same calendar delta, giving
+    the demo workspace current and prior-month activity without mutating the
+    sanitized truth corpus.
+    """
+    delta = as_of - _DEMO_ANCHOR_DATE
+
+    def shift_text(value: str) -> str:
+        def replace(match: re.Match[str]) -> str:
+            parsed = date(
+                int(match.group("year")),
+                int(match.group("month")),
+                int(match.group("day")),
+            )
+            return (parsed + delta).strftime("%d-%m-%Y")
+
+        return _DEMO_DATE_PATTERN.sub(replace, value)
+
+    return [{key: shift_text(value) for key, value in email.items()} for email in SAMPLE_EMAILS]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 
 from app.services.connectors.base import ConnectorErrorType
@@ -10,6 +11,9 @@ from app.services.connectors.base import ConnectorErrorType
 def classify_connector_exception(exc: Exception) -> ConnectorErrorType:
     message = str(exc).lower()
     status = getattr(getattr(exc, "resp", None), "status", None)
+
+    if isinstance(exc, RefreshError):
+        return ConnectorErrorType.PERMANENT
 
     if isinstance(exc, HttpError):
         if status in {401, 403}:
@@ -38,10 +42,15 @@ def classify_connector_exception(exc: Exception) -> ConnectorErrorType:
     return ConnectorErrorType.UNKNOWN
 
 
-def public_connector_error(error_type: ConnectorErrorType) -> str:
+def public_connector_error(
+    error_type: ConnectorErrorType,
+    *,
+    provider_name: str = "Gmail",
+) -> str:
     """Return a stable client-safe message without exposing provider details."""
+    label = provider_name.strip() or "provider"
     if error_type == ConnectorErrorType.PERMANENT:
-        return "Gmail authorization is invalid or revoked"
+        return f"{label} authorization is invalid or revoked"
     if error_type == ConnectorErrorType.TRANSIENT:
-        return "Gmail is temporarily unavailable"
-    return "Gmail synchronization failed"
+        return f"{label} is temporarily unavailable"
+    return f"{label} synchronization failed"

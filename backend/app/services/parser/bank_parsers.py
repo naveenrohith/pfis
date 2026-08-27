@@ -68,7 +68,7 @@ class HDFCParser(BaseParser):
     """
 
     BANK_NAME = "HDFC"
-    VERSION = 2
+    VERSION = 4
 
     # HDFC-specific amount patterns
     _HDFC_AMOUNT = [
@@ -86,8 +86,24 @@ class HDFCParser(BaseParser):
 
     # HDFC-specific merchant patterns
     _HDFC_MERCHANT = [
+        # Reversal/refund alerts carry an explicit counterparty label.
+        re.compile(
+            r"From\s+Merchant:\s*([A-Z][A-Z0-9\s.&_-]+?)(?:\s+Date\s+Time:|\s+Date:|$)",
+            re.IGNORECASE,
+        ),
         # "to VPA payzomato@hdfcbank (ZOMATO)" or "to VPA payzomato@hdfcbank ZOMATO on"
         re.compile(r"to\s+VPA\s+\S+\s+\(?([A-Z][A-Z0-9\s.&-]+?)\)?\s+on\s+\d", re.IGNORECASE),
+        # Credits name the counterparty after the VPA.
+        re.compile(r"by\s+VPA\s+\S+\s+([A-Z][A-Z0-9\s.&-]+?)\s+on\s+\d", re.IGNORECASE),
+        # Card gateways/acquirers prefix the display merchant with a short code.
+        re.compile(
+            r"towards\s+(?:[A-Z0-9]{2,6}\*)?([A-Z][A-Z0-9\s.&_-]+?)\s+on\s+\d",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bat\s+(?:[A-Z0-9]{2,6}\*)?([A-Z][A-Z0-9\s.&_-]+?)\s+on\s+\d",
+            re.IGNORECASE,
+        ),
         # "from NEFT Cr-BARC0INBBIR-RANDSTAD INDIA PRIVATE LIMITED-..."
         re.compile(r"NEFT\s+Cr-[^-]+-([A-Z][A-Z0-9\s.&]+?)(?:-|\s+on\s+)", re.IGNORECASE),
         # "at SWIGGY on"
@@ -121,8 +137,13 @@ class HDFCParser(BaseParser):
 
         result.reference_id = patterns.extract_reference_id(combined)
 
-        # HDFC-specific merchant extraction
-        result.merchant_raw = self._match_merchant(self._HDFC_MERCHANT, combined)
+        # An ATM location is evidence, not a merchant. Keep the raw source
+        # email for the location and expose the movement accurately.
+        if re.search(r"\b(?:ATM|cash)\s+withdrawal\b", combined, re.IGNORECASE):
+            result.merchant_raw = "ATM cash withdrawal"
+            result.merchant_source = "exact"
+        else:
+            result.merchant_raw = self._match_merchant(self._HDFC_MERCHANT, combined)
         if result.merchant_raw:
             result.merchant_source = "exact"
         else:
@@ -241,7 +262,11 @@ class ICICIParser(BaseParser):
     # ICICI merchant: "at AMAZON" or "to BIGBASKET via"
     _ICICI_MERCHANT = [
         re.compile(r"\bat\s+([A-Z][A-Z0-9\s.]+?)(?:\s+on|\s+via|\s*\.)", re.IGNORECASE),
-        re.compile(r"\bto\s+([A-Z][A-Z0-9\s.]+?)(?:\s+via|\s+on|\s+UPI)", re.IGNORECASE),
+        re.compile(
+            r"\bto\s+(?!your\s+(?:account|acct|card)\b)"
+            r"([A-Z][A-Z0-9\s.]+?)(?:\s+via|\s+on|\s+UPI)",
+            re.IGNORECASE,
+        ),
         re.compile(r"towards\s+([A-Z][A-Z0-9\s./-]+?)(?:\s+on|\s*\.)", re.IGNORECASE),
     ]
 
@@ -284,4 +309,169 @@ class ICICIParser(BaseParser):
                     result.merchant_source = "generic"
 
         result.compute_confidence()
+        return result
+
+
+class StructuredAlertParser(BaseParser):
+    """Shared parser for institution templates that expose stable labels.
+
+    Many non-HDFC/SBI/ICICI alerts use the same small family of templates, but
+    routing them through :class:`GenericParser` loses an important provenance
+    signal: we cannot tell whether the institution format was understood or
+    merely happened to match a broad expression.  This class keeps the common
+    extraction fallback while allowing each institution to contribute its
+    amount, account, and counterparty patterns.
+    """
+
+    _AMOUNT_PATTERNS: list[re.Pattern[str]] = []
+    _ACCOUNT_PATTERN: re.Pattern[str] | None = None
+    _MERCHANT_PATTERNS: list[re.Pattern[str]] = []
+
+    def parse(self, subject: str, body: str) -> ParseResult:
+        combined = self._clean_text(f"{subject} {body}")
+        result = ParseResult(bank=self.BANK_NAME, parser_version=self.VERSION)
+
+        result.amount = self._match_amount(self._AMOUNT_PATTERNS, combined)
+        if result.amount is None:
+            result.amount = patterns.extract_amount(combined)
+
+        txn_type = patterns.detect_transaction_type(combined)
+        if txn_type:
+            result.transaction_type = TransactionTypeEnum(txn_type)
+
+        result.date = patterns.extract_date(combined)
+        account_match = self._ACCOUNT_PATTERN.search(combined) if self._ACCOUNT_PATTERN else None
+        result.account_last4 = (
+            account_match.group(1) if account_match else patterns.extract_account(combined)
+        )
+        result.reference_id = patterns.extract_reference_id(combined)
+
+        result.merchant_raw = self._match_merchant(self._MERCHANT_PATTERNS, combined)
+        if result.merchant_raw:
+            result.merchant_source = "exact"
+        else:
+            result.merchant_raw = patterns.extract_merchant(combined)
+            if result.merchant_raw:
+                result.merchant_source = "exact"
+            else:
+                inferred = patterns.infer_generic_merchant(combined, txn_type)
+                if inferred:
+                    result.merchant_raw = inferred
+                    result.merchant_source = "generic"
+
+        result.compute_confidence()
+        return result
+
+
+class AxisParser(StructuredAlertParser):
+    """Axis Bank and Axis credit-card alert parser."""
+
+    BANK_NAME = "AXIS"
+    VERSION = 1
+    _AMOUNT_PATTERNS = [
+        re.compile(
+            r"(?:INR|Rs\.?)\s?([\d,]+(?:\.\d{1,2})?)\s+(?:was\s+)?(?:spent|debited|credited|charged)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:spent|debited|charged|paid)\s+(?:for\s+)?(?:INR|Rs\.?)\s?([\d,]+(?:\.\d{1,2})?)",
+            re.IGNORECASE,
+        ),
+    ]
+    _ACCOUNT_PATTERN = re.compile(
+        r"(?:ending|(?:A/?c|account|card)\s*(?:no\.?\s*)?)[\s:*X]*(\d{4})\b",
+        re.IGNORECASE,
+    )
+    _MERCHANT_PATTERNS = [
+        re.compile(
+            r"\bat\s+(?:[A-Z0-9]{2,8}\*)?([A-Z][A-Z0-9\s.&_-]+?)(?:\s+(?:on|using|via|with|for)|[.]|$)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\btowards\s+(?:[A-Z0-9]{2,8}\*)?([A-Z][A-Z0-9\s.&_-]+?)(?:\s+(?:on|via|using)|[.]|$)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bto\s+(?!your\s+(?:account|card|wallet)\b)([A-Z][A-Z0-9\s.&_-]+?)(?:\s+(?:via|using|on)|[.]|$)",
+            re.IGNORECASE,
+        ),
+    ]
+
+
+class KotakParser(StructuredAlertParser):
+    """Kotak Bank alert parser with account, UPI, and IMPS context."""
+
+    BANK_NAME = "KOTAK"
+    VERSION = 1
+    _AMOUNT_PATTERNS = [
+        re.compile(
+            r"(?:INR|Rs\.?)\s?([\d,]+(?:\.\d{1,2})?)\s+(?:has\s+been\s+)?(?:debited|credited)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:debited|credited|charged)\s+(?:for\s+)?(?:INR|Rs\.?)\s?([\d,]+(?:\.\d{1,2})?)",
+            re.IGNORECASE,
+        ),
+    ]
+    _ACCOUNT_PATTERN = re.compile(
+        r"(?:A/?c|account|card)\s*(?:no\.?\s*)?[\s:*X]*(\d{4})\b",
+        re.IGNORECASE,
+    )
+    _MERCHANT_PATTERNS = [
+        re.compile(
+            r"\bfor\s+(?!your\s+(?:account|card)\b)([A-Z][A-Z0-9\s.&_-]+?)(?:\s+(?:via|using|on|Ref)|[.]|$)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bto\s+(?!your\s+(?:account|card)\b)([A-Z][A-Z0-9\s.&_-]+?)(?:\s+(?:via|using|on|Ref)|[.]|$)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"UPI[-:]([A-Z][A-Z0-9\s.&_-]+?)(?:[-]\S+|\s+on|\s+Ref|[.]|$)",
+            re.IGNORECASE,
+        ),
+    ]
+
+
+class DigitalPaymentParser(StructuredAlertParser):
+    """Parser for wallet/payment-network receipts with no bank account suffix."""
+
+    BANK_NAME = "DIGITAL_PAYMENT"
+    VERSION = 1
+    _AMOUNT_PATTERNS = [
+        re.compile(
+            r"(?:payment\s+of|paid|charged|spent)\s+(?:INR|Rs\.?)\s?([\d,]+(?:\.\d{1,2})?)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:INR|Rs\.?)\s?([\d,]+(?:\.\d{1,2})?)\s+(?:was\s+)?(?:paid|charged|spent|credited)",
+            re.IGNORECASE,
+        ),
+    ]
+    _MERCHANT_PATTERNS = [
+        re.compile(
+            r"\brefund\b.*?\bfrom\s+([A-Z][A-Z0-9\s.&_-]+?)(?:\s+(?:on|via|using)|[.]|$)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:paid|payment\s+of|payment)\s+(?:for\s+)?(?:INR|Rs\.?\s?[\d,.]+\s+)?to\s+([A-Z][A-Z0-9\s.&_-]+?)(?:\s+(?:was\s+)?(?:successful|completed|approved|declined|via|using|on)|[.]|$)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bto\s+([A-Z][A-Z0-9\s.&_-]+?)(?:\s+(?:was\s+)?(?:successful|completed|approved|declined|via|using|on)|[.]|$)",
+            re.IGNORECASE,
+        ),
+    ]
+
+    def parse(self, subject: str, body: str) -> ParseResult:
+        result = super().parse(subject, body)
+        combined = self._clean_text(f"{subject} {body}")
+        if (
+            result.transaction_type == TransactionTypeEnum.REFUND
+            and re.search(r"\bcredited\s+to\s+your\s+wallet\b", combined, re.IGNORECASE)
+            and not re.search(r"\brefund\b.*?\bfrom\s+\S+", combined, re.IGNORECASE)
+        ):
+            result.merchant_raw = "WALLET REFUND"
+            result.merchant_source = "exact"
+            result.compute_confidence()
         return result

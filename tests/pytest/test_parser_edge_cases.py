@@ -2,6 +2,7 @@
 
 from app.services.parser import patterns
 from app.services.parser.bank_parsers import GenericParser, HDFCParser, ICICIParser, SBIParser
+from app.services.parser.normalizer import _clean_merchant_name
 
 
 def test_parse_email_with_empty_body():
@@ -69,6 +70,13 @@ def test_merchant_extraction_from_at_pattern():
     assert "SWIGGY" in merchant.upper()
 
 
+def test_merchant_cleaning_preserves_identity_words_and_strips_legal_suffix():
+    assert (
+        _clean_merchant_name("GOOGLE INDIA DIGITAL SERVICES PVT LTD")
+        == "Google India Digital Services"
+    )
+
+
 def test_refund_takes_priority_over_credit():
     """Refund detection takes priority over generic credit keywords."""
     text = "Refund of Rs.500.00 has been credited to your account"
@@ -86,6 +94,38 @@ def test_hdfc_parser_specific_patterns():
     assert result.bank == "HDFC"
     assert result.amount == 1500.0
     assert result.account_last4 == "5678"
+
+
+def test_hdfc_parser_extracts_gateway_card_merchant():
+    parser = HDFCParser()
+    result = parser.parse(
+        "A payment was made using your Credit Card",
+        (
+            "Rs. 642.00 has been debited from your HDFC Bank Credit Card ending 4349 "
+            "towards RAZ*Swiggy on 16 Jun, 2026 at 12:45:10."
+        ),
+    )
+    assert result.merchant_raw == "Swiggy"
+
+
+def test_hdfc_parser_extracts_upi_credit_counterparty_and_debit_card_merchant():
+    parser = HDFCParser()
+    credit = parser.parse(
+        "Account update",
+        (
+            "Rs. 2,400.00 is successfully credited to your account **1441 by VPA "
+            "amazon.refunds@rapl Amazon India on 28-04-26."
+        ),
+    )
+    debit = parser.parse(
+        "Debit Card alert",
+        (
+            "Rs.2,200.00 is debited from your HDFC Bank Debit Card ending 1441 "
+            "at PNB*Make My Trip on 26 Feb, 2026 at 08:10:00."
+        ),
+    )
+    assert credit.merchant_raw == "Amazon India"
+    assert debit.merchant_raw == "Make My Trip"
 
 
 def test_sbi_parser_specific_patterns():

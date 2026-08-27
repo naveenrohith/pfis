@@ -17,6 +17,7 @@ import secrets
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 from google.auth.transport.requests import Request
 from google.oauth2 import id_token
@@ -43,6 +44,7 @@ GMAIL_SCOPES = [
 ]
 
 SCOPES = GMAIL_SCOPES
+GOOGLE_TOKEN_REVOCATION_URL = "https://oauth2.googleapis.com/revoke"
 
 
 def create_oauth_flow(
@@ -241,3 +243,16 @@ def build_credentials(
         scopes=SCOPES,
         expiry=google_expiry,
     )
+
+
+async def revoke_google_token(token: str) -> bool:
+    """Ask Google to revoke a grant without exposing the credential in logs."""
+    if not token:
+        return False
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            GOOGLE_TOKEN_REVOCATION_URL,
+            data={"token": token},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    return response.status_code == 200

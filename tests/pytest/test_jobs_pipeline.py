@@ -5,12 +5,14 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 from app.models.email import RawEmail
 from app.models.sync import JobStatus
 from app.services import job_service
 from app.services.job_service import create_job, recover_interrupted_jobs, run_job
 from app.services.parser.pipeline import process_raw_emails
+from google.auth.exceptions import RefreshError
 
 from tests.pytest.helpers import create_user
 
@@ -175,6 +177,36 @@ async def test_job_claim_is_atomic_across_concurrent_workers(test_session_factor
     assert completed.attempt_count == 1
 
 
+async def test_job_does_not_start_after_account_deletion_fence(
+    client, test_session_factory, monkeypatch
+):
+    user = await create_user(client, "job-delete-fence")
+    calls = 0
+
+    async def handler(_db, _user_id, _payload):
+        nonlocal calls
+        calls += 1
+        return {"ok": True}
+
+    monkeypatch.setitem(job_service.JOB_HANDLERS, "deletion-fence-test", handler)
+    async with test_session_factory() as db:
+        persisted_user = await db.get(job_service.User, user["id"])
+        assert persisted_user is not None
+        persisted_user.deletion_started_at = datetime.now(UTC)
+        job = await create_job(db, "deletion-fence-test", user_id=user["id"])
+        job_id = job.id
+
+    await run_job(job_id)
+
+    async with test_session_factory() as db:
+        failed = await job_service.get_job(db, job_id)
+    assert failed is not None
+    assert failed.status == JobStatus.FAILED
+    assert failed.result_json is not None
+    assert '"error_type": "user_unavailable"' in failed.result_json
+    assert calls == 0
+
+
 async def test_job_idempotency_key_returns_original_job(client):
     user = await create_user(client, "job-idempotency")
     headers = {"Idempotency-Key": "same-user-action"}
@@ -221,6 +253,25 @@ async def test_unexpected_job_failure_is_retried_until_attempts_exhausted(
     assert failed.status == JobStatus.FAILED
     assert failed.attempt_count == 2
     assert failed.result_json
+
+
+async def test_refresh_error_is_a_terminal_credential_failure(test_session_factory, monkeypatch):
+    async def handler(_db, _user_id, _payload):
+        raise RefreshError("invalid_grant")
+
+    monkeypatch.setitem(job_service.JOB_HANDLERS, "credential-test", handler)
+    async with test_session_factory() as db:
+        job = await create_job(db, "credential-test", user_id=None, max_attempts=3)
+
+    await run_job(job.id)
+
+    async with test_session_factory() as db:
+        failed = await job_service.get_job(db, job.id)
+
+    assert failed.status == JobStatus.FAILED
+    assert failed.attempt_count == 1
+    assert failed.error_message == "Connector authorization failed"
+    assert "invalid_grant" not in failed.result_json
 
 
 async def test_unexpected_job_error_does_not_persist_secret_details(

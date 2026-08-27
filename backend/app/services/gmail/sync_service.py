@@ -19,8 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.email import RawEmail
 from app.models.sync import SyncRun, SyncStatus
+from app.services.financial_clock import user_financial_today
 from app.services.gmail.email_filter import EmailType, classify_email
 from app.services.ingestion import IngestionCoordinator, IngestionMode
+from app.services.ingestion.activity import require_ingestion_user, tracked_user_ingestion
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,10 @@ class DemoSyncStats(TypedDict):
     emails_skipped_otp: int
     emails_skipped_promo: int
     emails_skipped_duplicate: int
+    coverage_complete: bool
+    coverage_truncated: bool
+    coverage_pages: int
+    coverage_result_size_estimate: int
     classifications: list[dict[str, object]]
 
 
@@ -39,14 +45,28 @@ async def demo_sync_gmail_emails(
     user_id: str,
 ) -> DemoSyncStats:
     """Simulate Gmail sync using deterministic sample emails for demo/testing."""
-    from app.services.gmail.demo_data import SAMPLE_EMAILS
+    async with tracked_user_ingestion(db, user_id):
+        return await _demo_sync_gmail_emails_tracked(db, user_id)
+
+
+async def _demo_sync_gmail_emails_tracked(
+    db: AsyncSession,
+    user_id: str,
+) -> DemoSyncStats:
+    from app.services.gmail.demo_data import sample_emails_for_date
+
+    demo_emails = sample_emails_for_date(await user_financial_today(db, user_id))
 
     stats: DemoSyncStats = {
-        "emails_fetched": len(SAMPLE_EMAILS),
+        "emails_fetched": len(demo_emails),
         "emails_stored": 0,
         "emails_skipped_otp": 0,
         "emails_skipped_promo": 0,
         "emails_skipped_duplicate": 0,
+        "coverage_complete": True,
+        "coverage_truncated": False,
+        "coverage_pages": 1,
+        "coverage_result_size_estimate": len(demo_emails),
         "classifications": [],
     }
 
@@ -57,7 +77,7 @@ async def demo_sync_gmail_emails(
     sync_run_id = sync_run.id
 
     try:
-        for email_data in SAMPLE_EMAILS:
+        for email_data in demo_emails:
             fake_gmail_id = f"demo_{uuid.uuid5(uuid.NAMESPACE_DNS, email_data['body'][:50])}"
             scoped_gmail_id = f"{user_id}:{fake_gmail_id}"
 
@@ -116,6 +136,11 @@ async def demo_sync_gmail_emails(
         sync_run.end_time = datetime.now(UTC)
         sync_run.emails_fetched = stats["emails_fetched"]
         sync_run.emails_processed = stats["emails_stored"]
+        sync_run.coverage_complete = stats["coverage_complete"]
+        sync_run.coverage_truncated = stats["coverage_truncated"]
+        sync_run.coverage_pages = stats["coverage_pages"]
+        sync_run.coverage_result_size_estimate = stats["coverage_result_size_estimate"]
+        await require_ingestion_user(db, user_id)
         await db.commit()
         return stats
     except Exception as exc:

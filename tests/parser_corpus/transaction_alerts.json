@@ -3,6 +3,7 @@
   "cases": [
     {
       "id": "hdfc-upi-debit",
+      "format_id": "hdfc-account-upi-v1",
       "sender": "HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
       "subject": "You have done a UPI txn. Check details!",
       "body": "Rs.72.00 is debited from your account ending 1441 towards VPA shop@upi (SAMPLE MERCHANT) on 09-07-26. UPI transaction reference no.: 125997704118.",
@@ -10,6 +11,7 @@
     },
     {
       "id": "sbi-debit-fallback-merchant",
+      "format_id": "sbi-account-debit-v1",
       "sender": "alerts@sbi.co.in",
       "subject": "SBI Alert",
       "body": "Your a/c no. XXXXXXXX1234 is debited for Rs.230.00 on 05-05-2026. Ref No 412345678901",
@@ -17,6 +19,7 @@
     },
     {
       "id": "icici-credit-card-debit",
+      "format_id": "icici-account-card-rail-v1",
       "sender": "alerts@icicibank.com",
       "subject": "ICICI Card Alert",
       "body": "INR 499.00 has been debited from your ICICI Bank Account XX5678 on 05-May-2026 towards NETFLIX.COM on Credit Card.",
@@ -24,10 +27,379 @@
     },
     {
       "id": "generic-upi-fallback",
+      "format_id": "generic-payment-upi-v1",
       "sender": "alerts@example-payments.test",
       "subject": "Payment successful",
       "body": "Payment of Rs.750.00 to BOOKMYSHOW via UPI on 07-05-2026. Ref No: 555555123456.",
       "expected": {"bank": "GENERIC", "amount": 750.0, "transaction_type": "debit", "merchant_raw": "BOOKMYSHOW", "payment_method": "upi", "min_confidence": 1.0}
+    },
+    {
+      "id": "hdfc-upi-without-merchant",
+      "format_id": "hdfc-account-upi-v2",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "Alert: account update",
+      "body": "Rs.450.00 has been debited from your A/c XX1234 on 05-05-2026 by a UPI txn. UPI Ref No 412345678901.",
+      "expected": {"bank": "HDFC", "amount": 450.0, "transaction_type": "debit", "merchant_raw": "UPI TRANSFER", "date": "2026-05-05", "account_last4": "1234", "reference_id": "412345678901", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 0.8}
+    },
+    {
+      "id": "hdfc-neft-credit",
+      "format_id": "hdfc-account-neft-v1",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "Money received",
+      "body": "Rs.25,000.00 has been credited to your A/c XX1234 on 01-05-2026 by NEFT Ref No SBIN123456789012.",
+      "expected": {"bank": "HDFC", "amount": 25000.0, "transaction_type": "credit", "merchant_raw": "NEFT CREDIT", "date": "2026-05-01", "account_last4": "1234", "reference_id": "SBIN123456789012", "payment_method": "bank_transfer", "payment_rail": "transfer", "used_fallback": false, "min_confidence": 0.8}
+    },
+    {
+      "id": "icici-upi-merchant",
+      "format_id": "icici-account-upi-v1",
+      "sender": "alerts@icicibank.com",
+      "subject": "ICICI Bank UPI Alert",
+      "body": "Your ICICI Bank Acct XX5678 has been debited with INR 850.00 on 05-05-2026 towards UPI-SWIGGY-swiggy@axisbank-UTIB. UPI Ref: 412345678903.",
+      "expected": {"bank": "ICICI", "amount": 850.0, "transaction_type": "debit", "merchant_raw": "SWIGGY", "date": "2026-05-05", "account_last4": "5678", "reference_id": "412345678903", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "axis-debit-card-fallback",
+      "format_id": "axis-debit-card-v1",
+      "sender": "alerts@axisbank.com",
+      "subject": "Axis Bank Debit Card Transaction",
+      "body": "INR 1,500.00 spent on your Axis Bank Debit Card ending 9012 at BESCOM BANGALORE on 03-05-2026.",
+      "expected": {"bank": "AXIS", "amount": 1500.0, "transaction_type": "debit", "merchant_raw": "BESCOM BANGALORE", "date": "2026-05-03", "account_last4": "9012", "payment_method": "debit_card", "payment_rail": "debit_card", "card_event": "purchase", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "kotak-upi-fallback",
+      "format_id": "kotak-account-upi-v1",
+      "sender": "alerts@kotak.com",
+      "subject": "Kotak Bank Alert",
+      "body": "Rs.799.00 debited from your Kotak Bank A/c X1234 on 02-05-2026 for UBER INDIA via UPI. Ref No: 412345678904.",
+      "expected": {"bank": "KOTAK", "amount": 799.0, "transaction_type": "debit", "merchant_raw": "UBER INDIA", "date": "2026-05-02", "account_last4": "1234", "reference_id": "412345678904", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "paytm-upi-fallback",
+      "format_id": "paytm-wallet-upi-v1",
+      "sender": "noreply@paytm.com",
+      "subject": "Payment Successful",
+      "body": "You have successfully paid Rs.350.00 to BIGBASKET via UPI on 04-05-2026. UPI Transaction ID: 412345678905.",
+      "expected": {"bank": "PAYTM", "amount": 350.0, "transaction_type": "debit", "merchant_raw": "BIGBASKET", "date": "2026-05-04", "reference_id": "412345678905", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "hdfc-credit-card-purchase",
+      "format_id": "hdfc-credit-card-purchase-v1",
+      "sender": "creditcard@hdfcbank.net",
+      "subject": "HDFC Credit Card Transaction Alert",
+      "body": "Thank you for using your HDFC Bank Credit Card ending 7890. Rs.3,499.00 has been charged for FLIPKART INTERNET on 05-05-2026.",
+      "expected": {"bank": "HDFC_CC", "amount": 3499.0, "transaction_type": "debit", "merchant_raw": "FLIPKART INTERNET", "date": "2026-05-05", "account_last4": "7890", "payment_method": "credit_card", "card_event": "purchase", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "hdfc-refund-credit",
+      "format_id": "hdfc-account-refund-v1",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "Refund credited",
+      "body": "Rs.599.00 has been credited to your A/c XX1234 on 04-05-2026 as refund from AMAZON PAY.",
+      "expected": {"bank": "HDFC", "amount": 599.0, "transaction_type": "refund", "merchant_raw": "AMAZON PAY", "date": "2026-05-04", "account_last4": "1234", "card_event": "refund", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "hdfc-vpa-counterparty",
+      "format_id": "hdfc-account-upi-v3",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "HDFC Bank Alert",
+      "body": "Rs.1,500.00 has been debited from a/c **5678 on 05-05-26 to VPA payzomato@hdfcbank ZOMATO on 05-05-26",
+      "expected": {"bank": "HDFC", "amount": 1500.0, "transaction_type": "debit", "merchant_raw": "ZOMATO", "date": "2026-05-05", "account_last4": "5678", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "generic-low-confidence-debit",
+      "format_id": "generic-bare-debit-v1",
+      "sender": "alerts@example-payments.test",
+      "subject": "Debit alert",
+      "body": "Rs.99.00 has been debited.",
+      "expected": {"bank": "GENERIC", "amount": 99.0, "transaction_type": "debit", "merchant_raw": "BANK DEBIT", "payment_method": "other", "payment_rail": "other", "used_fallback": true, "min_confidence": 0.6}
+    },
+    {
+      "id": "generic-debit-card-purchase",
+      "format_id": "generic-debit-card-v1",
+      "sender": "alerts@example-payments.test",
+      "subject": "Debit card alert",
+      "body": "Your Debit Card was used for Rs.500 on 09-07-2026.",
+      "expected": {"bank": "GENERIC", "amount": 500.0, "transaction_type": "debit", "merchant_raw": "CARD PURCHASE", "date": "2026-07-09", "payment_method": "debit_card", "payment_rail": "debit_card", "card_event": "purchase", "used_fallback": true, "min_confidence": 0.8}
+    },
+    {
+      "id": "generic-credit-card-purchase",
+      "format_id": "generic-credit-card-v1",
+      "sender": "alerts@example-payments.test",
+      "subject": "Credit card alert",
+      "body": "Your Credit Card was charged Rs.500 on 09-07-2026.",
+      "expected": {"bank": "GENERIC", "amount": 500.0, "transaction_type": "debit", "merchant_raw": "CARD PURCHASE", "date": "2026-07-09", "payment_method": "credit_card", "payment_rail": "other", "card_event": "purchase", "used_fallback": true, "min_confidence": 0.8}
+    },
+    {
+      "id": "hdfc-upi-handle-with-atm-substring",
+      "format_id": "hdfc-account-upi-v4",
+      "sender": "HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
+      "subject": "You have done a UPI txn. Check details!",
+      "body": "Rs.56.00 has been debited from account 1441 to VPA kethavatmangya@ybl Mr KETHAVATH MANGYA on 21-03-26.",
+      "expected": {"bank": "HDFC", "amount": 56.0, "transaction_type": "debit", "merchant_raw": "Mr KETHAVATH MANGYA", "date": "2026-03-21", "account_last4": "1441", "payment_method": "upi", "payment_rail": "upi", "card_event": "none", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "hdfc-card-reversal-pending",
+      "format_id": "hdfc-credit-card-reversal-v1",
+      "sender": "HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
+      "subject": "Transaction reversal initiated",
+      "body": "Transaction reversal of Rs.2.00 has been initiated to your HDFC Bank Credit Card ending 4349. From Merchant: SAMPLE STORE Date Time: 20 Mar, 2026 at 14:37:13.",
+      "expected": {"bank": "HDFC", "amount": 2.0, "transaction_type": "refund", "merchant_raw": "SAMPLE STORE", "date": "2026-03-20", "transaction_timestamp": "2026-03-20T14:37:13+05:30", "account_last4": "4349", "payment_method": "credit_card", "card_event": "reversal", "transaction_status": "reversal_pending", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "hdfc-atm-with-fee-footer",
+      "format_id": "hdfc-debit-card-atm-v1",
+      "sender": "HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
+      "subject": "View: Account update for your HDFC Bank A/c",
+      "body": "Thank you for using your HDFC Bank Debit Card ending 4017 for ATM withdrawal for Rs 20,000.00 in PUNE at BANER on 09-06-2026 19:16:57. For more details on Service charges and Fees, click here.",
+      "expected": {"bank": "HDFC", "amount": 20000.0, "transaction_type": "debit", "merchant_raw": "ATM cash withdrawal", "date": "2026-06-09", "account_last4": "4017", "payment_method": "debit_card", "payment_rail": "atm", "card_event": "none", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "hdfc-gateway-card-purchase",
+      "format_id": "hdfc-credit-card-gateway-v1",
+      "sender": "HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
+      "subject": "A payment was made using your Credit Card",
+      "body": "Rs. 642.00 has been debited from your HDFC Bank Credit Card ending 4349 towards RAZ*Swiggy on 16 Jun, 2026 at 12:45:10. For more details on Service charges and Fees, click here.",
+      "expected": {"bank": "HDFC", "amount": 642.0, "transaction_type": "debit", "merchant_raw": "Swiggy", "date": "2026-06-16", "transaction_timestamp": "2026-06-16T12:45:10+05:30", "account_last4": "4349", "payment_method": "credit_card", "card_event": "purchase", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "hdfc-debit-card-acquirer-prefix",
+      "format_id": "hdfc-debit-card-purchase-v1",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "Debit Card alert",
+      "body": "Rs.2,200.00 is debited from your HDFC Bank Debit Card ending 1441 at PNB*Make My Trip on 26 Feb, 2026 at 08:10:00.",
+      "expected": {"bank": "HDFC", "amount": 2200.0, "transaction_type": "debit", "merchant_raw": "Make My Trip", "date": "2026-02-26", "transaction_timestamp": "2026-02-26T08:10:00+05:30", "account_last4": "1441", "payment_method": "debit_card", "payment_rail": "debit_card", "card_event": "purchase", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "sbi-neft-credit",
+      "format_id": "sbi-account-neft-credit-v1",
+      "sender": "alerts@sbi.co.in",
+      "subject": "SBI Credit Alert",
+      "body": "Your a/c no. XXXXXXXX1234 is credited by Rs.15,000.00 on 02-05-2026 (NEFT Ref No ICIC123456789).",
+      "expected": {"bank": "SBI", "amount": 15000.0, "transaction_type": "credit", "merchant_raw": "NEFT CREDIT", "date": "2026-05-02", "account_last4": "1234", "reference_id": "ICIC123456789", "payment_method": "bank_transfer", "payment_rail": "transfer", "used_fallback": false, "min_confidence": 0.8}
+    },
+    {
+      "id": "sbi-amount-first-credit",
+      "format_id": "sbi-account-credit-v2",
+      "sender": "donotreply@sbi.co.in",
+      "subject": "SBI Credit",
+      "body": "Rs. 5,000.00 credited to your a/c XXXXXXXX4321 on 06-05-2026. Ref No 412345678911.",
+      "expected": {"bank": "SBI", "amount": 5000.0, "transaction_type": "credit", "merchant_raw": "BANK CREDIT", "date": "2026-05-06", "account_last4": "4321", "reference_id": "412345678911", "payment_method": "other", "payment_rail": "other", "used_fallback": false, "min_confidence": 0.8}
+    },
+    {
+      "id": "sbi-beneficiary-transfer",
+      "format_id": "sbi-account-transfer-v1",
+      "sender": "alerts@sbi.co.in",
+      "subject": "SBI Transfer",
+      "body": "Your A/C X2468 is debited for Rs.1,100.00 transfer to BIGBASKET on 07-05-2026 Ref No 412345678912.",
+      "expected": {"bank": "SBI", "amount": 1100.0, "transaction_type": "debit", "merchant_raw": "BIGBASKET", "date": "2026-05-07", "account_last4": "2468", "reference_id": "412345678912", "payment_method": "other", "payment_rail": "other", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "sbi-upi-counterparty",
+      "format_id": "sbi-account-upi-v1",
+      "sender": "alerts@sbi.co.in",
+      "subject": "SBI UPI Alert",
+      "body": "Your a/c no. XXXXXXXX1357 is debited for Rs.325.00 UPI-SWIGGY-swiggy@axis on 08-05-2026 Ref No 412345678913.",
+      "expected": {"bank": "SBI", "amount": 325.0, "transaction_type": "debit", "merchant_raw": "SWIGGY", "date": "2026-05-08", "account_last4": "1357", "reference_id": "412345678913", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "icici-upi-credit-without-counterparty",
+      "format_id": "icici-account-upi-credit-v1",
+      "sender": "alerts@icicibank.com",
+      "subject": "ICICI Credit",
+      "body": "INR 2,500.00 credited to your Account XX5678 from UPI Ref 412345678914 on 09-May-2026.",
+      "expected": {"bank": "ICICI", "amount": 2500.0, "transaction_type": "credit", "merchant_raw": "UPI CREDIT", "date": "2026-05-09", "account_last4": "5678", "reference_id": "412345678914", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 0.8}
+    },
+    {
+      "id": "icici-card-used-purchase",
+      "format_id": "icici-credit-card-purchase-v1",
+      "sender": "creditcards@icicibank.com",
+      "subject": "ICICI Card Alert",
+      "body": "Your ICICI Bank Credit Card XX1234 has been used for Rs.1,299.00 at AMAZON on 10-May-2026.",
+      "expected": {"bank": "ICICI_CC", "amount": 1299.0, "transaction_type": "debit", "merchant_raw": "AMAZON", "date": "2026-05-10", "account_last4": "1234", "payment_method": "credit_card", "card_event": "purchase", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "icici-upi-to-merchant",
+      "format_id": "icici-account-upi-v2",
+      "sender": "alerts@icicibank.com",
+      "subject": "ICICI UPI Debit",
+      "body": "INR 875.00 has been debited from your Account XX5678 to BIGBASKET via UPI on 11-May-2026. UPI Ref 412345678915.",
+      "expected": {"bank": "ICICI", "amount": 875.0, "transaction_type": "debit", "merchant_raw": "BIGBASKET", "date": "2026-05-11", "account_last4": "5678", "reference_id": "412345678915", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "icici-account-at-merchant",
+      "format_id": "icici-account-debit-v2",
+      "sender": "alerts@icicibank.com",
+      "subject": "ICICI Bank Alert",
+      "body": "Rs.650.00 has been debited from your ICICI Bank Account XX5678 at SAMPLE CAFE on 12-May-2026.",
+      "expected": {"bank": "ICICI", "amount": 650.0, "transaction_type": "debit", "merchant_raw": "SAMPLE CAFE", "date": "2026-05-12", "account_last4": "5678", "payment_method": "other", "payment_rail": "other", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "phonepe-successful-payment",
+      "format_id": "phonepe-payment-v1",
+      "sender": "noreply@phonepe.com",
+      "subject": "PhonePe Payment Successful",
+      "body": "Payment of Rs.199.00 to SPOTIFY INDIA was successful on 01-05-2026. Transaction ID: PHO412345678906.",
+      "expected": {"bank": "PHONEPE", "amount": 199.0, "transaction_type": "debit", "merchant_raw": "SPOTIFY INDIA", "date": "2026-05-01", "reference_id": "PHO412345678906", "payment_method": "other", "payment_rail": "other", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "gpay-upi-payment",
+      "format_id": "gpay-upi-v1",
+      "sender": "noreply@googleplay.com",
+      "subject": "UPI payment",
+      "body": "You paid Rs.275.00 to SAMPLE CAFE via UPI on 13-05-2026. UPI Ref 412345678916.",
+      "expected": {"bank": "GPAY", "amount": 275.0, "transaction_type": "debit", "merchant_raw": "SAMPLE CAFE", "date": "2026-05-13", "reference_id": "412345678916", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "amazonpay-upi-payment",
+      "format_id": "amazonpay-upi-v1",
+      "sender": "notifications@amazonpay.in",
+      "subject": "Payment successful",
+      "body": "Payment of Rs.480.00 to SAMPLE BOOKS via UPI on 14-05-2026. Ref No 412345678917.",
+      "expected": {"bank": "AMAZONPAY", "amount": 480.0, "transaction_type": "debit", "merchant_raw": "SAMPLE BOOKS", "date": "2026-05-14", "reference_id": "412345678917", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "yes-upi-debit",
+      "format_id": "yes-account-upi-v1",
+      "sender": "alerts@yesbank.in",
+      "subject": "YES Bank UPI Alert",
+      "body": "Rs.720.00 has been debited from A/c XX1122 to SAMPLE MART via UPI on 15-05-2026. Ref No 412345678918.",
+      "expected": {"bank": "YES", "amount": 720.0, "transaction_type": "debit", "merchant_raw": "SAMPLE MART", "date": "2026-05-15", "account_last4": "1122", "reference_id": "412345678918", "payment_method": "upi", "payment_rail": "upi", "used_fallback": true, "min_confidence": 1.0}
+    },
+    {
+      "id": "pnb-account-debit",
+      "format_id": "pnb-account-debit-v1",
+      "sender": "alerts@pnb.co.in",
+      "subject": "PNB debit alert",
+      "body": "Your A/c XX2233 has been debited for Rs.910.00 at SAMPLE FUEL on 16-05-2026. Ref No 412345678919.",
+      "expected": {"bank": "PNB", "amount": 910.0, "transaction_type": "debit", "merchant_raw": "SAMPLE FUEL", "date": "2026-05-16", "account_last4": "2233", "reference_id": "412345678919", "payment_method": "other", "payment_rail": "other", "used_fallback": true, "min_confidence": 1.0}
+    },
+    {
+      "id": "rbl-credit-card-purchase",
+      "format_id": "rbl-credit-card-v1",
+      "sender": "alerts@bfrpr.rbl.co.in",
+      "subject": "RBL Card Alert",
+      "body": "Your Credit Card ending 3344 was charged Rs.1,050.00 at SAMPLE HOTEL on 17-05-2026.",
+      "expected": {"bank": "RBL", "amount": 1050.0, "transaction_type": "debit", "merchant_raw": "SAMPLE HOTEL", "date": "2026-05-17", "account_last4": "3344", "payment_method": "credit_card", "card_event": "purchase", "used_fallback": true, "min_confidence": 1.0}
+    },
+    {
+      "id": "indusind-imps-credit",
+      "format_id": "indusind-account-imps-v1",
+      "sender": "alerts@indusind.com",
+      "subject": "IMPS credit",
+      "body": "Rs.6,500.00 has been credited to A/c XX4455 by IMPS on 18-05-2026. Ref No 412345678920.",
+      "expected": {"bank": "INDUSIND", "amount": 6500.0, "transaction_type": "credit", "merchant_raw": "IMPS CREDIT", "date": "2026-05-18", "account_last4": "4455", "reference_id": "412345678920", "payment_method": "bank_transfer", "payment_rail": "transfer", "used_fallback": true, "min_confidence": 0.8}
+    },
+    {
+      "id": "federal-neft-debit",
+      "format_id": "federal-account-neft-v1",
+      "sender": "alerts@federalbank.co.in",
+      "subject": "NEFT debit",
+      "body": "Rs.2,250.00 has been debited from A/c XX5566 by NEFT on 19-05-2026. Ref No 412345678921.",
+      "expected": {"bank": "FEDERAL", "amount": 2250.0, "transaction_type": "debit", "merchant_raw": "NEFT TRANSFER", "date": "2026-05-19", "account_last4": "5566", "reference_id": "412345678921", "payment_method": "bank_transfer", "payment_rail": "transfer", "used_fallback": true, "min_confidence": 0.8}
+    },
+    {
+      "id": "axis-upi-payment",
+      "format_id": "axis-account-upi-v1",
+      "sender": "alerts@axisbank.com",
+      "subject": "Axis UPI Alert",
+      "body": "Payment of Rs.330.00 to SAMPLE FOOD via UPI on 20-05-2026. Ref No 412345678922.",
+      "expected": {"bank": "AXIS", "amount": 330.0, "transaction_type": "debit", "merchant_raw": "SAMPLE FOOD", "date": "2026-05-20", "reference_id": "412345678922", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "axis-credit-card-purchase",
+      "format_id": "axis-credit-card-v1",
+      "sender": "creditcard@axisbank.com",
+      "subject": "Axis Credit Card Alert",
+      "body": "Your Credit Card ending 6677 was charged Rs.1,499.00 at SAMPLE ELECTRONICS on 21-05-2026.",
+      "expected": {"bank": "AXIS_CC", "amount": 1499.0, "transaction_type": "debit", "merchant_raw": "SAMPLE ELECTRONICS", "date": "2026-05-21", "account_last4": "6677", "payment_method": "credit_card", "card_event": "purchase", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "razorpay-upi-payment",
+      "format_id": "razorpay-upi-v1",
+      "sender": "no-reply@razorpay.com",
+      "subject": "Payment successful",
+      "body": "Payment of Rs.845.00 to SAMPLE SERVICE via UPI on 22-05-2026. Ref No 412345678923.",
+      "expected": {"bank": "RAZORPAY", "amount": 845.0, "transaction_type": "debit", "merchant_raw": "SAMPLE SERVICE", "date": "2026-05-22", "reference_id": "412345678923", "payment_method": "upi", "payment_rail": "upi", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "lazypay-pay-later-purchase",
+      "format_id": "lazypay-purchase-v1",
+      "sender": "noreply@lazypay.in",
+      "subject": "Pay Later transaction",
+      "body": "Payment of Rs.560.00 to SAMPLE DELIVERY using Pay Later on 23-05-2026. Ref No 412345678924.",
+      "expected": {"bank": "LAZYPAY", "amount": 560.0, "transaction_type": "debit", "merchant_raw": "SAMPLE DELIVERY", "date": "2026-05-23", "reference_id": "412345678924", "payment_method": "pay_later", "payment_rail": "other", "used_fallback": false, "min_confidence": 1.0}
+    },
+    {
+      "id": "kotak-imps-credit",
+      "format_id": "kotak-account-imps-v1",
+      "sender": "alerts@kotak.com",
+      "subject": "Kotak credit alert",
+      "body": "Rs.4,250.00 has been credited to A/c XX7788 by IMPS on 24-05-2026. Ref No 412345678925.",
+      "expected": {"bank": "KOTAK", "amount": 4250.0, "transaction_type": "credit", "merchant_raw": "IMPS CREDIT", "date": "2026-05-24", "account_last4": "7788", "reference_id": "412345678925", "payment_method": "bank_transfer", "payment_rail": "transfer", "used_fallback": false, "min_confidence": 0.8}
+    },
+    {
+      "id": "paytm-wallet-refund",
+      "format_id": "paytm-wallet-refund-v1",
+      "sender": "noreply@paytm.com",
+      "subject": "Refund credited",
+      "body": "Refund of Rs.185.00 has been credited to your wallet on 25-05-2026. Ref No 412345678926.",
+      "expected": {"bank": "PAYTM", "amount": 185.0, "transaction_type": "refund", "merchant_raw": "WALLET REFUND", "date": "2026-05-25", "reference_id": "412345678926", "payment_method": "wallet", "payment_rail": "wallet", "card_event": "refund", "used_fallback": false, "min_confidence": 0.8}
+    },
+    {
+      "id": "generic-neft-debit",
+      "format_id": "generic-neft-v1",
+      "sender": "alerts@example-payments.test",
+      "subject": "NEFT transfer",
+      "body": "Rs.7,000.00 has been debited by NEFT on 26-05-2026. Ref No 412345678927.",
+      "expected": {"bank": "GENERIC", "amount": 7000.0, "transaction_type": "debit", "merchant_raw": "NEFT TRANSFER", "date": "2026-05-26", "reference_id": "412345678927", "payment_method": "bank_transfer", "payment_rail": "transfer", "used_fallback": true, "min_confidence": 0.8}
+    },
+    {
+      "id": "generic-imps-credit",
+      "format_id": "generic-imps-v1",
+      "sender": "alerts@example-payments.test",
+      "subject": "IMPS credit",
+      "body": "Rs.8,000.00 has been credited by IMPS on 27-05-2026. Ref No 412345678928.",
+      "expected": {"bank": "GENERIC", "amount": 8000.0, "transaction_type": "credit", "merchant_raw": "IMPS CREDIT", "date": "2026-05-27", "reference_id": "412345678928", "payment_method": "bank_transfer", "payment_rail": "transfer", "used_fallback": true, "min_confidence": 0.8}
+    },
+    {
+      "id": "generic-rtgs-debit",
+      "format_id": "generic-rtgs-v1",
+      "sender": "alerts@example-payments.test",
+      "subject": "RTGS transfer",
+      "body": "Rs.1,25,000.00 has been debited by RTGS on 28-05-2026. Ref No 412345678929.",
+      "expected": {"bank": "GENERIC", "amount": 125000.0, "transaction_type": "debit", "merchant_raw": "RTGS TRANSFER", "date": "2026-05-28", "reference_id": "412345678929", "payment_method": "bank_transfer", "payment_rail": "transfer", "used_fallback": true, "min_confidence": 0.8}
+    },
+    {
+      "id": "generic-atm-withdrawal",
+      "format_id": "generic-atm-v1",
+      "sender": "alerts@example-payments.test",
+      "subject": "ATM withdrawal",
+      "body": "Rs.3,000.00 has been withdrawn at ATM on 29-05-2026.",
+      "expected": {"bank": "GENERIC", "amount": 3000.0, "transaction_type": "debit", "merchant_raw": "ATM cash withdrawal", "date": "2026-05-29", "payment_method": "other", "payment_rail": "atm", "card_event": "none", "used_fallback": true, "min_confidence": 0.8}
+    },
+    {
+      "id": "generic-wallet-payment",
+      "format_id": "generic-wallet-v1",
+      "sender": "alerts@example-payments.test",
+      "subject": "Wallet payment",
+      "body": "Payment of Rs.210.00 to SAMPLE TAXI using wallet on 30-05-2026.",
+      "expected": {"bank": "GENERIC", "amount": 210.0, "transaction_type": "debit", "merchant_raw": "SAMPLE TAXI", "date": "2026-05-30", "payment_method": "wallet", "payment_rail": "wallet", "card_event": "none", "used_fallback": true, "min_confidence": 1.0}
+    },
+    {
+      "id": "generic-refund-credit",
+      "format_id": "generic-refund-v1",
+      "sender": "alerts@example-payments.test",
+      "subject": "Refund received",
+      "body": "Refund of Rs.390.00 has been credited on 31-05-2026.",
+      "expected": {"bank": "GENERIC", "amount": 390.0, "transaction_type": "refund", "merchant_raw": "BANK REFUND", "date": "2026-05-31", "card_event": "refund", "used_fallback": true, "min_confidence": 0.8}
+    },
+    {
+      "id": "generic-reversal-credit",
+      "format_id": "generic-reversal-v1",
+      "sender": "alerts@example-payments.test",
+      "subject": "Reversal completed",
+      "body": "Reversal of Rs.475.00 has been credited on 01-06-2026.",
+      "expected": {"bank": "GENERIC", "amount": 475.0, "transaction_type": "refund", "merchant_raw": "BANK REFUND", "date": "2026-06-01", "card_event": "reversal", "transaction_status": "completed", "used_fallback": true, "min_confidence": 0.8}
     }
   ]
 }

@@ -57,6 +57,11 @@ class GmailConnector:
         service = await self._service_or_refresh()
         fallback_used = False
         latest_history_id: str | None = None
+        coverage_metrics: dict[str, int | float | bool] = {
+            "coverage_complete": True,
+            "coverage_truncated": False,
+            "coverage_pages": 0,
+        }
 
         if cursor.history_id:
             try:
@@ -67,14 +72,14 @@ class GmailConnector:
                 if getattr(exc.resp, "status", None) != 404:
                     raise
                 fallback_used = True
-                refs = await self._list_message_refs_by_query(
+                refs, coverage_metrics = await self._list_message_refs_by_query_with_metadata(
                     service,
                     self._build_incremental_query(self.account.last_sync_started_at),
                     500,
                 )
         else:
             fallback_used = True
-            refs = await self._list_message_refs_by_query(
+            refs, coverage_metrics = await self._list_message_refs_by_query_with_metadata(
                 service,
                 self._build_incremental_query(self.account.last_sync_started_at),
                 500,
@@ -93,13 +98,14 @@ class GmailConnector:
                 "message_failures": len(errors),
                 "fallback_used": fallback_used,
                 "credentials_refreshed": self._refreshed_credentials is not None,
+                **coverage_metrics,
             },
             errors=errors,
         )
 
     async def fetch_backfill(self, user_id: str, options: BackfillOptions) -> ConnectorBatch:
         service = await self._service_or_refresh()
-        refs = await self._list_message_refs_by_query(
+        refs, coverage_metrics = await self._list_message_refs_by_query_with_metadata(
             service,
             self._build_sender_query(),
             options.max_results,
@@ -114,6 +120,7 @@ class GmailConnector:
                 "message_failures": len(errors),
                 "fallback_used": False,
                 "credentials_refreshed": self._refreshed_credentials is not None,
+                **coverage_metrics,
             },
             errors=errors,
         )
@@ -169,12 +176,29 @@ class GmailConnector:
     async def _list_message_refs_by_query(
         service, query: str, max_results: int | None
     ) -> list[dict]:
+        """Return message refs while preserving the legacy list-only helper contract."""
+
+        messages, _ = await GmailConnector._list_message_refs_by_query_with_metadata(
+            service, query, max_results
+        )
+        return messages
+
+    @staticmethod
+    async def _list_message_refs_by_query_with_metadata(
+        service, query: str, max_results: int | None
+    ) -> tuple[list[dict], dict[str, int | float | bool]]:
+        """List refs and report whether Gmail pagination was fully exhausted."""
+
         messages: list[dict[str, Any]] = []
         next_page_token: str | None = None
         seen_page_tokens: set[str] = set()
+        page_count = 0
+        result_size_estimate = 0
+        truncated = False
         while True:
             page_size = 500 if max_results is None else min(max_results - len(messages), 500)
             if page_size <= 0:
+                truncated = bool(next_page_token)
                 break
 
             list_kwargs: dict[str, Any] = {
@@ -187,16 +211,33 @@ class GmailConnector:
 
             request = service.users().messages().list(**list_kwargs)
             response = await asyncio.to_thread(request.execute)
+            page_count += 1
             messages.extend(response.get("messages", []))
+            result_size_estimate = max(
+                result_size_estimate,
+                int(response.get("resultSizeEstimate") or 0),
+            )
             next_page_token = response.get("nextPageToken")
             if next_page_token and next_page_token in seen_page_tokens:
                 raise RuntimeError("Gmail pagination repeated a page token")
             if next_page_token:
                 seen_page_tokens.add(next_page_token)
-            if not next_page_token or (max_results is not None and len(messages) >= max_results):
+            if not next_page_token:
+                truncated = bool(
+                    max_results is not None
+                    and (len(messages) > max_results or result_size_estimate > max_results)
+                )
+                break
+            if max_results is not None and len(messages) >= max_results:
+                truncated = True
                 break
 
-        return messages[:max_results] if max_results is not None else messages
+        return messages[:max_results] if max_results is not None else messages, {
+            "coverage_complete": not truncated,
+            "coverage_truncated": truncated,
+            "coverage_pages": page_count,
+            "coverage_result_size_estimate": result_size_estimate,
+        }
 
     @staticmethod
     async def _list_message_refs_by_history(

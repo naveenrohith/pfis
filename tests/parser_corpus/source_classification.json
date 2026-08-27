@@ -1,0 +1,355 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "hdfc-transaction",
+      "sender": "HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
+      "subject": "You have done a UPI txn. Check details!",
+      "body": "Rs.72.00 is debited from your account ending 1441 towards VPA shop@upi (SAMPLE MERCHANT) on 09-07-26.",
+      "expected": {"classification": "transaction", "institution": "HDFC"}
+    },
+    {
+      "id": "hdfc-otp",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "HDFC Bank OTP",
+      "body": "Your OTP for online transaction is 4567. Do not share it.",
+      "expected": {"classification": "otp", "institution": "HDFC"}
+    },
+    {
+      "id": "hdfc-balance-update",
+      "sender": "HDFC Bank InstaAlerts <alerts@hdfcbank.net>",
+      "subject": "View: Account update for your HDFC Bank A/c",
+      "body": "The available balance in your account ending XX1441 is Rs. INR 8,795.88 as of 23-MAR-26.",
+      "expected": {"classification": "ignore", "institution": "HDFC"}
+    },
+    {
+      "id": "unknown-maintenance-notice",
+      "sender": "notices@example.test",
+      "subject": "Planned System Maintenance: Service Impact Details",
+      "body": "UPI transactions can be carried out up to applicable limits. Rs 5,000 will be kept aside for debit card usage.",
+      "expected": {"classification": "ignore", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "travel-itinerary",
+      "sender": "travel@example.test",
+      "subject": "Your IndiGo Itinerary - SAMPLE",
+      "body": "PNR SAMPLE123 status confirmed. Payment status approved. Passenger itinerary and flight details.",
+      "expected": {"classification": "ignore", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "retail-promotion",
+      "sender": "Tata Starbucks <news@members.sbuxin.com>",
+      "subject": "Holiday offers",
+      "body": "Grab a free reusable cup with your next purchase.",
+      "expected": {"classification": "promotion", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "bank-voucher-promotion",
+      "sender": "HDFC Bank Offers <offers@mailers.hdfcbank.bank.in>",
+      "subject": "Rs.1000 voucher is waiting",
+      "body": "Redeem your reward now. Terms apply.",
+      "expected": {"classification": "promotion", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "investment-debit",
+      "sender": "Groww <noreply@groww.in>",
+      "subject": "SIP investment successful",
+      "body": "Your SIP investment of Rs.5,000 has been debited on 09-07-2026. Order ID SIP123456.",
+      "expected": {"classification": "investment", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "salary-credit",
+      "sender": "alerts@icicibank.com",
+      "subject": "Salary credited",
+      "body": "Salary of INR 75,000.00 has been credited to your ICICI Bank Account XX5678 on 01-Jul-2026.",
+      "expected": {"classification": "salary", "institution": "ICICI"}
+    },
+    {
+      "id": "refund-credit",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "Refund credited",
+      "body": "Refund of Rs.500.00 has been credited to your account **1234 on 05-07-2026.",
+      "expected": {"classification": "refund", "institution": "HDFC"}
+    },
+    {
+      "id": "failed-payment",
+      "sender": "alerts@sbi.co.in",
+      "subject": "Transaction failed",
+      "body": "Your payment of Rs.900.00 from account XXXXXXXX1234 failed on 05-07-2026.",
+      "expected": {"classification": "failed_payment", "institution": "SBI"}
+    },
+    {
+      "id": "generic-payment",
+      "sender": "alerts@example-payments.test",
+      "subject": "Payment successful",
+      "body": "Payment of Rs.750.00 to BOOKMYSHOW via UPI on 07-05-2026.",
+      "expected": {"classification": "transaction", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "sbi-otp",
+      "sender": "donotreply@sbi.co.in",
+      "subject": "Security code",
+      "body": "Your one-time password is 123456. Never share this code.",
+      "expected": {"classification": "otp", "institution": "SBI"}
+    },
+    {
+      "id": "icici-statement-notice",
+      "sender": "noreply@icicibank.com",
+      "subject": "Your monthly account statement",
+      "body": "Your statement is ready to view securely in internet banking.",
+      "expected": {"classification": "statement", "institution": "ICICI"}
+    },
+    {
+      "id": "axis-card-transaction",
+      "sender": "alerts@axisbank.com",
+      "subject": "Card transaction alert",
+      "body": "INR 1,250.00 was spent at SAMPLE STORE using your card ending 9012.",
+      "expected": {"classification": "transaction", "institution": "AXIS"}
+    },
+    {
+      "id": "kotak-salary-credit",
+      "sender": "alerts@kotakbank.com",
+      "subject": "Salary received",
+      "body": "Salary of Rs.80,000.00 has been credited to account XX1234.",
+      "expected": {"classification": "salary", "institution": "KOTAK"}
+    },
+    {
+      "id": "yes-refund-credit",
+      "sender": "alerts@yesbank.in",
+      "subject": "Refund received",
+      "body": "A refund of INR 450.00 has been credited to your account.",
+      "expected": {"classification": "refund", "institution": "YES"}
+    },
+    {
+      "id": "pnb-failed-payment",
+      "sender": "alerts@pnb.co.in",
+      "subject": "Payment declined",
+      "body": "Your card payment failed. No amount was debited.",
+      "expected": {"classification": "failed_payment", "institution": "PNB"}
+    },
+    {
+      "id": "rbl-subscription-debit",
+      "sender": "alerts@bfrpr.rbl.co.in",
+      "subject": "Auto-pay completed",
+      "body": "Your subscription auto-pay of INR 299.00 was debited successfully.",
+      "expected": {"classification": "subscription", "institution": "RBL"}
+    },
+    {
+      "id": "indusind-emi-debit",
+      "sender": "alerts@indusind.com",
+      "subject": "Loan EMI processed",
+      "body": "Your loan EMI of Rs.12,000.00 has been debited from account XX7788.",
+      "expected": {"classification": "loan", "institution": "INDUSIND"}
+    },
+    {
+      "id": "federal-statement-notice",
+      "sender": "alerts@federalbank.co.in",
+      "subject": "Account statement available",
+      "body": "Sign in securely to view your latest account statement.",
+      "expected": {"classification": "statement", "institution": "FEDERAL"}
+    },
+    {
+      "id": "phonepe-payment",
+      "sender": "noreply@phonepe.com",
+      "subject": "Payment successful",
+      "body": "You paid Rs.640.00 to SAMPLE GROCER using UPI.",
+      "expected": {"classification": "transaction", "institution": "PHONEPE"}
+    },
+    {
+      "id": "gpay-promotion",
+      "sender": "noreply@googleplay.com",
+      "subject": "Exclusive offer and discount",
+      "body": "Claim your limited-time reward today.",
+      "expected": {"classification": "promotion", "institution": "GPAY"}
+    },
+    {
+      "id": "amazonpay-refund",
+      "sender": "notifications@amazonpay.in",
+      "subject": "Refund processed",
+      "body": "Your refund of Rs.899.00 has been credited to your account.",
+      "expected": {"classification": "refund", "institution": "AMAZONPAY"}
+    },
+    {
+      "id": "icici-investment-debit",
+      "sender": "alerts@icicibank.com",
+      "subject": "SIP processed",
+      "body": "Your SIP investment of INR 5,000.00 has been debited from account XX5678.",
+      "expected": {"classification": "investment", "institution": "ICICI"}
+    },
+    {
+      "id": "unknown-loan-guide",
+      "sender": "editorial@example.test",
+      "subject": "A guide to home loans",
+      "body": "Learn how a Rs.25,00,000 loan may affect long-term planning.",
+      "expected": {"classification": "ignore", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "unknown-salary-guide",
+      "sender": "editorial@example.test",
+      "subject": "Salary planning guide",
+      "body": "A sample salary of Rs.60,000 can be divided across several goals.",
+      "expected": {"classification": "ignore", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "unknown-subscription-payment",
+      "sender": "billing@sample-service.test",
+      "subject": "Subscription payment received",
+      "body": "We received your subscription payment of Rs.199.00.",
+      "expected": {"classification": "subscription", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "unknown-failed-payment",
+      "sender": "billing@sample-service.test",
+      "subject": "Payment unsuccessful",
+      "body": "Your payment failed and the transaction was declined.",
+      "expected": {"classification": "failed_payment", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "unknown-otp",
+      "sender": "security@example.test",
+      "subject": "Verification code",
+      "body": "Use OTP 987654 to verify this attempt. Do not share it.",
+      "expected": {"classification": "otp", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "hdfc-password-reset",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "Account update",
+      "body": "You have successfully reset your NetBanking password via online banking.",
+      "expected": {"classification": "ignore", "institution": "HDFC"}
+    },
+    {
+      "id": "hdfc-chat-registration",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "ChatBanking registration successful",
+      "body": "Successful completion of your HDFC Bank ChatBanking registration.",
+      "expected": {"classification": "ignore", "institution": "HDFC"}
+    },
+    {
+      "id": "hdfc-contact-update",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "Profile updated",
+      "body": "Your mobile number and email ID have been successfully updated in our records.",
+      "expected": {"classification": "ignore", "institution": "HDFC"}
+    },
+    {
+      "id": "hdfc-card-application",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "Credit card application approved",
+      "body": "Your credit card application reference SAMPLE123 has been approved.",
+      "expected": {"classification": "ignore", "institution": "HDFC"}
+    },
+    {
+      "id": "sbi-statement-notice",
+      "sender": "alerts@sbi.co.in",
+      "subject": "SBI Account Statement",
+      "body": "Your monthly statement is now available securely for your account.",
+      "expected": {"classification": "statement", "institution": "SBI"}
+    },
+    {
+      "id": "icici-preapproved-promotion",
+      "sender": "alerts@icicibank.com",
+      "subject": "Exclusive offer",
+      "body": "Limited-time pre-approved loan offer. Apply now to learn more.",
+      "expected": {"classification": "promotion", "institution": "ICICI"}
+    },
+    {
+      "id": "unknown-investment-newsletter",
+      "sender": "weekly@digest.example.test",
+      "subject": "Investment newsletter",
+      "body": "This week's digest discusses a sample SIP of Rs.5,000. Unsubscribe here.",
+      "expected": {"classification": "ignore", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "unknown-salary-digest",
+      "sender": "editor@digest.example.test",
+      "subject": "Salary planning digest",
+      "body": "A newsletter example uses a salary of Rs.70,000 for education. Unsubscribe.",
+      "expected": {"classification": "ignore", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "travel-itinerary-with-amount",
+      "sender": "travel@example.test",
+      "subject": "Your flight itinerary",
+      "body": "PNR/Booking Ref SAMPLE456. Fare paid Rs.4,500.00. Passenger and flight details follow.",
+      "expected": {"classification": "ignore", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "hdfc-maintenance-window",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "Planned system maintenance",
+      "body": "Service impact details: UPI transactions will be unavailable during maintenance.",
+      "expected": {"classification": "ignore", "institution": "HDFC"}
+    },
+    {
+      "id": "unknown-maintenance-window",
+      "sender": "status@example.test",
+      "subject": "Scheduled maintenance",
+      "body": "Scheduled maintenance means payment services will be unavailable tonight.",
+      "expected": {"classification": "ignore", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "hdfc-balance-snapshot-detailed",
+      "sender": "alerts@hdfcbank.net",
+      "subject": "View account update",
+      "body": "The available balance in your account ending XX1441 is Rs. INR 42,055.05 as of 02-JUL-26.",
+      "expected": {"classification": "ignore", "institution": "HDFC"}
+    },
+    {
+      "id": "icici-balance-snapshot",
+      "sender": "alerts@icicibank.com",
+      "subject": "Account balance update",
+      "body": "The available balance in your account is INR 20,500.00 as of today.",
+      "expected": {"classification": "ignore", "institution": "ICICI"}
+    },
+    {
+      "id": "unknown-season-sale",
+      "sender": "offers@retail.example.test",
+      "subject": "Sale is live",
+      "body": "Shop now and receive 20% off for a limited time.",
+      "expected": {"classification": "promotion", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "hdfc-reward-promotion",
+      "sender": "alerts@hdfcbank.com",
+      "subject": "Reward points offer",
+      "body": "Redeem your reward points for an exclusive voucher today.",
+      "expected": {"classification": "promotion", "institution": "HDFC"}
+    },
+    {
+      "id": "subscription-newsletter-with-example-payment",
+      "sender": "newsletter@digest.example.test",
+      "subject": "Subscription newsletter",
+      "body": "Our digest explains how a Rs.199 subscription payment is processed. Unsubscribe here.",
+      "expected": {"classification": "ignore", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "unknown-loan-repayment",
+      "sender": "servicing@loan.example.test",
+      "subject": "EMI payment processed",
+      "body": "Your loan EMI of Rs.8,500.00 was debited successfully.",
+      "expected": {"classification": "loan", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "unknown-payroll-credit",
+      "sender": "payroll@example.test",
+      "subject": "Payroll received",
+      "body": "Payroll amount of INR 65,000.00 has been credited to your account.",
+      "expected": {"classification": "salary", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "unknown-refund-received",
+      "sender": "billing@merchant.example.test",
+      "subject": "Refund completed",
+      "body": "Your refund of Rs.325.00 has been credited successfully.",
+      "expected": {"classification": "refund", "institution": "UNKNOWN"}
+    },
+    {
+      "id": "unknown-bank-transfer",
+      "sender": "payments@example.test",
+      "subject": "Transfer completed",
+      "body": "INR 3,500.00 was transferred successfully to SAMPLE BENEFICIARY.",
+      "expected": {"classification": "transaction", "institution": "UNKNOWN"}
+    }
+  ]
+}
