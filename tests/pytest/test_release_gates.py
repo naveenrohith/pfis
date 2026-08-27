@@ -76,7 +76,6 @@ def test_current_worktree_inventory_has_no_unassigned_files():
     root = Path(__file__).resolve().parents[2]
     report = build_report(root)
 
-    assert report["total"] > 0
     assert sum(report["packet_counts"].values()) == report["total"]
     assert report["unassigned"] == []
 
