@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, CheckCircle2 } from 'lucide-react';
+import { Search, CheckCircle2, FileCheck2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -8,13 +8,26 @@ import { Input, Select } from '@/components/ui/Input';
 import { Segmented } from '@/components/ui/Segmented';
 import { Skeleton, EmptyState } from '@/components/ui/Skeleton';
 import { SectionTitle } from '@/components/SectionTitle';
-import { useTransactions, useCategories } from '@/features/workspace/queries';
+import {
+  queryKeys,
+  useAccounts,
+  useCategories,
+  useLinkTransferMatch,
+  useStatementReviewItems,
+  useTransferMatchCandidates,
+  useTransactions,
+} from '@/features/workspace/queries';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { api } from '@/lib/api';
-import { formatCurrency, formatTime } from '@/lib/format';
-import type { Transaction, TransactionType } from '@/lib/types';
+import { formatCurrency, formatDate, formatTime } from '@/lib/format';
+import type {
+  StatementReviewItem,
+  Transaction,
+  TransactionType,
+  TransferMatchCandidate,
+} from '@/lib/types';
 import { ReviewDetail } from './ReviewDetail';
 
 const THRESHOLD = 0.85;
@@ -31,6 +44,9 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
   const transactions = useTransactions();
   const categories = useCategories();
+  const statementReview = useStatementReviewItems();
+  const transferCandidates = useTransferMatchCandidates();
+  const accounts = useAccounts();
   const { notify } = useToast();
   const { focusedReviewId, focusReview, scrollTo } = useDashboardUi();
   const queryClient = useQueryClient();
@@ -42,7 +58,15 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
   const [bulkCategory, setBulkCategory] = useState('');
   const [bulkType, setBulkType] = useState('');
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['transactions'] });
+  const invalidate = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['transactions'] }),
+      queryClient.invalidateQueries({ queryKey: ['cardOverview'] }),
+      queryClient.invalidateQueries({ queryKey: ['accountPosition'] }),
+      queryClient.invalidateQueries({ queryKey: ['balanceForecast'] }),
+      queryClient.invalidateQueries({ queryKey: ['cardDueRunway'] }),
+    ]);
+  };
 
   const items = useMemo(() => {
     const all = transactions.data ?? [];
@@ -67,7 +91,9 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
     [transactions.data, focusedReviewId],
   );
 
-  const pendingCount = (transactions.data ?? []).filter((t) => !t.reviewed_flag).length;
+  const pendingCount =
+    (transactions.data ?? []).filter((t) => !t.reviewed_flag).length +
+    (statementReview.data?.length ?? 0);
 
   const bulkMutation = useMutation({
     mutationFn: () => {
@@ -133,6 +159,16 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
         </div>
       ) : null}
 
+      <StatementEvidenceQueue
+        items={statementReview.data ?? []}
+        isLoading={statementReview.isLoading}
+        bankAccounts={(accounts.data ?? []).filter((account) => account.account_type === 'bank')}
+      />
+      <TransferMatchQueue
+        candidates={transferCandidates.data ?? []}
+        isLoading={transferCandidates.isLoading}
+      />
+
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Queue */}
         <Card className={items.length === 0 ? 'lg:col-span-3' : 'lg:col-span-2'}>
@@ -163,7 +199,7 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/25 bg-primary/5 p-2">
                 <span className="text-sm font-semibold">{selected.size} selected</span>
                 <Select
-                  className="h-9 w-auto"
+                  className="h-11 w-auto"
                   value={bulkCategory}
                   onChange={(e) => setBulkCategory(e.target.value)}
                 >
@@ -175,7 +211,7 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
                   ))}
                 </Select>
                 <Select
-                  className="h-9 w-auto"
+                  className="h-11 w-auto"
                   value={bulkType}
                   onChange={(e) => setBulkType(e.target.value)}
                 >
@@ -237,6 +273,7 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
           <ReviewDetail
             transaction={focused}
             categories={categories.data ?? []}
+            accounts={accounts.data ?? []}
             currency={currency}
             onSaved={() => invalidate()}
             onNext={nextPending}
@@ -244,6 +281,308 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function TransferMatchQueue({
+  candidates,
+  isLoading,
+}: {
+  candidates: TransferMatchCandidate[];
+  isLoading: boolean;
+}) {
+  const { notify } = useToast();
+  const link = useLinkTransferMatch();
+
+  if (isLoading) {
+    return <Skeleton className="mb-4 h-32" />;
+  }
+  if (!candidates.length) return null;
+
+  const visible = candidates.slice(0, 12);
+  return (
+    <section
+      className="mb-4 rounded-xl border border-primary/20 bg-primary/5 p-4 sm:p-5"
+      aria-labelledby="transfer-match-title"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 id="transfer-match-title" className="font-extrabold">
+            Possible paired movements
+          </h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+            PFIS found settled bank/card or internal-transfer legs with matching amounts and dates.
+            Confirm only pairs you recognize; this never moves money externally.
+          </p>
+        </div>
+        <Badge variant="warning">{candidates.length} to review</Badge>
+      </div>
+      <div className="mt-4 grid gap-2">
+        {visible.map((candidate) => (
+          <article
+            key={candidate.candidate_id}
+            className="rounded-lg border border-border/70 bg-background/80 p-3"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="break-words text-sm font-extrabold">
+                  {candidate.debit_account_label} <span aria-hidden="true">→</span>{' '}
+                  {candidate.credit_account_label}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {formatDate(candidate.debit_date)} → {formatDate(candidate.credit_date)} ·{' '}
+                  {candidate.kind === 'card_payment' ? 'Card payment' : 'Account transfer'} ·{' '}
+                  {Math.round(candidate.confidence * 100)}% evidence
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Badge variant={candidate.ambiguous ? 'warning' : 'outline'}>
+                    {candidate.ambiguous ? 'Ambiguous counterparty' : 'Reviewable match'}
+                  </Badge>
+                  {candidate.reason_codes.slice(0, 3).map((reason) => (
+                    <Badge key={reason} variant="outline">
+                      {reason.replaceAll('_', ' ')}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                <span className="money-value text-sm font-extrabold">
+                  {formatCurrency(candidate.amount, candidate.currency)}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={link.isPending}
+                  onClick={() =>
+                    link.mutate(
+                      {
+                        debitTransactionId: candidate.debit_transaction_id,
+                        counterpartyTransactionId: candidate.credit_transaction_id,
+                        kind: candidate.kind,
+                      },
+                      {
+                        onSuccess: () => notify('Paired movement linked', 'success'),
+                        onError: (error) => notify((error as Error).message, 'error'),
+                      },
+                    )
+                  }
+                >
+                  Link pair
+                </Button>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+      {candidates.length > visible.length ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Showing the 12 highest-confidence candidates. Resolve these before reviewing lower
+          confidence pairs.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function StatementEvidenceQueue({
+  items,
+  isLoading,
+  bankAccounts,
+}: {
+  items: StatementReviewItem[];
+  isLoading: boolean;
+  bankAccounts: Array<{
+    id: string;
+    institution_name: string;
+    masked_number: string;
+  }>;
+}) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const { notify } = useToast();
+  const [candidateByLine, setCandidateByLine] = useState<Record<string, string>>({});
+  const [bankByLine, setBankByLine] = useState<Record<string, string>>({});
+  const resolve = useMutation({
+    mutationFn: ({
+      item,
+      decision,
+    }: {
+      item: StatementReviewItem;
+      decision: 'ignore' | 'match' | 'import' | 'record_card_payment';
+    }) =>
+      api.reviewStatementLine(user!.id, item.id, {
+        decision,
+        matched_transaction_id: decision === 'match' ? candidateByLine[item.id] || null : null,
+        paying_account_id: decision === 'record_card_payment' ? bankByLine[item.id] || null : null,
+      }),
+    onSuccess: async (_, variables) => {
+      notify('Statement evidence resolved', 'success');
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.statementReview(user!.id),
+        }),
+        queryClient.invalidateQueries({ queryKey: ['transactions'] }),
+        queryClient.invalidateQueries({
+          queryKey: ['cardOverview', user!.id, variables.item.financial_account_id],
+        }),
+        queryClient.invalidateQueries({ queryKey: ['balanceForecast'] }),
+        queryClient.invalidateQueries({ queryKey: ['cardDueRunway'] }),
+      ]);
+    },
+    onError: (error) => notify(error.message, 'error'),
+  });
+
+  if (isLoading) {
+    return <Skeleton className="mb-4 h-32" />;
+  }
+  if (!items.length) return null;
+
+  return (
+    <section
+      className="mb-4 rounded-xl border border-warning/25 bg-warning/5 p-4 sm:p-5"
+      aria-labelledby="statement-evidence-title"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="bg-warning/12 grid h-10 w-10 shrink-0 place-items-center rounded-lg text-warning">
+            <FileCheck2 className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 id="statement-evidence-title" className="font-extrabold">
+              Statement evidence
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              PFIS creates no additional ledger event while this evidence is unresolved.
+            </p>
+          </div>
+        </div>
+        <Badge variant="warning">{items.length} to review</Badge>
+      </div>
+      <div className="mt-4 divide-y divide-border/70">
+        {items.map((item) => {
+          const canImport = [
+            'purchase',
+            'refund',
+            'cashback',
+            'fee',
+            'tax',
+            'interest',
+            'reversal',
+          ].includes(item.card_event);
+          return (
+            <article key={item.id} className="py-5 first:pt-0 last:pb-0">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <div className="min-w-0">
+                  <p className="break-words font-extrabold">{item.description}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {item.account_label} · {item.masked_number} ·{' '}
+                    {formatDate(item.transaction_date)} · {item.card_event}
+                  </p>
+                </div>
+                <p className="money-value text-base font-extrabold">
+                  {formatCurrency(item.amount, user?.currency ?? 'INR')}
+                </p>
+              </div>
+              <div className="mt-3 flex flex-col gap-3">
+                {item.candidate_transactions.length ? (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <div className="min-w-0 flex-1">
+                      <label
+                        htmlFor={`candidate-${item.id}`}
+                        className="text-xs font-bold text-muted-foreground"
+                      >
+                        Existing ledger candidate
+                      </label>
+                      <Select
+                        id={`candidate-${item.id}`}
+                        className="mt-1"
+                        value={candidateByLine[item.id] ?? ''}
+                        onChange={(event) =>
+                          setCandidateByLine((current) => ({
+                            ...current,
+                            [item.id]: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Choose a candidate</option>
+                        {item.candidate_transactions.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {formatDate(candidate.transaction_date)} · {candidate.label} ·{' '}
+                            {formatCurrency(candidate.amount, user?.currency ?? 'INR')}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => resolve.mutate({ item, decision: 'match' })}
+                      disabled={!candidateByLine[item.id] || resolve.isPending}
+                    >
+                      Match existing
+                    </Button>
+                  </div>
+                ) : null}
+                {item.card_event === 'payment' ? (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <div className="min-w-0 flex-1">
+                      <label
+                        htmlFor={`paying-bank-${item.id}`}
+                        className="text-xs font-bold text-muted-foreground"
+                      >
+                        Paying bank account
+                      </label>
+                      <Select
+                        id={`paying-bank-${item.id}`}
+                        className="mt-1"
+                        value={bankByLine[item.id] ?? ''}
+                        onChange={(event) =>
+                          setBankByLine((current) => ({
+                            ...current,
+                            [item.id]: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Choose the bank leg</option>
+                        {bankAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.institution_name} · {account.masked_number}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => resolve.mutate({ item, decision: 'record_card_payment' })}
+                      disabled={!bankByLine[item.id] || resolve.isPending}
+                    >
+                      Record paired transfer
+                    </Button>
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  {canImport ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => resolve.mutate({ item, decision: 'import' })}
+                      disabled={resolve.isPending}
+                    >
+                      Import as new
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="ghost"
+                    onClick={() => resolve.mutate({ item, decision: 'ignore' })}
+                    disabled={resolve.isPending}
+                  >
+                    Ignore by rule
+                  </Button>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

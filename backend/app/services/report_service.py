@@ -12,9 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.category import Category
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import Transaction
 from app.services.insights_service import InsightsService
 from app.services.report_renderer import render_monthly_report_html
+from app.services.transaction_aggregates import (
+    spend_effect_expression,
+    spend_event_predicate,
+)
 
 
 async def fetch_monthly_transaction_rows(
@@ -29,6 +33,7 @@ async def fetch_monthly_transaction_rows(
         .join(Category, Transaction.category_id == Category.id, isouter=True)
         .where(
             Transaction.user_id == user_id,
+            Transaction.review_outcome != "ignored_by_rule",
             extract("month", Transaction.transaction_date) == month,
             extract("year", Transaction.transaction_date) == year,
         )
@@ -48,19 +53,19 @@ async def fetch_monthly_category_rows(
         select(
             Category.name,
             Category.icon,
-            func.sum(Transaction.amount).label("total"),
+            func.sum(spend_effect_expression()).label("total"),
             func.count(Transaction.id).label("count"),
         )
         .join(Category, Transaction.category_id == Category.id, isouter=True)
         .where(
             Transaction.user_id == user_id,
-            Transaction.transaction_type == TransactionType.DEBIT,
-            Transaction.is_transfer.is_(False),
+            spend_event_predicate(),
             extract("month", Transaction.transaction_date) == month,
             extract("year", Transaction.transaction_date) == year,
         )
         .group_by(Category.name, Category.icon)
-        .order_by(func.sum(Transaction.amount).desc())
+        .having(func.sum(spend_effect_expression()) > 0)
+        .order_by(func.sum(spend_effect_expression()).desc())
     )
     return list(result.all())
 
@@ -73,7 +78,8 @@ def build_transactions_csv(txn_rows: list[Any]) -> io.StringIO:
         [
             "Date",
             "Merchant",
-            "Amount (INR)",
+            "Amount",
+            "Currency",
             "Type",
             "Category",
             "Account",
@@ -88,6 +94,7 @@ def build_transactions_csv(txn_rows: list[Any]) -> io.StringIO:
                 txn.transaction_date.strftime("%Y-%m-%d"),
                 txn.merchant_normalized or txn.merchant_raw or "Unknown",
                 f"{txn.amount:.2f}",
+                txn.currency,
                 txn.transaction_type.value,
                 cat_name or "Uncategorized",
                 f"**{txn.account_last4}" if txn.account_last4 else "",

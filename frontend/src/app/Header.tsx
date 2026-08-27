@@ -1,12 +1,17 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import {
+  Activity,
   Calendar,
   ChevronLeft,
   ChevronRight,
+  Database,
+  House,
+  LineChart,
   LogOut,
   RefreshCw,
   Search,
   Settings2,
+  Target,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -16,10 +21,22 @@ import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
 import { useSync } from '@/features/workspace/SyncContext';
 import { formatCountdown, initials, monthLabel } from '@/lib/format';
+import { lazyWithRetry } from '@/lib/lazyWithRetry';
 import { useDashboardUi } from './DashboardUiContext';
+import { WORKSPACES } from './workspaceNavigation';
 
-const GlobalSearch = lazy(() =>
-  import('@/features/search/GlobalSearch').then((module) => ({ default: module.GlobalSearch })),
+const WORKSPACE_ICONS = {
+  today: House,
+  activity: Activity,
+  plan: Target,
+  insights: LineChart,
+  data: Database,
+} as const;
+
+const GlobalSearch = lazyWithRetry(
+  () =>
+    import('@/features/search/GlobalSearch').then((module) => ({ default: module.GlobalSearch })),
+  'global-search',
 );
 
 export function Header() {
@@ -27,7 +44,10 @@ export function Header() {
   const { notify } = useToast();
   const { month, year, isCurrentMonth, goPrev, goNext, goToday } = useWorkspace();
   const { running, runSync } = useSync();
-  const { setCustomizeOpen, setCommandOpen } = useDashboardUi();
+  const { activeWorkspace, activeSection, setCustomizeOpen, setCommandOpen } = useDashboardUi();
+  const workspace = WORKSPACES.find((item) => item.id === activeWorkspace) ?? WORKSPACES[0];
+  const section = workspace.sections.find((item) => item.id === activeSection);
+  const WorkspaceIcon = WORKSPACE_ICONS[workspace.id];
   const countdown =
     session?.mode === 'demo' ? 'Demo workspace' : formatCountdown(session?.expiresAt ?? null);
 
@@ -40,7 +60,20 @@ export function Header() {
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/90 backdrop-blur-xl">
       <div className="flex h-16 items-center justify-between gap-2 px-3 sm:px-6 lg:h-[72px] lg:px-8">
-        <div className="flex min-w-0 items-center gap-1">
+        <div className="flex min-w-0 items-center gap-2 lg:gap-5">
+          <div className="hidden min-w-0 items-center gap-2.5 border-r border-border/70 pr-5 lg:flex">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
+              <WorkspaceIcon className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-extrabold tracking-[-0.02em]">
+                {workspace.label}
+              </p>
+              <p className="truncate text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                {section?.label ?? 'Workspace'}
+              </p>
+            </div>
+          </div>
           <Button variant="ghost" size="icon" onClick={goPrev} aria-label="Previous month">
             <ChevronLeft className="h-4 w-4" />
           </Button>

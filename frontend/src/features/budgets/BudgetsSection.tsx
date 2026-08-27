@@ -4,6 +4,7 @@ import { Plus, Pencil, Trash2, Target } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { Dialog } from '@/components/ui/Dialog';
 import { Skeleton, EmptyState } from '@/components/ui/Skeleton';
 import { SectionTitle } from '@/components/SectionTitle';
 import { useBudgets, useCategories } from '@/features/workspace/queries';
@@ -38,12 +39,14 @@ export function BudgetsSection({ embedded = false }: { embedded?: boolean } = {}
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<BudgetTracker | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<BudgetTracker | null>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['budgets'] });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteBudget(id),
     onSuccess: () => {
+      setDeleteTarget(null);
       notify('Budget deleted', 'success');
       invalidate();
     },
@@ -161,7 +164,7 @@ export function BudgetsSection({ embedded = false }: { embedded?: boolean } = {}
                     >
                       <Pencil className="mr-1 h-3 w-3" /> Edit
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => deleteMutation.mutate(b.id)}>
+                    <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(b)}>
                       <Trash2 className="mr-1 h-3 w-3" /> Delete
                     </Button>
                     <Button
@@ -192,6 +195,40 @@ export function BudgetsSection({ embedded = false }: { embedded?: boolean } = {}
           invalidate();
         }}
       />
+
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onClose={() => {
+          if (!deleteMutation.isPending) setDeleteTarget(null);
+        }}
+        title="Delete this budget?"
+        description="This removes the monthly guardrail, but it does not delete transaction history."
+      >
+        <p className="text-sm leading-6 text-muted-foreground">
+          {deleteTarget
+            ? `${deleteTarget.category} spending will no longer be compared with a limit.`
+            : 'The selected budget will no longer be used for comparisons.'}
+        </p>
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            data-dialog-initial-focus
+            variant="ghost"
+            onClick={() => setDeleteTarget(null)}
+            disabled={deleteMutation.isPending}
+          >
+            Keep budget
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => {
+              if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+            }}
+            disabled={!deleteTarget || deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? 'Deleting…' : 'Delete budget'}
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }

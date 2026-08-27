@@ -14,6 +14,9 @@ vi.mock('@/app/DashboardUiContext', () => ({
 }));
 
 vi.mock('@/features/workspace/queries', () => ({
+  useAdjudicateAnomaly: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  useAdjudicateAnomalySample: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  useAnomalySamples: () => ({ isLoading: false, data: [] }),
   useInsights: () => ({
     isLoading: false,
     data: {
@@ -39,6 +42,22 @@ vi.mock('@/features/workspace/queries', () => ({
       top_merchants: [{ name: longMerchant, total: 25000, count: 1 }],
     },
   }),
+  useMerchants: () => ({
+    isLoading: false,
+    data: [
+      {
+        merchant_key: 'long-merchant',
+        name: longMerchant,
+        total_spend: 25000,
+        transaction_count: 1,
+        avg_spend: 25000,
+        recurrence_likelihood: 0,
+        recurrence_status: 'inactive',
+        recurrence_confidence: 0,
+        data_sufficiency: 'low',
+      },
+    ],
+  }),
   useWorkspaceSnapshot: () => ({
     isLoading: false,
     data: {
@@ -48,26 +67,25 @@ vi.mock('@/features/workspace/queries', () => ({
         income: 43200,
         income_change_pct: null,
         category_deltas: [
-          { category: 'An unusually long category name for a narrow panel', change_pct: 65.8 },
+          {
+            category: 'An unusually long category name for a narrow panel',
+            current: 12000,
+            change_pct: 65.8,
+          },
         ],
       },
     },
   }),
 }));
 
-describe('Insights summary layout', () => {
-  it('keeps summary cards content-height and constrains long ledger rows', () => {
+describe('Insights investigation layout', () => {
+  it('presents one conclusion with a traceable evidence spine', () => {
     render(<InsightsSection embedded />);
 
-    const summaryGrid = screen.getByRole('region', { name: 'Monthly insight summaries' });
-    expect(summaryGrid).toHaveClass('items-start');
-
-    const merchantRow = screen.getByText(longMerchant).parentElement;
-    expect(merchantRow).toHaveClass('grid-cols-[auto_minmax(0,1fr)_auto]', 'min-w-0');
+    expect(screen.getByText('MONTHLY INVESTIGATION')).toBeInTheDocument();
+    expect(screen.getByText('Why it changed')).toBeInTheDocument();
+    expect(screen.getByText('Merchant concentration')).toBeInTheDocument();
     expect(screen.getByText(longMerchant)).toHaveClass('truncate');
-
-    const recurringRow = screen.getByText(longRecurringMerchant).closest('.dashboard-row');
-    expect(recurringRow).toHaveClass('grid-cols-[minmax(0,1fr)_auto]', 'min-w-0');
     expect(screen.getByText(longRecurringMerchant)).toHaveClass('truncate');
   });
 });

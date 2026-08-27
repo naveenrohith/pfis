@@ -11,6 +11,7 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from google.auth.exceptions import RefreshError
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,12 +19,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import AsyncSessionLocal
 from app.models.email import GmailAccount
 from app.models.sync import BackgroundJob, JobStatus
+from app.models.user import User
+from app.services.balance_provider_connection_service import BalanceProviderConnectionService
+from app.services.balance_sync_service import BalanceSyncService
+from app.services.connectors.balance_registry import balance_connector_registry
+from app.services.connectors.errors import classify_connector_exception
 from app.services.gmail.sync_service import demo_sync_gmail_emails, sync_gmail_emails
 from app.services.parser.pipeline import process_raw_emails, retry_parse_failures
+from app.services.retention_service import redact_expired_raw_email_content
 from app.services.sync_events import sync_event_manager
 
 logger = logging.getLogger(__name__)
 _active_tasks: set[asyncio.Task] = set()
+_active_user_tasks: dict[str, set[asyncio.Task]] = {}
 _worker_task: asyncio.Task | None = None
 _worker_wakeup: asyncio.Event | None = None
 _worker_id = uuid.uuid4().hex
@@ -52,6 +60,22 @@ def serialize_job(job: BackgroundJob) -> dict[str, Any]:
 def get_active_task_count() -> int:
     """Return the number of in-process job tasks currently tracked."""
     return len(_active_tasks)
+
+
+async def stop_user_jobs(user_id: str) -> int:
+    """Cancel in-process jobs so deletion cannot race a late write."""
+    current = asyncio.current_task()
+    tasks = [
+        task
+        for task in _active_user_tasks.get(user_id, set())
+        if task is not current and not task.done()
+    ]
+    if not tasks:
+        return 0
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    return len(tasks)
 
 
 async def get_job_status_counts(db: AsyncSession) -> dict[str, int]:
@@ -190,6 +214,8 @@ async def _handle_gmail_sync_pipeline(
     gmail_account = result.scalar_one_or_none()
     if gmail_account is None:
         raise ValueError("No Gmail account connected for this user")
+    if gmail_account.auto_sync_status == "disconnecting":
+        raise ValueError("Gmail disconnect is already in progress")
 
     sync_stats = await sync_gmail_emails(
         db=db,
@@ -226,18 +252,77 @@ async def _handle_retry_parse_failures(
     return await retry_parse_failures(db, user_id, limit=payload.get("limit", 20))
 
 
+async def _handle_raw_email_retention(
+    db: AsyncSession, user_id: str, payload: dict[str, Any]
+) -> dict[str, Any]:
+    batch_size = min(max(int(payload.get("batch_size", 500)), 1), 2000)
+    return await redact_expired_raw_email_content(
+        db,
+        user_id=user_id or None,
+        batch_size=batch_size,
+    )
+
+
+async def _handle_balance_refresh(
+    db: AsyncSession, user_id: str, payload: dict[str, Any]
+) -> dict[str, Any]:
+    if not user_id:
+        raise ValueError("A user is required for a balance refresh")
+    provider_type = str(payload.get("provider_type", "")).strip().lower()
+    registration = balance_connector_registry.get(provider_type)
+    if registration is None:
+        raise ValueError("The requested balance provider is not configured")
+    connection_service = BalanceProviderConnectionService(db)
+    connection = await connection_service.require_active_connection(user_id, provider_type)
+    account_ids = [str(item) for item in payload.get("account_ids", [])]
+    await connection_service.mark_started(user_id, provider_type)
+    try:
+        connector = await registration.factory(db, user_id, connection)
+        result = await BalanceSyncService(db).run(
+            user_id,
+            connector,
+            account_ids,
+            provider_type=provider_type,
+        )
+        await connection_service.mark_completed(user_id, provider_type)
+        return {
+            "source_type": result.source_type,
+            "financial_account_ids": result.financial_account_ids,
+            "observations_ingested": result.observations_ingested,
+            "card_observations_ingested": result.card_observations_ingested,
+            "coverage_complete": result.coverage_complete,
+            "error_types": result.error_types,
+            "cursor_advanced": result.cursor_advanced,
+        }
+    except Exception as exc:
+        await connection_service.mark_failed(
+            user_id,
+            provider_type,
+            f"balance_refresh_{classify_connector_exception(exc).value}",
+        )
+        raise
+
+
 JOB_HANDLERS = {
     "demo_sync_pipeline": _handle_demo_sync_pipeline,
     "gmail_sync_pipeline": _handle_gmail_sync_pipeline,
     "retry_parse_failures": _handle_retry_parse_failures,
+    "raw_email_retention": _handle_raw_email_retention,
+    "balance_refresh": _handle_balance_refresh,
 }
 
 
 def classify_job_error(exc: Exception) -> str:
     """Map job exceptions to stable operational categories."""
     message = str(exc).lower()
+    if isinstance(exc, RefreshError):
+        return "credential_error"
     if isinstance(exc, ValueError) and "no gmail account connected" in message:
         return "missing_gmail_account"
+    if isinstance(exc, ValueError) and "balance provider is not configured" in message:
+        return "missing_balance_provider"
+    if isinstance(exc, ValueError) and "provider consent" in message:
+        return "missing_provider_consent"
     if isinstance(exc, ValueError):
         return "validation_error"
     if "credential" in message or "token" in message or "oauth" in message:
@@ -253,6 +338,8 @@ def public_job_error_message(error_type: str) -> str:
     """Return a stable job error without exposing provider or payload details."""
     return {
         "missing_gmail_account": "No Gmail account connected for this user",
+        "missing_balance_provider": "No balance provider is configured for this deployment",
+        "missing_provider_consent": "Balance provider consent is missing or expired",
         "validation_error": "Background job validation failed",
         "credential_error": "Connector authorization failed",
         "unexpected_error": "Background job failed unexpectedly",
@@ -388,7 +475,24 @@ async def run_job(job_id: str) -> None:
             await db.commit()
             return
 
+        active_task = asyncio.current_task()
+        tracked_user_id = job.user_id
+        if tracked_user_id and active_task is not None:
+            _active_user_tasks.setdefault(tracked_user_id, set()).add(active_task)
+
         try:
+            if tracked_user_id:
+                user = await db.get(User, tracked_user_id)
+                if user is None or not user.is_active or user.deletion_started_at is not None:
+                    job.status = JobStatus.FAILED
+                    job.error_message = "User account is unavailable"
+                    job.result_json = _job_error_result("user_unavailable", job.error_message)
+                    job.finished_at = datetime.now(UTC)
+                    job.lease_owner = None
+                    job.lease_expires_at = None
+                    await db.commit()
+                    return
+
             heartbeat = asyncio.create_task(_renew_job_lease(job_id))
             result = await handler(db, job.user_id or "", payload)
             job.status = JobStatus.COMPLETED
@@ -400,6 +504,8 @@ async def run_job(job_id: str) -> None:
             await db.commit()
             if job.user_id and job.job_type in {"gmail_sync_pipeline", "demo_sync_pipeline"}:
                 await sync_event_manager.broadcast(job.user_id, "sync_completed", result)
+            elif job.user_id and job.job_type == "balance_refresh":
+                await sync_event_manager.broadcast(job.user_id, "balance_refresh_completed", result)
         except Exception as exc:
             await db.rollback()
             job = await get_job(db, job_id)
@@ -432,7 +538,17 @@ async def run_job(job_id: str) -> None:
                 await sync_event_manager.broadcast(
                     job.user_id, "sync_failed", {"error": public_error}
                 )
+            elif job.user_id and job.job_type == "balance_refresh":
+                await sync_event_manager.broadcast(
+                    job.user_id, "balance_refresh_failed", {"error": public_error}
+                )
         finally:
+            if tracked_user_id and active_task is not None:
+                user_tasks = _active_user_tasks.get(tracked_user_id)
+                if user_tasks is not None:
+                    user_tasks.discard(active_task)
+                    if not user_tasks:
+                        _active_user_tasks.pop(tracked_user_id, None)
             if "heartbeat" in locals():
                 heartbeat.cancel()
                 with suppress(asyncio.CancelledError):

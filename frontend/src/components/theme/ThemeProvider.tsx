@@ -24,13 +24,20 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle('dark', theme === 'dark');
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', theme === 'dark' ? '#111815' : '#f6f4ee');
     localStorage.setItem(STORAGE_KEY, theme);
   }, [theme]);
 
   const setTheme = (nextTheme: Theme) => updateTheme(nextTheme);
   const toggleTheme = () => updateTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
 
-  return <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
 }
 
 // eslint-disable-next-line react-refresh/only-export-components

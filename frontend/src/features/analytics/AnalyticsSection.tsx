@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Activity, CalendarClock, Plus, Target, TrendingUp } from 'lucide-react';
+import { useDashboardUi } from '@/app/DashboardUiContext';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -15,10 +16,13 @@ import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import type { Goal, GoalType, RecurringPayment } from '@/lib/types';
 import { ScenarioStudio } from './ScenarioStudio';
+import { DataConfidenceLedger } from './DataConfidenceLedger';
+import { RecommendationEffectivenessPanel } from './RecommendationEffectivenessPanel';
 
 const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 
 export function AnalyticsSection({ embedded = false }: { embedded?: boolean } = {}) {
+  const { scrollTo } = useDashboardUi();
   const { user } = useAuth();
   const { month, year } = useWorkspace();
   const workspace = useWorkspaceSnapshot();
@@ -86,7 +90,23 @@ export function AnalyticsSection({ embedded = false }: { embedded?: boolean } = 
                   {Math.round(cashFlow.confidence * 100)}% confidence · {cashFlow.historical_months}{' '}
                   comparable months
                 </div>
-                <p className="text-xs leading-5 text-muted-foreground">{cashFlow.assumptions[2]}</p>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {cashFlow.interval_calibration === 'same_cutoff_empirical'
+                    ? `Range calibrated from ${cashFlow.interval_calibration_samples ?? 0} comparable same-cutoff months toward ${cashFlow.interval_target_coverage_pct ?? 80}% coverage.`
+                    : cashFlow.interval_calibration === 'robust_history'
+                      ? 'Range uses robust historical variation because a same-cutoff cohort is not yet large enough.'
+                      : 'Range is low-evidence until enough comparable history is available.'}
+                </p>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {cashFlow.category_mix_status === 'same_month_supported'
+                    ? `Category mix is calibrated from ${cashFlow.category_mix_sample_months ?? 0} prior same-month periods.`
+                    : cashFlow.category_mix_status === 'mix_supported'
+                      ? `Category mix is calibrated from ${cashFlow.category_mix_sample_months ?? 0} comparable periods.`
+                      : 'Category mix stays neutral until repeated category history is available.'}{' '}
+                  {cashFlow.pay_cycle_status === 'supported'
+                    ? `Income timing uses ${cashFlow.pay_cycle_sample_count ?? 0} settled pay-cycle observations.`
+                    : 'Income timing stays uncalibrated until a recurring pay cycle is evidenced.'}
+                </p>
               </>
             ) : null}
           </CardContent>
@@ -121,11 +141,19 @@ export function AnalyticsSection({ embedded = false }: { embedded?: boolean } = 
                   Stability measures the month. Data confidence measures how much PFIS can trust the
                   underlying classifications; it does not improve the stability score.
                 </p>
+                <DataConfidenceLedger
+                  dimensions={health.data_confidence_breakdown ?? []}
+                  sourceCoverage={health.source_coverage ?? []}
+                  sourceCoverageScore={health.source_coverage_score}
+                  onNavigate={scrollTo}
+                />
               </>
             ) : null}
           </CardContent>
         </Card>
       </div>
+
+      <RecommendationEffectivenessPanel />
 
       <CommitmentLedger
         commitments={workspace.data?.recurring_commitments ?? []}

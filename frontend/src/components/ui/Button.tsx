@@ -15,7 +15,7 @@ const buttonVariants = cva(
         link: 'h-auto px-0 text-primary underline-offset-4 hover:underline active:translate-y-0',
       },
       size: {
-        sm: 'h-9 px-3 text-xs',
+        sm: 'h-11 px-3 text-xs',
         md: 'h-11 px-4',
         lg: 'h-12 px-6 text-base',
         icon: 'h-11 w-11 p-0',
@@ -42,3 +42,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ),
 );
 Button.displayName = 'Button';
+
+export interface ButtonLinkProps
+  extends React.AnchorHTMLAttributes<HTMLAnchorElement>, VariantProps<typeof buttonVariants> {}
+
+export const ButtonLink = forwardRef<HTMLAnchorElement, ButtonLinkProps>(
+  ({ className, variant, size, ...props }, ref) => (
+    <a ref={ref} className={cn(buttonVariants({ variant, size }), className)} {...props} />
+  ),
+);
+ButtonLink.displayName = 'ButtonLink';

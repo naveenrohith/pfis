@@ -67,6 +67,15 @@ async def test_workspace_empty_month_returns_stable_shape(client: AsyncClient):
     assert data["recommendations"] == []
     assert data["financial_health"]["monthly_stability"] == 0
     assert data["financial_health"]["data_confidence"] == 0
+    breakdown = data["financial_health"]["data_confidence_breakdown"]
+    assert {item["key"] for item in breakdown} == {
+        "coverage",
+        "freshness",
+        "parsing",
+        "conflicts",
+    }
+    assert all(item["status"] == "limited" for item in breakdown)
+    assert all(item["remediation_label"] for item in breakdown)
     assert data["financial_health"]["budget_adherence"] is None
 
 
@@ -151,9 +160,9 @@ async def test_workspace_snapshot_and_timeline_with_data(client: AsyncClient):
 
     snap = data["snapshot"]
     assert snap["income"] == 50000.0
-    assert snap["spend"] == 2000.0
-    assert snap["savings"] == 48000.0
-    assert snap["net_cash_flow"] == 48000.0
+    assert snap["spend"] == 1700.0
+    assert snap["savings"] == 48300.0
+    assert snap["net_cash_flow"] == 48300.0
     assert snap["transaction_count"] == 4
 
     review = data["review_summary"]
@@ -203,7 +212,12 @@ async def test_workspace_budget_risk_recommendation(client: AsyncClient):
     data = resp.json()
 
     assert data["snapshot"]["budget_risk_count"] >= 1
-    assert any(r["type"] == "budget" for r in data["recommendations"])
+    budget_recommendation = next(r for r in data["recommendations"] if r["type"] == "budget")
+    assert budget_recommendation["resolution"]["status"] in {"blocked", "needs_review"}
+    assert any(
+        conflict["code"] == "source_coverage_incomplete"
+        for conflict in budget_recommendation["conflicts"]
+    )
 
 
 @pytest.mark.asyncio

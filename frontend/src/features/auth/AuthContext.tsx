@@ -10,6 +10,12 @@ interface AuthContextValue {
   isReady: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, currency: string) => Promise<void>;
+  updateProfile: (changes: {
+    name?: string;
+    timezone?: string;
+    raw_email_retention_days?: number | null;
+  }) => Promise<User>;
+  deleteAccount: (confirmation: string) => Promise<void>;
   startDemo: () => Promise<void>;
   logout: (message?: string) => Promise<boolean>;
   expiryMessage: string | null;
@@ -109,6 +115,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     commit(await api.startDemo());
   }, [commit]);
 
+  const updateProfile = useCallback(
+    async (changes: {
+      name?: string;
+      timezone?: string;
+      raw_email_retention_days?: number | null;
+    }) => {
+      if (!session) throw new Error('Sign in to update your profile');
+      const user = await api.updateUser(session.user.id, changes);
+      setSession((current) => (current ? { ...current, user } : current));
+      return user;
+    },
+    [session],
+  );
+
+  const deleteAccount = useCallback(
+    async (confirmation: string) => {
+      if (!session) throw new Error('Sign in to delete your account');
+      await api.deleteAccount(session.user.id, confirmation);
+      endSession();
+    },
+    [session, endSession],
+  );
+
   useEffect(() => {
     if (!session?.expiresAt) return;
     const remaining = session.expiresAt - Date.now();
@@ -133,12 +162,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isReady,
       login,
       register,
+      updateProfile,
+      deleteAccount,
       startDemo,
       logout,
       expiryMessage,
       clearExpiryMessage: () => setExpiryMessage(null),
     }),
-    [session, isReady, login, register, startDemo, logout, expiryMessage],
+    [
+      session,
+      isReady,
+      login,
+      register,
+      updateProfile,
+      deleteAccount,
+      startDemo,
+      logout,
+      expiryMessage,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

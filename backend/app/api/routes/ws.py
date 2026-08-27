@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
@@ -22,7 +23,17 @@ def _origin_is_allowed(websocket: WebSocket) -> bool:
     origin = websocket.headers.get("origin")
     if not origin:
         return not settings.is_production
-    return origin in settings.CORS_ORIGINS
+    if origin in settings.CORS_ORIGINS:
+        return True
+    parsed = urlsplit(origin)
+    # Browsers always send Origin for WebSockets. Accept the exact HTTP host
+    # serving PFIS so local machine names and LAN addresses do not require an
+    # unrelated CORS allow-list entry.
+    return bool(
+        parsed.netloc
+        and parsed.netloc == websocket.headers.get("host")
+        and (not settings.is_production or parsed.scheme == "https")
+    )
 
 
 async def _authorize_websocket_user(

@@ -14,6 +14,9 @@ PyJWT==2.13.0
 cryptography==49.0.0
 argon2-cffi==25.1.0
 slowapi==0.1.9
+pdfplumber==0.11.9
+PyMuPDF==1.26.5
+tzdata==2025.2
 
 # Phase 1: Gmail Integration
 google-auth==2.40.3

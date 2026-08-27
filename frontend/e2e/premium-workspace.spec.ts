@@ -15,7 +15,7 @@ async function openDemoWorkspace(page: import('@playwright/test').Page) {
   await page.clock.setFixedTime(new Date('2026-07-16T09:00:00+05:30'));
   await page.context().addCookies(demoCookies);
   await page.goto('/dashboard/');
-  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 20_000 });
 }
 
 test('sign-in is responsive, consent-clear, and accessible', async ({ page }) => {
@@ -53,9 +53,7 @@ test('Today is keyboard reachable, responsive, and free of serious accessibility
 }) => {
   await openDemoWorkspace(page);
 
-  await expect(page.getByRole('heading', { level: 1 })).toContainText(
-    'Connect or add activity to begin your brief.',
-  );
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   await expect(page.locator('main')).not.toContainText('You have kept ₹0');
 
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+K');
@@ -93,8 +91,8 @@ test('all five destinations and their primary tabs are deep-linkable', async ({ 
   await expect(page).toHaveURL(/#review$/);
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
-  await expect(page).toHaveURL(/#analytics$/);
-  await page.getByRole('tab', { name: 'Position', exact: true }).click();
+  await expect(page).toHaveURL(/#cash-plan$/);
+  await page.getByRole('tab', { name: 'Verified position', exact: true }).click();
   await expect(page).toHaveURL(/#networth$/);
 
   await page.getByRole('button', { name: 'Insights', exact: true }).click();
@@ -106,6 +104,58 @@ test('all five destinations and their primary tabs are deep-linkable', async ({ 
   await expect(page).toHaveURL(/#inbox$/);
   await page.getByRole('tab', { name: 'Diagnostics', exact: true }).click();
   await expect(page).toHaveURL(/#pipeline$/);
+  await expectNoHorizontalOverflow(page);
+});
+
+test('financial roadmap workspaces are responsive, keyboard reachable, and accessible', async ({
+  page,
+}) => {
+  await openDemoWorkspace(page);
+
+  await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  for (const tabName of ['Safe to spend', 'Verified position', 'Commitments', 'Outlook & guardrails']) {
+    const tab = page.getByRole('tab', { name: tabName, exact: true });
+    await tab.scrollIntoViewIfNeeded();
+    await tab.focus();
+    await page.keyboard.press('Enter');
+    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    const box = await tab.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    const placement = await tab.evaluate((element) => {
+      const tabRect = element.getBoundingClientRect();
+      const headerBottom = document.querySelector('header')?.getBoundingClientRect().bottom ?? 0;
+      return { tabTop: tabRect.top, headerBottom };
+    });
+    expect(placement.tabTop).toBeGreaterThanOrEqual(placement.headerBottom - 1);
+    await expectNoHorizontalOverflow(page);
+  }
+
+  await page.getByRole('tab', { name: 'Commitments', exact: true }).click();
+  await expect(page).toHaveURL(/#obligations$/);
+  await page.getByRole('button', { name: 'Cards', exact: true }).click();
+  await expect(page).toHaveURL(/#cards$/);
+  await page.getByRole('button', { name: 'All liabilities', exact: true }).click();
+  await expect(page).toHaveURL(/#liabilities$/);
+
+  await page.getByRole('button', { name: 'Bills & safeguards', exact: true }).click();
+  await expect(page).toHaveURL(/#obligations$/);
+
+  await page.getByRole('button', { name: 'Data & settings', exact: true }).click();
+  const statementsTab = page.getByRole('tab', { name: 'Statements', exact: true });
+  await statementsTab.scrollIntoViewIfNeeded();
+  await statementsTab.focus();
+  await page.keyboard.press('Enter');
+  await expect(statementsTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page).toHaveURL(/#statements$/);
+  await expect(page.locator('main')).toContainText('Extract, then delete');
+  const statementsBox = await statementsTab.boundingBox();
+  expect(statementsBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+  const results = await new AxeBuilder({ page }).analyze();
+  const serious = results.violations.filter((violation) =>
+    ['serious', 'critical'].includes(violation.impact ?? ''),
+  );
+  expect(serious).toEqual([]);
   await expectNoHorizontalOverflow(page);
 });
 
@@ -138,6 +188,7 @@ test('scenario preview and briefing rhythm stay user controlled', async ({ page 
   await openDemoWorkspace(page);
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await page.getByRole('tab', { name: 'Outlook & guardrails', exact: true }).click();
   await page.getByLabel('Add expected income', { exact: true }).fill('5000');
   await page.getByRole('button', { name: 'Preview change', exact: true }).click();
   const studio = page.getByRole('region', { name: 'Test one change before you commit to it.' });

@@ -36,11 +36,16 @@ export function Dialog({ open, onClose, title, description, children, className 
           <BaseDialog.Popup
             ref={popupRef}
             aria-modal="true"
-            initialFocus={() =>
-              popupRef.current?.querySelector<HTMLElement>(
-                '[data-dialog-initial-focus], input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
-              ) ?? true
-            }
+            initialFocus={() => {
+              const popup = popupRef.current;
+              return (
+                popup?.querySelector<HTMLElement>('[data-dialog-initial-focus]') ??
+                popup?.querySelector<HTMLElement>(
+                  'input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
+                ) ??
+                true
+              );
+            }}
             className={cn(
               'relative w-full max-w-md animate-fade-in rounded-xl bg-card p-6 text-card-foreground shadow-float outline-none sm:p-7',
               className,

@@ -17,19 +17,19 @@ export function PageIntro({
 }) {
   return (
     <header
-      className={cn('flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between', className)}
+      className={cn('flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between', className)}
     >
       <div className="max-w-4xl">
         {eyebrow ? (
-          <p className="mb-3 text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
+          <p className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted-foreground">
             {eyebrow}
           </p>
         ) : null}
-        <h1 className="text-balance text-3xl font-extrabold leading-[1.04] tracking-[-0.05em] sm:text-4xl lg:text-5xl">
+        <h1 className="text-balance text-3xl font-extrabold leading-[1.05] tracking-[-0.05em] sm:text-4xl lg:text-[3.25rem]">
           {title}
         </h1>
         {description ? (
-          <div className="mt-4 max-w-2xl text-pretty text-base leading-7 text-muted-foreground">
+          <div className="mt-3 max-w-2xl text-pretty text-sm leading-6 text-muted-foreground sm:text-base">
             {description}
           </div>
         ) : null}
@@ -48,10 +48,83 @@ export function FinancialHero({
 }) {
   return (
     <section
-      className={cn('relative overflow-hidden rounded-xl bg-jade/10 p-5 sm:p-7 lg:p-8', className)}
+      className={cn('relative overflow-hidden rounded-2xl bg-jade/10 p-5 sm:p-6 lg:p-7', className)}
     >
       {children}
     </section>
+  );
+}
+
+export function WorkspaceContextBar({
+  label,
+  description,
+  children,
+  className,
+}: {
+  label: string;
+  description?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      aria-label={label}
+      data-testid="workspace-context-bar"
+      className={cn(
+        'workspace-context-strip rounded-xl border border-border/70 bg-background/95 p-2 backdrop-blur-xl lg:sticky lg:top-[5.75rem] lg:z-20',
+        className,
+      )}
+    >
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="hidden min-w-0 px-3 py-1 lg:block">
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted-foreground">
+            {label}
+          </p>
+          {description ? (
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
+        <div className="min-w-0 flex-1">{children}</div>
+      </div>
+    </section>
+  );
+}
+
+export function DecisionStrip({
+  items,
+  className,
+}: {
+  items: Array<{
+    label: string;
+    value: React.ReactNode;
+    tone?: 'neutral' | 'positive' | 'attention';
+  }>;
+  className?: string;
+}) {
+  return (
+    <dl
+      className={cn(
+        'decision-strip grid gap-px overflow-hidden rounded-xl border border-border/70 bg-border/70 sm:grid-cols-3',
+        className,
+      )}
+    >
+      {items.map((item) => (
+        <div key={item.label} className="min-w-0 bg-card px-4 py-3.5 sm:px-5">
+          <dt className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
+            {item.label}
+          </dt>
+          <dd
+            className={cn(
+              'mt-1 break-words text-sm font-extrabold tracking-[-0.02em]',
+              item.tone === 'positive' && 'text-success',
+              item.tone === 'attention' && 'text-warning',
+            )}
+          >
+            {item.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -112,6 +185,7 @@ export function ActionSurface({
   actionLabel,
   onAction,
   secondary,
+  footer,
   className,
 }: {
   icon?: React.ReactNode;
@@ -121,12 +195,13 @@ export function ActionSurface({
   actionLabel: string;
   onAction: () => void;
   secondary?: React.ReactNode;
+  footer?: React.ReactNode;
   className?: string;
 }) {
   return (
     <aside
       className={cn(
-        'flex min-h-64 flex-col rounded-xl bg-surface-strong p-6 text-background shadow-lift sm:p-7',
+        'flex min-h-0 flex-col rounded-2xl bg-surface-strong p-5 text-background shadow-lift sm:p-6',
         className,
       )}
     >
@@ -138,11 +213,11 @@ export function ActionSurface({
           </span>
         ) : null}
       </div>
-      <h2 className="mt-8 text-balance text-2xl font-extrabold leading-tight tracking-[-0.035em]">
+      <h2 className="mt-6 text-balance text-2xl font-extrabold leading-tight tracking-[-0.035em]">
         {title}
       </h2>
       <div className="text-background/72 mt-3 text-pretty text-sm leading-6">{description}</div>
-      <div className="mt-auto pt-7">
+      <div className="mt-6 pt-1">
         <Button
           variant="secondary"
           className="w-full justify-between bg-background text-foreground hover:bg-background/90"
@@ -152,6 +227,7 @@ export function ActionSurface({
           <ArrowRight className="h-4 w-4" aria-hidden="true" />
         </Button>
         {secondary ? <div className="text-background/58 mt-3 text-xs">{secondary}</div> : null}
+        {footer ? <div className="mt-4 border-t border-background/15 pt-4">{footer}</div> : null}
       </div>
     </aside>
   );

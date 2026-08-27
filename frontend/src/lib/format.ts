@@ -101,3 +101,35 @@ export function formatTime(value?: string): string {
     minute: '2-digit',
   });
 }
+
+export function formatDate(value?: string | null): string {
+  if (!value) return '—';
+  const date = parseDateValue(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+}
+
+export function dateInputValueInTimezone(timezone: string, instant = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(instant);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+export function calendarDayDifference(later: string, earlier: string): number {
+  const [laterYear, laterMonth, laterDay] = later.split('-').map(Number);
+  const [earlierYear, earlierMonth, earlierDay] = earlier.split('-').map(Number);
+  return Math.floor(
+    (Date.UTC(laterYear, laterMonth - 1, laterDay) -
+      Date.UTC(earlierYear, earlierMonth - 1, earlierDay)) /
+      86_400_000,
+  );
+}

@@ -12,12 +12,13 @@ describe('workspace navigation model', () => {
     expect(workspaceForSection('budgets')).toBe('plan');
     expect(workspaceForSection('transactions')).toBe('activity');
     expect(workspaceForSection('pipeline')).toBe('data');
+    expect(workspaceForSection('settings')).toBe('data');
   });
 
   it('uses a stable entry section for each workspace', () => {
     expect(firstSectionForWorkspace('today')).toBe('overview');
     expect(firstSectionForWorkspace('activity')).toBe('transactions');
-    expect(firstSectionForWorkspace('plan')).toBe('analytics');
+    expect(firstSectionForWorkspace('plan')).toBe('cash-plan');
     expect(firstSectionForWorkspace('insights')).toBe('insights');
     expect(firstSectionForWorkspace('data')).toBe('inbox');
   });
@@ -26,6 +27,7 @@ describe('workspace navigation model', () => {
     expect(sectionFromHash('#transactions')).toBe('transactions');
     expect(sectionFromHash('#home')).toBe('overview');
     expect(sectionFromHash('#system')).toBe('inbox');
+    expect(sectionFromHash('#settings')).toBe('settings');
     expect(sectionFromHash('#not-a-section')).toBeNull();
     expect(sectionFromHash('#%E0%A4%A')).toBeNull();
     expect(sectionFromHash('')).toBeNull();

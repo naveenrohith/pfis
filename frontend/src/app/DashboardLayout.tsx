@@ -1,40 +1,54 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import { Header } from './Header';
 import { SectionNav } from './SectionNav';
 import { DashboardUiProvider, useDashboardUi } from './DashboardUiContext';
 import { TodayExperience } from '@/features/today/TodayExperience';
 import { useDashboardPreferences } from '@/features/workspace/queries';
 import { cn } from '@/lib/utils';
+import { lazyWithRetry } from '@/lib/lazyWithRetry';
+import { WorkspaceErrorBoundary } from '@/components/WorkspaceErrorBoundary';
 
-const QuickAddDialog = lazy(() =>
-  import('@/features/transactions/QuickAddDialog').then((module) => ({
-    default: module.QuickAddDialog,
-  })),
+const QuickAddDialog = lazyWithRetry(
+  () =>
+    import('@/features/transactions/QuickAddDialog').then((module) => ({
+      default: module.QuickAddDialog,
+    })),
+  'quick-add',
 );
-const ActivityExperience = lazy(() =>
-  import('@/features/activity/ActivityExperience').then((module) => ({
-    default: module.ActivityExperience,
-  })),
+const ActivityExperience = lazyWithRetry(
+  () =>
+    import('@/features/activity/ActivityExperience').then((module) => ({
+      default: module.ActivityExperience,
+    })),
+  'activity',
 );
-const PlanExperience = lazy(() =>
-  import('@/features/plan/PlanExperience').then((module) => ({
-    default: module.PlanExperience,
-  })),
+const PlanExperience = lazyWithRetry(
+  () =>
+    import('@/features/plan/PlanExperience').then((module) => ({
+      default: module.PlanExperience,
+    })),
+  'plan',
 );
-const InsightsExperience = lazy(() =>
-  import('@/features/insights/InsightsExperience').then((module) => ({
-    default: module.InsightsExperience,
-  })),
+const InsightsExperience = lazyWithRetry(
+  () =>
+    import('@/features/insights/InsightsExperience').then((module) => ({
+      default: module.InsightsExperience,
+    })),
+  'insights',
 );
-const DataExperience = lazy(() =>
-  import('@/features/data/DataExperience').then((module) => ({
-    default: module.DataExperience,
-  })),
+const DataExperience = lazyWithRetry(
+  () =>
+    import('@/features/data/DataExperience').then((module) => ({
+      default: module.DataExperience,
+    })),
+  'data',
 );
-const CustomizeDashboardDialog = lazy(() =>
-  import('@/features/personalization/CustomizeDashboardDialog').then((module) => ({
-    default: module.CustomizeDashboardDialog,
-  })),
+const CustomizeDashboardDialog = lazyWithRetry(
+  () =>
+    import('@/features/personalization/CustomizeDashboardDialog').then((module) => ({
+      default: module.CustomizeDashboardDialog,
+    })),
+  'customize',
 );
 function DashboardWorkspace() {
   const { activeWorkspace, quickAddOpen, setQuickAddOpen, customizeOpen, setCustomizeOpen } =
@@ -44,7 +58,7 @@ function DashboardWorkspace() {
   return (
     <div
       className={cn(
-        'grid min-h-screen bg-background lg:grid-cols-[88px_minmax(0,1fr)]',
+        'grid min-h-screen bg-background lg:grid-cols-[224px_minmax(0,1fr)]',
         preferences.data?.density === 'compact' && 'dashboard-compact',
       )}
     >
@@ -60,39 +74,41 @@ function DashboardWorkspace() {
         <main
           id="workspace-content"
           tabIndex={-1}
-          className="mx-auto w-full max-w-[1320px] px-4 py-8 sm:px-6 lg:px-10 lg:py-12"
+          className="mx-auto w-full max-w-[1440px] px-4 py-7 sm:px-6 lg:px-10 lg:py-10 xl:px-12"
         >
-          {activeWorkspace === 'today' ? (
-            <section id="overview" className="animate-fade-in scroll-mt-24">
-              <TodayExperience />
-            </section>
-          ) : activeWorkspace === 'activity' ? (
-            <Suspense
-              fallback={
-                <div
-                  role="status"
-                  aria-label="Loading Activity"
-                  className="h-96 animate-soft-pulse rounded-xl bg-muted"
-                />
-              }
-            >
-              <ActivityExperience />
-            </Suspense>
-          ) : (
-            <Suspense
-              fallback={
-                <div
-                  role="status"
-                  aria-label={`Loading ${activeWorkspace}`}
-                  className="h-96 animate-soft-pulse rounded-xl bg-muted"
-                />
-              }
-            >
-              {activeWorkspace === 'plan' ? <PlanExperience /> : null}
-              {activeWorkspace === 'insights' ? <InsightsExperience /> : null}
-              {activeWorkspace === 'data' ? <DataExperience /> : null}
-            </Suspense>
-          )}
+          <WorkspaceErrorBoundary>
+            {activeWorkspace === 'today' ? (
+              <section id="overview" className="animate-fade-in scroll-mt-24">
+                <TodayExperience />
+              </section>
+            ) : activeWorkspace === 'activity' ? (
+              <Suspense
+                fallback={
+                  <div
+                    role="status"
+                    aria-label="Loading Activity"
+                    className="h-96 animate-soft-pulse rounded-xl bg-muted"
+                  />
+                }
+              >
+                <ActivityExperience />
+              </Suspense>
+            ) : (
+              <Suspense
+                fallback={
+                  <div
+                    role="status"
+                    aria-label={`Loading ${activeWorkspace}`}
+                    className="h-96 animate-soft-pulse rounded-xl bg-muted"
+                  />
+                }
+              >
+                {activeWorkspace === 'plan' ? <PlanExperience /> : null}
+                {activeWorkspace === 'insights' ? <InsightsExperience /> : null}
+                {activeWorkspace === 'data' ? <DataExperience /> : null}
+              </Suspense>
+            )}
+          </WorkspaceErrorBoundary>
         </main>
       </div>
       <Suspense fallback={null}>

@@ -132,7 +132,7 @@ def test_alembic_head_matches_orm_and_database_constraints():
                             },
                             "operational_indexes": {
                                 item["name"]
-                                for table in ("raw_emails", "sync_runs")
+                                for table in ("raw_emails", "sync_runs", "pipeline_events")
                                 for item in inspector.get_indexes(table)
                             },
                         }
@@ -152,7 +152,7 @@ def test_alembic_head_matches_orm_and_database_constraints():
         for table in Base.metadata.sorted_tables
     }
     assert schema["columns"] == orm_columns
-    assert schema["revision"] == "017_gmail_token_expiry"
+    assert schema["revision"] == "055_deposit_line_review"
     assert "uq_user_merchant_rule_descriptor" in schema["merchant_unique"]
     assert {
         "ix_user_merchant_rules_user_id",
@@ -166,6 +166,7 @@ def test_alembic_head_matches_orm_and_database_constraints():
     assert {
         "ix_raw_emails_user_received",
         "ix_sync_runs_user_started",
+        "ix_pipeline_events_source_created",
     } <= schema["operational_indexes"]
 
 
@@ -192,7 +193,11 @@ def test_money_columns_use_fixed_scale_numeric_storage():
         ("transactions", "amount"),
         ("budgets", "monthly_limit"),
         ("account_balance_snapshots", "amount"),
+        ("cash_flow_forecast_snapshots", "projected_spend"),
+        ("cash_flow_forecast_outcomes", "actual_spend"),
+        ("recommendation_outcomes", "actual_impact_value"),
         ("goals", "target_amount"),
+        ("transaction_splits", "amount"),
     }
 
     for table_name, column_name in expected:

@@ -1,6 +1,15 @@
-import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Building2, Landmark, Plus, Scale, TrendingUp } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  AlertTriangle,
+  Building2,
+  Landmark,
+  Plus,
+  RefreshCw,
+  Scale,
+  ShieldCheck,
+  TrendingUp,
+} from 'lucide-react';
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -10,23 +19,58 @@ import { Input, Label, Select } from '@/components/ui/Input';
 import { Skeleton, EmptyState } from '@/components/ui/Skeleton';
 import { SectionTitle } from '@/components/SectionTitle';
 import { useToast } from '@/components/ui/Toast';
+import { useDashboardUi } from '@/app/DashboardUiContext';
+import { AccountIdentityDialog } from '@/features/accounts/AccountIdentityDialog';
 import { useAuth } from '@/features/auth/AuthContext';
-import { queryKeys, useAccounts, useNetWorth } from '@/features/workspace/queries';
+import {
+  queryKeys,
+  useAccounts,
+  useBalanceProviderStatus,
+  useBalanceProviderDiscoveredAccounts,
+  useEnqueueBalanceRefresh,
+  useJob,
+  useMapBalanceProviderAccount,
+  useNetWorth,
+  useRequestBalanceProviderConsent,
+} from '@/features/workspace/queries';
 import { api } from '@/lib/api';
-import { formatChartCurrency, formatCurrency } from '@/lib/format';
-
-function todayValue() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-}
+import {
+  dateInputValueInTimezone,
+  formatChartCurrency,
+  formatCurrency,
+  formatTime,
+} from '@/lib/format';
+import type {
+  BalanceProviderAccountCandidate,
+  BalanceProviderStatus,
+  FinancialAccount,
+} from '@/lib/types';
 
 export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const accounts = useAccounts();
   const netWorth = useNetWorth();
+  const providerStatus = useBalanceProviderStatus();
+  const { scrollTo } = useDashboardUi();
   const [accountOpen, setAccountOpen] = useState(false);
   const [balanceAccountId, setBalanceAccountId] = useState<string | null>(null);
+  const [identityAccountId, setIdentityAccountId] = useState<string | null>(null);
+  const [mappingProviderType, setMappingProviderType] = useState<string | null>(null);
   const currency = user?.currency ?? 'INR';
+  const unresolvedAccounts = (accounts.data ?? []).filter(
+    (account) => account.is_active && identityStatus(account) !== 'confirmed',
+  );
+  const currentPositionStatus = netWorth.data?.current_position_status;
+  const currentPositionLabel =
+    currentPositionStatus === 'estimated'
+      ? 'Estimated current position'
+      : currentPositionStatus === 'observed'
+        ? 'Observed current position'
+        : currentPositionStatus === 'needs_review'
+          ? 'Current position needs review'
+          : currentPositionStatus === 'stale'
+            ? 'Current position is stale'
+            : null;
 
   return (
     <div>
@@ -34,7 +78,7 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
         <SectionTitle
           eyebrow="Accounts"
           title="Net worth"
-          description="Assets minus liabilities, calculated only from balance snapshots you own and provide."
+          description="Assets minus liabilities, grounded in owned observations and eligible settled movement."
           action={
             <Button size="sm" onClick={() => setAccountOpen(true)}>
               <Plus className="h-4 w-4" /> Add account
@@ -69,6 +113,52 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
         </Card>
       ) : (
         <>
+          {unresolvedAccounts.length ? (
+            <section
+              className="mb-4 border-l-2 border-warning bg-warning/5 px-4 py-3"
+              aria-labelledby="unresolved-account-title"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex gap-3">
+                  <AlertTriangle
+                    className="mt-0.5 h-5 w-5 shrink-0 text-warning"
+                    aria-hidden="true"
+                  />
+                  <div>
+                    <h3 id="unresolved-account-title" className="text-sm font-extrabold">
+                      {unresolvedAccounts.length} account{' '}
+                      {unresolvedAccounts.length === 1 ? 'identity needs' : 'identities need'}{' '}
+                      confirmation
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      Confirm the product type before PFIS uses these instruments in position, debt,
+                      or Cash Plan calculations.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIdentityAccountId(unresolvedAccounts[0].id)}
+                >
+                  Resolve first account
+                </Button>
+              </div>
+            </section>
+          ) : null}
+          {providerStatus.data ? (
+            <BalanceProviderNotice
+              status={providerStatus.data}
+              onOpenSettings={() => scrollTo('settings')}
+              onOpenMapping={setMappingProviderType}
+            />
+          ) : null}
+          <BalanceProviderMappingDialog
+            open={Boolean(mappingProviderType)}
+            providerType={mappingProviderType}
+            accounts={accounts.data ?? []}
+            onClose={() => setMappingProviderType(null)}
+          />
           <div className="grid gap-3 sm:grid-cols-3">
             <Metric
               label="Assets"
@@ -86,6 +176,25 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
               icon={<Landmark className="text-primary" />}
             />
           </div>
+          {currentPositionLabel ? (
+            <div
+              className="mt-4 border-l-2 border-primary/50 pl-4 text-xs text-muted-foreground"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="font-extrabold uppercase tracking-[0.1em] text-foreground">
+                Current position · {currentPositionLabel}
+                {netWorth.data?.current_position_as_of
+                  ? ` · as of ${netWorth.data.current_position_as_of}`
+                  : ''}
+              </p>
+              <p className="mt-1 leading-5">
+                {currentPositionStatus === 'needs_review' || currentPositionStatus === 'stale'
+                  ? 'Totals remain on the latest verified snapshot until every account has a fresh, reconciled position.'
+                  : 'Totals include only eligible settled movement after each account’s verified anchor.'}
+              </p>
+            </div>
+          ) : null}
 
           <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
             <Card>
@@ -161,12 +270,7 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
               <CardContent className="grid gap-3 p-5">
                 <h3 className="font-bold">Your accounts</h3>
                 {(accounts.data ?? []).map((account) => (
-                  <button
-                    key={account.id}
-                    type="button"
-                    onClick={() => setBalanceAccountId(account.id)}
-                    className="dashboard-row flex w-full items-center gap-3 text-left"
-                  >
+                  <div key={account.id} className="dashboard-row flex w-full items-center gap-3">
                     <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
                       <Building2 className="h-4 w-4 text-primary" />
                     </span>
@@ -178,17 +282,63 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
                         {account.account_type} · {account.masked_number}
                       </span>
                     </span>
-                    <span className="text-right">
+                    <span className="text-right" aria-live="polite">
                       <span className="block text-sm font-bold">
-                        {account.latest_balance == null
-                          ? 'Add balance'
-                          : formatCurrency(account.latest_balance, account.currency)}
+                        {account.current_balance != null
+                          ? formatCurrency(account.current_balance, account.currency)
+                          : account.latest_balance == null
+                            ? 'Add balance'
+                            : formatCurrency(account.latest_balance, account.currency)}
                       </span>
-                      <Badge variant={account.balance_kind === 'asset' ? 'success' : 'warning'}>
-                        {account.balance_kind}
-                      </Badge>
+                      {account.current_balance != null ? (
+                        <span
+                          className={`block text-[0.68rem] ${
+                            account.current_balance_status === 'needs_review' ||
+                            account.current_balance_status === 'stale' ||
+                            account.current_balance_status === 'incomplete'
+                              ? 'text-warning'
+                              : 'text-muted-foreground'
+                          }`}
+                          title={
+                            account.current_balance_reason_codes?.length
+                              ? account.current_balance_reason_codes.join(', ')
+                              : undefined
+                          }
+                        >
+                          {accountPositionLabel(
+                            account.current_balance_status,
+                            account.account_type,
+                          )}
+                          {' · '}
+                          {account.current_balance_as_of ?? 'today'}
+                        </span>
+                      ) : null}
+                      {account.current_balance == null && account.latest_balance != null ? (
+                        <span className="block text-[0.68rem] text-muted-foreground">
+                          Verified · {account.balance_as_of ?? 'date unknown'}
+                        </span>
+                      ) : null}
+                      <div className="flex flex-wrap justify-end gap-1">
+                        <Badge variant={account.balance_kind === 'asset' ? 'success' : 'warning'}>
+                          {account.balance_kind}
+                        </Badge>
+                        {identityStatus(account) !== 'confirmed' ? (
+                          <Badge variant="outline">{identityStatus(account)}</Badge>
+                        ) : null}
+                      </div>
                     </span>
-                  </button>
+                    <Button
+                      size="sm"
+                      variant={identityStatus(account) !== 'confirmed' ? 'outline' : 'ghost'}
+                      onClick={() =>
+                        identityStatus(account) !== 'confirmed'
+                          ? setIdentityAccountId(account.id)
+                          : setBalanceAccountId(account.id)
+                      }
+                    >
+                      {identityStatus(account) !== 'confirmed' ? 'Review identity' : 'Position'}
+                    </Button>
+                  </div>
                 ))}
               </CardContent>
             </Card>
@@ -198,8 +348,46 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
 
       <AccountDialog open={accountOpen} onClose={() => setAccountOpen(false)} />
       <BalanceDialog accountId={balanceAccountId} onClose={() => setBalanceAccountId(null)} />
+      <AccountIdentityDialog
+        account={(accounts.data ?? []).find((account) => account.id === identityAccountId) ?? null}
+        onClose={() => setIdentityAccountId(null)}
+      />
     </div>
   );
+}
+
+function identityStatus(account: { account_type: string; identity_status?: string }) {
+  return (
+    account.identity_status ?? (account.account_type === 'unknown' ? 'unresolved' : 'confirmed')
+  );
+}
+
+function accountPositionLabel(
+  status:
+    | 'needs_observation'
+    | 'observed'
+    | 'estimated'
+    | 'stale'
+    | 'incomplete'
+    | 'needs_review'
+    | undefined,
+  accountType?: string,
+) {
+  const noun = accountType === 'credit_card' ? 'outstanding' : 'current';
+  switch (status) {
+    case 'observed':
+      return `Observed ${noun}`;
+    case 'estimated':
+      return `Estimated ${noun}`;
+    case 'needs_review':
+      return `${noun[0].toUpperCase()}${noun.slice(1)} needs review`;
+    case 'stale':
+      return `Stale ${noun}`;
+    case 'incomplete':
+      return 'Incomplete source';
+    default:
+      return `${noun[0].toUpperCase()}${noun.slice(1)} position`;
+  }
 }
 
 function Metric({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
@@ -215,6 +403,398 @@ function Metric({ label, value, icon }: { label: string; value: string; icon: Re
         </span>
       </CardContent>
     </Card>
+  );
+}
+
+function BalanceProviderNotice({
+  status,
+  onOpenSettings,
+  onOpenMapping,
+}: {
+  status: BalanceProviderStatus;
+  onOpenSettings: () => void;
+  onOpenMapping: (providerType: string) => void;
+}) {
+  const { notify } = useToast();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const requestConsent = useRequestBalanceProviderConsent();
+  const refresh = useEnqueueBalanceRefresh();
+  const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
+  const refreshJob = useJob(refreshJobId ?? undefined);
+  const supportedProviderTypes = status.supported_provider_types ?? [];
+  const transportConfigured = supportedProviderTypes.length > 0;
+  const connection =
+    status.connections?.find(
+      (item) => item.status === 'active' && supportedProviderTypes.includes(item.provider_type),
+    ) ?? status.connections?.find((item) => supportedProviderTypes.includes(item.provider_type));
+  const providerType = connection?.provider_type ?? supportedProviderTypes[0] ?? null;
+  const providerLabel =
+    status.provider_name ??
+    (providerType
+      ? providerType
+          .split(/[_-]/)
+          .filter(Boolean)
+          .map((part) => part[0].toUpperCase() + part.slice(1))
+          .join(' ')
+      : 'provider');
+  const hasCompleteMapping =
+    status.account_count > 0 && status.mapped_account_count === status.account_count;
+  const connectionIsActive = connection?.status === 'active';
+  const canRefresh = Boolean(status.refresh_supported && connectionIsActive && hasCompleteMapping);
+  const actionPending = requestConsent.isPending || refresh.isPending || refreshJobId !== null;
+  const connectionLabel =
+    connection?.status === 'active'
+      ? 'Connected'
+      : connection?.status === 'pending'
+        ? 'Consent pending'
+        : connection?.status === 'expired'
+          ? 'Consent expired'
+          : connection?.status === 'revoked'
+            ? 'Disconnected'
+            : connection?.status === 'error'
+              ? 'Needs attention'
+              : 'Not connected';
+  const consentPending = status.reason_codes.includes('provider_consent_pending');
+  const consentExpired = status.reason_codes.includes('provider_consent_expired');
+
+  useEffect(() => {
+    const jobStatus = refreshJob.data?.status;
+    if (!refreshJobId || !jobStatus) return;
+    if (jobStatus === 'completed') {
+      setRefreshJobId(null);
+      notify('Balance evidence arrived; positions are updating', 'success');
+      void Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.balanceProviderStatus(user?.id ?? ''),
+        }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.accounts(user?.id ?? '') }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.netWorth(user?.id ?? '') }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.cashPlan(user?.id ?? '') }),
+        queryClient.invalidateQueries({ queryKey: ['cardOverview', user?.id ?? ''] }),
+        queryClient.invalidateQueries({ queryKey: ['cardDueRunway', user?.id ?? ''] }),
+      ]);
+    } else if (jobStatus === 'failed') {
+      setRefreshJobId(null);
+      notify(
+        refreshJob.data?.error_message ?? 'Balance refresh failed; review provider status',
+        'error',
+      );
+    }
+  }, [notify, queryClient, refreshJob.data, refreshJobId, user?.id]);
+  const title =
+    status.status === 'ready'
+      ? 'Latest provider observations are inside their refresh window'
+      : status.status === 'due' || status.status === 'overdue'
+        ? 'Provider observations need a refresh'
+        : status.status === 'incomplete'
+          ? 'Provider coverage is incomplete'
+          : consentPending
+            ? 'Provider consent is pending'
+            : consentExpired
+              ? 'Provider consent has expired'
+              : 'Live bank and card refresh is not connected';
+  const tone =
+    status.status === 'ready'
+      ? 'border-success/25 bg-success/[0.035]'
+      : status.status === 'blocked' || status.status === 'not_configured'
+        ? 'border-intelligence/25 bg-intelligence/[0.035]'
+        : 'border-warning/35 bg-warning/[0.035]';
+  const badgeVariant = status.status === 'ready' ? 'success' : 'warning';
+
+  const requestConsentForProvider = async () => {
+    if (!providerType) return;
+    try {
+      await requestConsent.mutateAsync(providerType);
+      notify(`${providerLabel} consent request created`, 'success');
+    } catch (error) {
+      notify((error as Error).message, 'error');
+    }
+  };
+
+  const refreshProvider = async () => {
+    if (!providerType || !canRefresh) return;
+    const idempotencyKey =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? `balance-refresh:${providerType}:${crypto.randomUUID()}`
+        : `balance-refresh:${providerType}:${Date.now()}`;
+    try {
+      const queuedJob = await refresh.mutateAsync({ providerType, idempotencyKey });
+      setRefreshJobId(queuedJob.id);
+      notify('Balance refresh queued; PFIS is waiting for provider evidence', 'success');
+    } catch (error) {
+      notify((error as Error).message, 'error');
+    }
+  };
+
+  return (
+    <section
+      className={`mt-4 border p-4 ${tone}`}
+      aria-labelledby="balance-provider-status-title"
+      role="status"
+      aria-live="polite"
+      aria-busy={actionPending}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 rounded-lg bg-card/80 p-2 text-intelligence shadow-sm">
+            <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div>
+            <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
+              Bank & card refresh
+            </p>
+            <h3 id="balance-provider-status-title" className="mt-1 text-sm font-extrabold">
+              {title}
+            </h3>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+              {status.refresh_supported
+                ? 'A consented connector can refresh these accounts; verify coverage before treating an amount as current truth.'
+                : consentPending
+                  ? `The ${providerLabel} consent handoff is pending. PFIS will not change a balance until the provider returns verified evidence.`
+                  : consentExpired
+                    ? `The ${providerLabel} consent has expired. Reconnect before using a provider amount as current truth.`
+                    : transportConfigured
+                      ? `A ${providerLabel} connector is available, but consent is not active. Request consent before using provider amounts as current truth.`
+                      : 'PFIS can roll eligible settled activity forward, but this deployment has no consented provider transport. Current amounts remain explicitly observed or estimated, never live.'}
+            </p>
+            <p className="mt-2 text-xs font-bold text-foreground">Next: {status.next_step}</p>
+            {providerType ? (
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                <span>
+                  <span className="font-semibold text-foreground">{providerLabel}</span> ·{' '}
+                  {connectionLabel}
+                </span>
+                {connection?.last_refresh_completed_at ? (
+                  <span>Last completed {formatTime(connection.last_refresh_completed_at)}</span>
+                ) : null}
+                {connection?.last_error_code ? (
+                  <span className="font-semibold text-warning">Refresh needs attention</span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+          <Badge variant={badgeVariant}>
+            {status.mapped_account_count}/{status.account_count} mapped
+          </Badge>
+          {canRefresh ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="primary"
+              onClick={refreshProvider}
+              disabled={actionPending}
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${refresh.isPending || refreshJobId ? 'animate-spin' : ''}`}
+                aria-hidden="true"
+              />
+              {refresh.isPending
+                ? 'Starting…'
+                : refreshJobId
+                  ? 'Waiting for evidence…'
+                  : 'Refresh balances'}
+            </Button>
+          ) : providerType && connection?.status !== 'pending' && !connectionIsActive ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={requestConsentForProvider}
+              disabled={actionPending}
+            >
+              {requestConsent.isPending ? 'Requesting…' : 'Request consent'}
+            </Button>
+          ) : !status.refresh_supported && supportedProviderTypes.length === 0 ? (
+            <Button type="button" size="sm" variant="outline" onClick={onOpenSettings}>
+              Review connection path
+            </Button>
+          ) : !hasCompleteMapping && connectionIsActive ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => (providerType ? onOpenMapping(providerType) : onOpenSettings())}
+            >
+              Map all accounts
+            </Button>
+          ) : null}
+          {connection?.status === 'pending' ? (
+            <Button type="button" size="sm" variant="outline" onClick={onOpenSettings}>
+              Review consent
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BalanceProviderMappingDialog({
+  open,
+  providerType,
+  accounts,
+  onClose,
+}: {
+  open: boolean;
+  providerType: string | null;
+  accounts: FinancialAccount[];
+  onClose: () => void;
+}) {
+  const { notify } = useToast();
+  const discovered = useBalanceProviderDiscoveredAccounts(providerType ?? undefined);
+  const mapAccount = useMapBalanceProviderAccount();
+  const [selections, setSelections] = useState<Record<string, string>>({});
+  const candidates = useMemo(() => discovered.data ?? [], [discovered.data]);
+  const eligibleAccounts = accounts.filter(
+    (account) => account.is_active && account.account_type !== 'unknown',
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    setSelections((current) => {
+      const next = { ...current };
+      for (const candidate of candidates) {
+        if (candidate.mapped_financial_account_id && !next[candidate.mapped_financial_account_id]) {
+          next[candidate.mapped_financial_account_id] = candidate.provider_account_id;
+        }
+      }
+      return next;
+    });
+  }, [candidates, open]);
+
+  const labelForCandidate = (candidate: BalanceProviderAccountCandidate) => {
+    const identity = candidate.masked_number || candidate.display_name || 'Provider account';
+    const type = candidate.account_type
+      ? candidate.account_type.replace('_', ' ')
+      : 'financial account';
+    return `${identity} · ${type}`;
+  };
+
+  const mapSelectedAccount = async (accountId: string) => {
+    if (!providerType) return;
+    const providerAccountId = selections[accountId];
+    if (!providerAccountId) return;
+    const candidate = candidates.find((item) => item.provider_account_id === providerAccountId);
+    if (!candidate || candidate.mapped_financial_account_id === accountId) return;
+    if (candidate.mapped_financial_account_id) {
+      notify('Choose an unassigned provider account', 'error');
+      return;
+    }
+    try {
+      await mapAccount.mutateAsync({
+        accountId,
+        providerType,
+        providerAccountId,
+      });
+      notify('Provider account mapped', 'success');
+    } catch (error) {
+      notify((error as Error).message, 'error');
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Map provider accounts"
+      description="Match each owned account to the identity returned by the consented provider. PFIS never asks for a full account or card number."
+      className="max-w-2xl"
+    >
+      {discovered.isPending ? (
+        <div className="grid gap-3" role="status" aria-live="polite">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+          <p className="text-xs text-muted-foreground">Loading provider accounts…</p>
+        </div>
+      ) : discovered.isError ? (
+        <div className="rounded-lg border border-warning/30 bg-warning/[0.06] p-4" role="alert">
+          <p className="text-sm font-bold">Provider account discovery is unavailable</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            {(discovered.error as Error).message}. No mapping was changed.
+          </p>
+        </div>
+      ) : candidates.length === 0 ? (
+        <div className="rounded-lg border border-border/70 bg-muted/25 p-4">
+          <p className="text-sm font-bold">No provider accounts returned</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Finish the provider consent handoff, then reopen this mapping step.
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-3" aria-live="polite">
+          {eligibleAccounts.map((account) => {
+            const currentCandidate = candidates.find(
+              (candidate) => candidate.mapped_financial_account_id === account.id,
+            );
+            const selectedProviderId =
+              selections[account.id] ?? currentCandidate?.provider_account_id ?? '';
+            return (
+              <div
+                key={account.id}
+                className="grid gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_auto] sm:items-end"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold">{account.institution_name}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {account.account_type.replace('_', ' ')} · {account.masked_number}
+                  </p>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor={`provider-account-${account.id}`}>Provider identity</Label>
+                  <Select
+                    id={`provider-account-${account.id}`}
+                    name={`provider_account_${account.id}`}
+                    value={selectedProviderId}
+                    onChange={(event) =>
+                      setSelections((current) => ({
+                        ...current,
+                        [account.id]: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">Choose an account…</option>
+                    {candidates.map((candidate) => {
+                      const mappedElsewhere =
+                        Boolean(candidate.mapped_financial_account_id) &&
+                        candidate.mapped_financial_account_id !== account.id;
+                      return (
+                        <option
+                          key={candidate.provider_account_id}
+                          value={candidate.provider_account_id}
+                          disabled={mappedElsewhere}
+                        >
+                          {labelForCandidate(candidate)}
+                          {mappedElsewhere ? ' · already mapped' : ''}
+                        </option>
+                      );
+                    })}
+                  </Select>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={currentCandidate ? 'secondary' : 'primary'}
+                  onClick={() => mapSelectedAccount(account.id)}
+                  disabled={
+                    !selectedProviderId || mapAccount.isPending || Boolean(currentCandidate)
+                  }
+                >
+                  {currentCandidate ? 'Mapped' : mapAccount.isPending ? 'Mapping…' : 'Map account'}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="mt-5 flex justify-end gap-2">
+        <Button type="button" variant="ghost" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+    </Dialog>
   );
 }
 
@@ -278,7 +858,7 @@ function AccountDialog({ open, onClose }: { open: boolean; onClose: () => void }
               <option value="bank">Bank</option>
               <option value="cash">Cash</option>
               <option value="investment">Investment</option>
-              <option value="credit">Credit card</option>
+              <option value="credit_card">Credit card</option>
               <option value="loan">Loan</option>
             </Select>
           </div>
@@ -312,10 +892,28 @@ function AccountDialog({ open, onClose }: { open: boolean; onClose: () => void }
 
 function BalanceDialog({ accountId, onClose }: { accountId: string | null; onClose: () => void }) {
   const { user } = useAuth();
+  const financialToday = dateInputValueInTimezone(user?.timezone ?? 'Asia/Kolkata');
+  const { scrollTo } = useDashboardUi();
   const queryClient = useQueryClient();
   const { notify } = useToast();
   const [amount, setAmount] = useState('');
-  const [asOf, setAsOf] = useState(todayValue());
+  const [asOf, setAsOf] = useState(financialToday);
+  const position = useQuery({
+    queryKey: ['accountPosition', user?.id ?? '', accountId ?? ''],
+    queryFn: () => api.accountPosition(user!.id, accountId!),
+    enabled: Boolean(user && accountId),
+    staleTime: 5 * 60 * 1000,
+  });
+  const providerObserved =
+    position.data?.observed_source === 'connector' &&
+    position.data.coverage_status === 'fresh' &&
+    position.data.coverage_complete === true;
+  const observedProof =
+    position.data?.observed_as_of && position.data.observed_balance != null
+      ? providerObserved
+        ? `Provider observed ${formatCurrency(position.data.observed_balance, position.data.currency)} on ${position.data.observed_as_of}${position.data.observed_at ? ` · retrieved ${formatTime(position.data.observed_at)}` : ''}; this position is inside its refresh window.`
+        : `Observed ${formatCurrency(position.data.observed_balance, position.data.currency)} on ${position.data.observed_as_of}; settled movement is ${formatCurrency(position.data.settled_movement_since_observation ?? 0, position.data.currency)} through ${position.data.estimated_as_of ?? 'today'}.`
+      : 'Record a verified observation before PFIS estimates the current position.';
   const save = useMutation({
     mutationFn: () => {
       if (!user || !accountId) throw new Error('Choose an account');
@@ -325,6 +923,13 @@ function BalanceDialog({ accountId, onClose }: { accountId: string | null; onClo
       if (user) {
         queryClient.invalidateQueries({ queryKey: queryKeys.accounts(user.id) });
         queryClient.invalidateQueries({ queryKey: queryKeys.netWorth(user.id) });
+        queryClient.invalidateQueries({
+          queryKey: ['accountPosition', user.id, accountId ?? ''],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ['balanceForecast', user.id, accountId ?? ''],
+        });
+        queryClient.invalidateQueries({ queryKey: ['cardDueRunway', user.id] });
       }
       notify('Balance snapshot saved', 'success');
       setAmount('');
@@ -333,8 +938,187 @@ function BalanceDialog({ accountId, onClose }: { accountId: string | null; onClo
     onError: (error) => notify((error as Error).message, 'error'),
   });
   return (
-    <Dialog open={!!accountId} onClose={onClose} title="Record balance">
+    <Dialog open={!!accountId} onClose={onClose} title="Account position">
       <div className="grid gap-3">
+        {position.data ? (
+          <section className="rounded-lg bg-muted/55 p-4" aria-labelledby="position-conclusion">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <div>
+                <p className="text-xs font-bold text-muted-foreground">LATEST VERIFIED POSITION</p>
+                <h3 id="position-conclusion" className="money-value mt-1 text-xl font-extrabold">
+                  {position.data.verified_balance == null
+                    ? 'No verified balance'
+                    : formatCurrency(position.data.verified_balance, position.data.currency)}
+                </h3>
+              </div>
+              <Badge
+                variant={
+                  position.data.reconciliation_status === 'reconciled'
+                    ? 'success'
+                    : position.data.reconciliation_status === 'needs_review'
+                      ? 'warning'
+                      : 'outline'
+                }
+              >
+                {position.data.reconciliation_status.replace('_', ' ')}
+              </Badge>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              {position.data.balance_as_of
+                ? providerObserved
+                  ? `Provider-observed ${position.data.balance_as_of} from ${position.data.balance_source}; freshness is ${position.data.coverage_status}.`
+                  : `Observed ${position.data.balance_as_of} from ${position.data.balance_source}. This is not a live bank balance.`
+                : 'Add a verified snapshot; PFIS will not derive a live balance from partial alerts.'}
+            </p>
+            <div
+              className="mt-4 border-t border-border/70 pt-4"
+              aria-live="polite"
+              aria-label="Estimated current account position"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <p className="text-xs font-bold text-muted-foreground">
+                    {providerObserved
+                      ? 'CURRENT POSITION · PROVIDER OBSERVED'
+                      : 'CURRENT POSITION · ESTIMATE'}
+                  </p>
+                  <p className="mt-1 text-sm font-extrabold">
+                    {position.data.position_status === 'needs_review'
+                      ? 'Estimate needs review'
+                      : position.data.position_status === 'estimated'
+                        ? 'Settled activity rolled forward'
+                        : position.data.position_status === 'observed'
+                          ? 'Observed anchor'
+                          : 'Needs a verified anchor'}
+                  </p>
+                </div>
+                <p className="money-value text-xl font-extrabold">
+                  {position.data.estimated_balance == null
+                    ? 'Needs anchor'
+                    : formatCurrency(position.data.estimated_balance, position.data.currency)}
+                </p>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                {observedProof}
+                {(position.data.pending_increase ?? 0) > 0 ||
+                (position.data.pending_decrease ?? 0) > 0
+                  ? ` Pending impact of ${formatCurrency((position.data.pending_increase ?? 0) + (position.data.pending_decrease ?? 0), position.data.currency)} is excluded from the estimate.`
+                  : ''}
+                {position.data.coverage_status === 'overdue'
+                  ? ' Provider refresh is overdue; PFIS keeps this amount reviewable rather than calling it live.'
+                  : position.data.coverage_complete === false
+                    ? ' Provider history is incomplete; PFIS keeps this amount reviewable rather than treating it as safe current truth.'
+                    : ''}
+              </p>
+            </div>
+            <dl className="mt-4 grid grid-cols-2 gap-3">
+              <div>
+                <dt className="text-xs text-muted-foreground">Known inflows</dt>
+                <dd className="money-value mt-1 text-sm font-extrabold text-success">
+                  {formatCurrency(position.data.inflows, position.data.currency)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Known outflows</dt>
+                <dd className="money-value mt-1 text-sm font-extrabold">
+                  {formatCurrency(position.data.outflows, position.data.currency)}
+                </dd>
+              </div>
+            </dl>
+            {position.data.opening_balance != null &&
+            position.data.known_movement != null &&
+            position.data.verified_balance != null ? (
+              <div className="mt-4 border-t border-border/70 pt-4">
+                <p className="text-xs font-bold text-muted-foreground">
+                  SNAPSHOT-TO-SNAPSHOT PROOF
+                </p>
+                <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <dt className="text-muted-foreground">
+                      Opening · {position.data.opening_as_of}
+                    </dt>
+                    <dd className="money-value mt-1 font-extrabold">
+                      {formatCurrency(position.data.opening_balance, position.data.currency)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Known movement</dt>
+                    <dd className="money-value mt-1 font-extrabold">
+                      {formatCurrency(position.data.known_movement, position.data.currency)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Closing</dt>
+                    <dd className="money-value mt-1 font-extrabold">
+                      {formatCurrency(position.data.verified_balance, position.data.currency)}
+                    </dd>
+                  </div>
+                </dl>
+                {position.data.unexplained_amount ? (
+                  <p className="mt-3 text-xs font-bold text-warning">
+                    {formatCurrency(
+                      Math.abs(position.data.unexplained_amount),
+                      position.data.currency,
+                    )}{' '}
+                    remains unexplained.
+                  </p>
+                ) : (
+                  <p className="mt-3 text-xs font-bold text-success">
+                    Opening balance plus known movement equals the closing snapshot.
+                  </p>
+                )}
+              </div>
+            ) : null}
+            {Object.keys(position.data.rail_breakdown).length ? (
+              <div className="mt-4 border-t border-border/70 pt-4">
+                <p className="text-xs font-bold text-muted-foreground">OUTFLOW EVIDENCE BY RAIL</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {Object.entries(position.data.rail_breakdown).map(([rail, value]) => (
+                    <Badge key={rail} variant="outline">
+                      {rail.replace('_', ' ')} · {formatCurrency(value, position.data.currency)}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {position.data.review_count ? (
+              <div className="mt-4 border-t border-border/70 pt-4">
+                <p className="text-xs font-bold text-warning">
+                  {position.data.review_count} focused reconciliation item
+                  {position.data.review_count === 1 ? '' : 's'} need review.
+                </p>
+                <div className="mt-2 grid gap-2">
+                  {position.data.reconciliation_items.map((item) => (
+                    <details key={item.id} className="rounded-lg border border-border/70 p-3">
+                      <summary className="focus-ring cursor-pointer rounded text-xs font-bold">
+                        {item.title}
+                        {item.amount != null
+                          ? ` · ${formatCurrency(item.amount, position.data.currency)}`
+                          : ''}
+                      </summary>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        {item.description}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.basis}</p>
+                    </details>
+                  ))}
+                </div>
+                <Button
+                  className="mt-3"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onClose();
+                    scrollTo('review');
+                  }}
+                >
+                  Open Activity review
+                </Button>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+        <h3 className="mt-1 font-extrabold">Record a verified balance</h3>
         <div className="grid gap-1">
           <Label htmlFor="balance-amount">Balance amount</Label>
           <Input
@@ -356,7 +1140,7 @@ function BalanceDialog({ accountId, onClose }: { accountId: string | null; onClo
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          Balance history is append-only. Each account can have one immutable snapshot per date.
+          Balance history is append-only. Each observation keeps its source and as-of date.
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>

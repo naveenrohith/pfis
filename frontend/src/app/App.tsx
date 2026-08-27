@@ -10,8 +10,13 @@ import { DashboardLayout } from './DashboardLayout';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: (failureCount, error) => {
+        const status = (error as { status?: number }).status;
+        if (status && status >= 400 && status < 500) return false;
+        return failureCount < 3;
+      },
       refetchOnWindowFocus: false,
+      refetchOnReconnect: 'always',
       staleTime: 30_000,
     },
   },
