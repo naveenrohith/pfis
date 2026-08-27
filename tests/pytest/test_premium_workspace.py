@@ -1,6 +1,6 @@
 """Regression coverage for premium workspace APIs."""
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from app.models.workspace import DashboardPreference
@@ -61,7 +61,7 @@ async def test_transaction_filters_and_deterministic_guidance(client):
         f"/api/guidance/brief?user_id={user['id']}&period=daily&as_of={today.isoformat()}"
     )
     assert brief.status_code == 200
-    assert brief.json()["ruleset_version"] == "pfis-guidance-2"
+    assert brief.json()["ruleset_version"] == "pfis-guidance-3"
 
     supported = await client.post(
         f"/api/guidance/query?user_id={user['id']}",
@@ -74,6 +74,10 @@ async def test_transaction_filters_and_deterministic_guidance(client):
     assert supported.status_code == 200
     assert supported.json()["supported"] is True
     assert supported.json()["intent"] == "monthly_spend"
+    assert supported.json()["plan"]
+    assert supported.json()["evidence"][0]["source_type"] == "transactions"
+    assert supported.json()["temporal_scope"] == "selected_calendar_month"
+    assert supported.json()["uncertainty"]
 
     unsupported = await client.post(
         f"/api/guidance/query?user_id={user['id']}",
@@ -82,6 +86,120 @@ async def test_transaction_filters_and_deterministic_guidance(client):
     assert unsupported.status_code == 200
     assert unsupported.json()["supported"] is False
     assert unsupported.json()["supported_examples"]
+    assert "No financial read model was queried" in unsupported.json()["uncertainty"][0]
+
+
+@pytest.mark.asyncio
+async def test_guidance_current_position_uses_balance_read_model(client):
+    user = await create_user(client, "guidance-position")
+    today = date.today()
+    account = await client.post(
+        f"/api/accounts?user_id={user['id']}",
+        json={
+            "institution_name": "Guidance Bank",
+            "account_type": "bank",
+            "balance_kind": "asset",
+            "masked_number": "****7711",
+            "currency": "INR",
+        },
+    )
+    account.raise_for_status()
+    balance = await client.post(
+        f"/api/accounts/{account.json()['id']}/balances?user_id={user['id']}",
+        json={"amount": 10000, "as_of": today.isoformat(), "source": "manual"},
+    )
+    balance.raise_for_status()
+
+    current = await client.post(
+        f"/api/guidance/query?user_id={user['id']}",
+        json={
+            "query": "What is my current bank balance?",
+            "month": today.month,
+            "year": today.year,
+        },
+    )
+    current.raise_for_status()
+    assert current.json()["intent"] == "bank_position"
+    assert "10,000" in current.json()["answer"]
+    assert "not provider-live" in current.json()["answer"]
+
+    plan = await client.put(
+        f"/api/cash-plan?user_id={user['id']}",
+        json={
+            "primary_financial_account_id": account.json()["id"],
+            "next_income_date": (today + timedelta(days=5)).isoformat(),
+        },
+    )
+    plan.raise_for_status()
+    safe = await client.post(
+        f"/api/guidance/query?user_id={user['id']}",
+        json={
+            "query": "Is it safe to spend before my next income?",
+            "month": today.month,
+            "year": today.year,
+        },
+    )
+    safe.raise_for_status()
+    assert safe.json()["intent"] == "safe_to_spend"
+    assert safe.json()["metrics"][1]["value"] == "₹10,000"
+
+
+@pytest.mark.asyncio
+async def test_guidance_card_upcoming_state_uses_timeline_read_model(client):
+    user = await create_user(client, "guidance-card-upcoming")
+    today = date.today()
+    card = await client.post(
+        f"/api/accounts?user_id={user['id']}",
+        json={
+            "institution_name": "Guidance Card Bank",
+            "account_type": "credit_card",
+            "balance_kind": "liability",
+            "masked_number": "****8181",
+            "currency": "INR",
+        },
+    )
+    card.raise_for_status()
+    due_date = today + timedelta(days=5)
+    statement_date = today - timedelta(days=5)
+    imported = await client.post(
+        f"/api/statements/hdfc/text?user_id={user['id']}",
+        json={
+            "financial_account_id": card.json()["id"],
+            "document_fingerprint": "g" * 64,
+            "statement_text": f"""
+            HDFC BANK CREDIT CARD STATEMENT
+            STATEMENT DATE: {statement_date:%d/%m/%Y}
+            STATEMENT PERIOD: {(statement_date - timedelta(days=30)):%d/%m/%Y} TO {statement_date:%d/%m/%Y}
+            TOTAL AMOUNT DUE: 4,000.00
+            MINIMUM AMOUNT DUE: 400.00
+            PAYMENT DUE DATE: {due_date:%d/%m/%Y}
+            TOTAL CREDIT LIMIT: 100,000.00
+            AVAILABLE CREDIT LIMIT: 96,000.00
+            """,
+        },
+    )
+    imported.raise_for_status()
+
+    response = await client.post(
+        f"/api/guidance/query?user_id={user['id']}",
+        json={
+            "query": "What happens next with my card?",
+            "month": today.month,
+            "year": today.year,
+        },
+    )
+    response.raise_for_status()
+    body = response.json()
+
+    assert body["supported"] is True
+    assert body["intent"] == "card_upcoming_state"
+    assert body["temporal_scope"] == "current_card_cycle"
+    assert body["metrics"][0]["label"] == "Upcoming card state"
+    assert body["metrics"][1]["label"] == "Next dated signal"
+    assert body["metrics"][2]["value"] == due_date.isoformat()
+    assert body["evidence"][0]["source_type"] == "credit_card_statements"
+    assert body["evidence"][0]["cutoff"] == today.isoformat()
+    assert "not submitting a payment" in body["answer"]
 
 
 @pytest.mark.asyncio

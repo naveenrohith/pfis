@@ -13,10 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.category import Category
 from app.models.sync import Budget
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import Transaction
 from app.models.user import User
 from app.schemas.budget import BudgetCreate, BudgetResponse, BudgetTracker, BudgetUpdate
 from app.security import ensure_user_owns_resource, get_current_user_optional, resolve_user_scope
+from app.services.transaction_aggregates import (
+    spend_effect_expression,
+    spend_event_predicate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -163,16 +167,16 @@ async def track_budgets(
     spend_result = await db.execute(
         select(
             Transaction.category_id,
-            func.coalesce(func.sum(Transaction.amount), 0).label("total"),
+            func.coalesce(func.sum(spend_effect_expression()), 0).label("total"),
         )
         .where(
             Transaction.user_id == user_id,
-            Transaction.transaction_type == TransactionType.DEBIT,
-            Transaction.is_transfer.is_(False),
+            spend_event_predicate(),
             extract("month", Transaction.transaction_date) == month,
             extract("year", Transaction.transaction_date) == year,
         )
         .group_by(Transaction.category_id)
+        .having(func.sum(spend_effect_expression()) > 0)
     )
     spend_map = {row.category_id: float(row.total) for row in spend_result.all()}
 

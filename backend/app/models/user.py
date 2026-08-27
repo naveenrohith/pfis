@@ -6,21 +6,44 @@ Stores registered users of the PFIS system.
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.utils.financial_time import DEFAULT_USER_TIMEZONE
 
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            "raw_email_retention_days IS NULL OR " "raw_email_retention_days IN (30, 90, 180, 365)",
+            name="ck_users_raw_email_retention_days",
+        ),
+        Index("ix_users_deleted_at", "deleted_at"),
+        Index("ix_users_deletion_started_at", "deletion_started_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="INR")
+    timezone: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default=DEFAULT_USER_TIMEZONE,
+    )
+    raw_email_retention_days: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=365,
+    )
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deletion_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
@@ -32,6 +55,12 @@ class User(Base):
     budgets = relationship("Budget", back_populates="user", lazy="select")
     sync_runs = relationship("SyncRun", back_populates="user", lazy="select")
     jobs = relationship("BackgroundJob", back_populates="user", lazy="select")
+    balance_provider_connections = relationship(
+        "BalanceProviderConnection", back_populates="user", lazy="select"
+    )
+    balance_provider_account_mappings = relationship(
+        "BalanceProviderAccountMapping", back_populates="user", lazy="select"
+    )
     goals = relationship("Goal", back_populates="user", lazy="select")
     pipeline_events = relationship("PipelineEvent", back_populates="user", lazy="select")
     financial_accounts = relationship("FinancialAccount", back_populates="user", lazy="select")

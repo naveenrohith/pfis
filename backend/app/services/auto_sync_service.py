@@ -22,12 +22,25 @@ logger = logging.getLogger(__name__)
 
 _scheduler_task: asyncio.Task | None = None
 _running_account_ids: set[str] = set()
+_account_tasks: dict[str, asyncio.Task] = {}
 _poll_interval_seconds = 30
 _error_cooldown_seconds = 900
 
 
 def get_running_auto_sync_count() -> int:
     return len(_running_account_ids)
+
+
+async def stop_auto_sync_for_account(
+    gmail_account_id: str,
+) -> bool:
+    """Cancel one live auto-sync before connector/account deletion."""
+    task = _account_tasks.get(gmail_account_id)
+    if task is None or task.done() or task is asyncio.current_task():
+        return False
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    return True
 
 
 def start_auto_sync_scheduler() -> None:
@@ -67,7 +80,15 @@ async def run_due_auto_syncs_once() -> int:
 
 
 def _schedule_account_sync(gmail_account_id: str) -> asyncio.Task:
-    return asyncio.create_task(_run_account_sync(gmail_account_id))
+    task = asyncio.create_task(_run_account_sync(gmail_account_id))
+    _account_tasks[gmail_account_id] = task
+
+    def cleanup(completed: asyncio.Task) -> None:
+        if _account_tasks.get(gmail_account_id) is completed:
+            _account_tasks.pop(gmail_account_id, None)
+
+    task.add_done_callback(cleanup)
+    return task
 
 
 def _is_due(account: GmailAccount) -> bool:

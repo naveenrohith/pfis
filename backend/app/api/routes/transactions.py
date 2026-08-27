@@ -11,16 +11,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import User
+from app.schemas.account import TransferResponse
 from app.schemas.transaction import (
+    AtmCashLinkRequest,
     BulkTransactionUpdate,
     BulkTransactionUpdateResponse,
     TransactionCreate,
     TransactionResponse,
+    TransactionSplitReplace,
+    TransactionSplitResponse,
     TransactionSummary,
     TransactionUpdate,
+    TransferMatchCandidate,
+    TransferMatchLinkRequest,
 )
 from app.security import ensure_user_owns_resource, get_current_user_optional, resolve_user_scope
 from app.services.transaction_service import TransactionService
+from app.services.transaction_transfer_service import TransactionTransferService
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 
@@ -43,6 +50,8 @@ async def create_transaction(
             ),
             "merchant_rule_id": None,
             "merchant_resolver_version": 1,
+            "source_kind": "manual",
+            "source_identifier": None,
         }
     )
     try:
@@ -75,6 +84,7 @@ async def list_transactions(
     sort_direction: Literal["asc", "desc"] | None = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    include_ignored: bool = False,
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
@@ -108,6 +118,7 @@ async def list_transactions(
         direction=effective_direction,
         limit=limit,
         offset=offset,
+        include_ignored=include_ignored,
     )
     total_count = await service.get_transaction_count(
         user_id=user_id,
@@ -122,6 +133,7 @@ async def list_transactions(
         date_to=date_to,
         amount_min=amount_min,
         amount_max=amount_max,
+        include_ignored=include_ignored,
     )
 
     from app.schemas.transaction import TransactionResponse as TR
@@ -146,6 +158,51 @@ async def get_monthly_summary(
     user_id = resolve_user_scope(user_id, current_user)
     summary = await service.get_monthly_summary(user_id, month, year)
     return summary
+
+
+@router.get("/transfer-match-candidates", response_model=list[TransferMatchCandidate])
+async def list_transfer_match_candidates(
+    user_id: str,
+    account_id: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=200),
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """List conservative, non-mutating candidates for paired ledger legs."""
+
+    user_id = resolve_user_scope(user_id, current_user)
+    try:
+        return await TransactionTransferService(db).list_candidates(
+            user_id,
+            account_id=account_id,
+            limit=limit,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{txn_id}/transfer-link", response_model=TransferResponse)
+async def link_transfer_match(
+    txn_id: str,
+    data: TransferMatchLinkRequest,
+    user_id: str,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm one proposed pair; no transfer is initiated externally."""
+
+    user_id = resolve_user_scope(user_id, current_user)
+    try:
+        return await TransactionTransferService(db).link_pair(
+            user_id,
+            txn_id,
+            data.counterparty_transaction_id,
+            kind=data.kind,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.patch("/bulk-update", response_model=BulkTransactionUpdateResponse)
@@ -175,6 +232,54 @@ async def get_transaction(
         raise HTTPException(status_code=404, detail="Transaction not found")
     ensure_user_owns_resource(txn.user_id, current_user)
     return txn
+
+
+@router.get("/{txn_id}/splits", response_model=list[TransactionSplitResponse])
+async def list_transaction_splits(
+    txn_id: str,
+    user_id: str,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = resolve_user_scope(user_id, current_user)
+    try:
+        return await TransactionService(db).list_splits(user_id, txn_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/{txn_id}/splits", response_model=list[TransactionSplitResponse])
+async def replace_transaction_splits(
+    txn_id: str,
+    data: TransactionSplitReplace,
+    user_id: str,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = resolve_user_scope(user_id, current_user)
+    try:
+        return await TransactionService(db).replace_splits(user_id, txn_id, data)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/{txn_id}/atm-cash-link", response_model=TransferResponse)
+async def link_atm_withdrawal_to_cash(
+    txn_id: str,
+    data: AtmCashLinkRequest,
+    user_id: str,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = resolve_user_scope(user_id, current_user)
+    try:
+        return await TransactionService(db).link_atm_withdrawal_to_cash(user_id, txn_id, data)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.patch("/{txn_id}", response_model=TransactionResponse)

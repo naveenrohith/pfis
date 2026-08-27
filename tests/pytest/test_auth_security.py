@@ -4,13 +4,16 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 
 from app.api.routes import auth as auth_routes
 from app.api.routes import gmail as gmail_routes
 from app.models.auth import AuthSession
-from app.models.email import GmailAccount
+from app.models.email import GmailAccount, RawEmail
+from app.models.sync import ConnectorAuditEvent
+from app.security import encrypt_secret
 from app.services.gmail import oauth_service
 from sqlalchemy import select
 
@@ -55,6 +58,37 @@ def test_gmail_consent_can_include_existing_google_grants(monkeypatch):
 
     assert captured["include_granted_scopes"] == "true"
     assert captured["access_type"] == "offline"
+
+
+async def test_google_token_revocation_uses_provider_endpoint(monkeypatch):
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, *, data, headers):
+            captured.update({"url": url, "data": data, "headers": headers})
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        oauth_service.httpx,
+        "AsyncClient",
+        lambda *, timeout: FakeClient(),
+    )
+
+    assert await oauth_service.revoke_google_token("provider-token") is True
+    assert captured == {
+        "url": oauth_service.GOOGLE_TOKEN_REVOCATION_URL,
+        "data": {"token": "provider-token"},
+        "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+    }
 
 
 async def test_demo_seed_user_can_login_with_configured_password(client):
@@ -266,6 +300,216 @@ async def test_gmail_consent_is_separate_and_stores_verified_encrypted_tokens(
         )
         assert "raw-access-token" not in account.access_token_ref
         assert "raw-refresh-token" not in account.refresh_token_ref
+
+
+async def test_gmail_reconnect_replaces_grant_and_resumes_auto_sync(
+    client,
+    monkeypatch,
+    test_session_factory,
+):
+    demo = await client.post("/api/auth/demo")
+    demo.raise_for_status()
+    user = demo.json()["user"]
+    state = "gmail-reconnect-state"
+
+    async with test_session_factory() as db:
+        db.add(
+            GmailAccount(
+                user_id=user["id"],
+                google_account_id="gmail-subject-1",
+                access_token_ref="old-access",
+                refresh_token_ref="old-refresh",
+                auto_sync_enabled=True,
+                auto_sync_status="paused",
+                auto_sync_error="Gmail authorization is invalid or revoked",
+            )
+        )
+        await db.commit()
+
+    monkeypatch.setattr(
+        gmail_routes,
+        "get_authorization_url",
+        lambda redirect_uri=None, scopes=None, offline=True: (
+            "https://accounts.google.test/gmail",
+            state,
+            "gmail-verifier",
+            "gmail-nonce",
+        ),
+    )
+    monkeypatch.setattr(
+        gmail_routes,
+        "exchange_code_for_tokens",
+        lambda code, redirect_uri=None, scopes=None, code_verifier=None: {
+            "access_token": "new-access-token",
+            "refresh_token": "new-refresh-token",
+            "id_token": "gmail-id-token",
+            "expiry": "2026-07-28T18:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        gmail_routes,
+        "verify_google_identity",
+        lambda token_data, expected_nonce=None: {
+            "google_account_id": "gmail-subject-1",
+            "email": "gmailreconnect@example.com",
+            "name": "Gmail Reconnect",
+        },
+    )
+
+    connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={user['id']}",
+        follow_redirects=False,
+    )
+    assert connect.status_code == 307
+
+    callback = await client.get(
+        f"/api/auth/gmail/callback?code=gmail-code&state={state}",
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/dashboard?gmail_auth=success"
+
+    async with test_session_factory() as db:
+        account = await db.scalar(select(GmailAccount).where(GmailAccount.user_id == user["id"]))
+
+    assert account is not None
+    assert account.auto_sync_enabled is True
+    assert account.auto_sync_status == "idle"
+    assert account.auto_sync_error is None
+    assert account.access_token_ref.startswith("enc:")
+    assert account.refresh_token_ref.startswith("enc:")
+    assert "new-access-token" not in account.access_token_ref
+    assert "new-refresh-token" not in account.refresh_token_ref
+
+
+async def test_gmail_disconnect_revokes_grant_and_retains_imported_evidence(
+    client,
+    monkeypatch,
+    test_session_factory,
+):
+    demo = await client.post("/api/auth/demo")
+    demo.raise_for_status()
+    user = demo.json()["user"]
+    captured: dict[str, str] = {}
+
+    async with test_session_factory() as db:
+        db.add(
+            GmailAccount(
+                user_id=user["id"],
+                google_account_id="gmail-disconnect-subject",
+                access_token_ref=encrypt_secret("disconnect-access-token"),
+                refresh_token_ref=encrypt_secret("disconnect-refresh-token"),
+            )
+        )
+        db.add(
+            RawEmail(
+                user_id=user["id"],
+                gmail_message_id="disconnect-retained-email",
+                subject="Retained evidence",
+                body="Imported content remains after connector removal",
+            )
+        )
+        await db.commit()
+
+    async def fake_revoke(token: str) -> bool:
+        captured["token"] = token
+        async with test_session_factory() as db:
+            disconnecting = await db.scalar(
+                select(GmailAccount).where(GmailAccount.user_id == user["id"])
+            )
+        assert disconnecting is not None
+        assert disconnecting.auto_sync_enabled is False
+        assert disconnecting.auto_sync_status == "disconnecting"
+        csrf_headers = {"X-CSRF-Token": client.cookies.get("pfis_csrf")}
+        settings_response = await client.patch(
+            f"/api/gmail/auto-sync?user_id={user['id']}",
+            headers=csrf_headers,
+            json={"enabled": True},
+        )
+        sync_response = await client.post(
+            f"/api/gmail/sync?user_id={user['id']}",
+            headers=csrf_headers,
+        )
+        assert settings_response.status_code == 409
+        assert sync_response.status_code == 409
+        return True
+
+    monkeypatch.setattr(gmail_routes, "revoke_google_token", fake_revoke)
+    response = await client.delete(
+        f"/api/gmail/connection?user_id={user['id']}",
+        headers={"X-CSRF-Token": client.cookies.get("pfis_csrf")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "disconnected",
+        "provider_revocation": "revoked",
+        "retained_raw_email_count": 1,
+        "derived_records_retained": True,
+    }
+    assert captured == {"token": "disconnect-refresh-token"}
+
+    async with test_session_factory() as db:
+        account = await db.scalar(select(GmailAccount).where(GmailAccount.user_id == user["id"]))
+        retained_email = await db.scalar(select(RawEmail).where(RawEmail.user_id == user["id"]))
+        audit = await db.scalar(
+            select(ConnectorAuditEvent)
+            .where(
+                ConnectorAuditEvent.user_id == user["id"],
+                ConnectorAuditEvent.event_type == "disconnect",
+            )
+            .order_by(ConnectorAuditEvent.created_at.desc())
+        )
+
+    assert account is None
+    assert retained_email is not None
+    assert audit is not None
+    assert json.loads(audit.payload_json) == {
+        "provider_revocation": "revoked",
+        "retained_raw_email_count": 1,
+        "derived_records_retained": True,
+    }
+
+
+async def test_gmail_disconnect_removes_local_grant_when_provider_is_unavailable(
+    client,
+    monkeypatch,
+    test_session_factory,
+    caplog,
+):
+    demo = await client.post("/api/auth/demo")
+    demo.raise_for_status()
+    user = demo.json()["user"]
+    secret = "provider failure containing private-token-material"
+
+    async with test_session_factory() as db:
+        db.add(
+            GmailAccount(
+                user_id=user["id"],
+                google_account_id="gmail-failed-revocation-subject",
+                access_token_ref=encrypt_secret("failed-revocation-access"),
+                refresh_token_ref=encrypt_secret("failed-revocation-refresh"),
+            )
+        )
+        await db.commit()
+
+    async def fail_revoke(_token: str) -> bool:
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(gmail_routes, "revoke_google_token", fail_revoke)
+    with caplog.at_level(logging.WARNING, logger="app.api.routes.gmail"):
+        response = await client.delete(
+            f"/api/gmail/connection?user_id={user['id']}",
+            headers={"X-CSRF-Token": client.cookies.get("pfis_csrf")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["provider_revocation"] == "unconfirmed"
+    assert secret not in caplog.text
+    assert "exception=RuntimeError" in caplog.text
+    async with test_session_factory() as db:
+        account = await db.scalar(select(GmailAccount).where(GmailAccount.user_id == user["id"]))
+    assert account is None
 
 
 async def test_gmail_callback_failure_does_not_log_provider_secret(client, monkeypatch, caplog):
