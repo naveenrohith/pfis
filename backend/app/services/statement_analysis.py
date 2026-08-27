@@ -40,8 +40,7 @@ _DATE_RE = re.compile(
     r")(?!\w)"
 )
 _MONEY_RE = re.compile(
-    r"(?<!\w)(?:₹|INR|RS\.?\s*)?"
-    r"\(?-?[\d,]+(?:\.\d{1,2})?\)?(?!\w)",
+    r"(?<!\w)(?:₹|INR|RS\.?\s*)?" r"\(?-?[\d,]+(?:\.\d{1,2})?\)?(?!\w)",
     re.IGNORECASE,
 )
 _CARD_EVENT_CREDIT = {"credit", "refund"}
@@ -366,9 +365,7 @@ def _parse_card_row(raw_line: str) -> dict[str, Any] | None:
         "reason_codes": (
             ("explicit_credit_marker",)
             if direction == "credit"
-            else ("explicit_debit_marker",)
-            if direction == "debit"
-            else ("direction_not_proven",)
+            else ("explicit_debit_marker",) if direction == "debit" else ("direction_not_proven",)
         ),
     }
 

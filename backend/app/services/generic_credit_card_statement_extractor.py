@@ -75,9 +75,7 @@ def extract_generic_credit_card_statement(text: str) -> dict[str, Any]:
         if value is None
     ]
     if missing:
-        raise ValueError(
-            "Generic credit-card statement is missing " + ", ".join(missing)
-        )
+        raise ValueError("Generic credit-card statement is missing " + ", ".join(missing))
     assert period is not None
     assert statement_date is not None
     assert total_due is not None
@@ -123,9 +121,7 @@ def extract_generic_credit_card_statement(text: str) -> dict[str, Any]:
         amount = debit if debit is not None else credit
         assert amount is not None
         balance_after = _money(cells[header.balance_index])
-        expected_balance = previous_balance + (debit or Decimal("0")) - (
-            credit or Decimal("0")
-        )
+        expected_balance = previous_balance + (debit or Decimal("0")) - (credit or Decimal("0"))
         if balance_after != expected_balance:
             raise ValueError("Generic credit-card running balance does not reconcile")
         transaction_type, card_event = _classify_card_event(
@@ -157,9 +153,7 @@ def extract_generic_credit_card_statement(text: str) -> dict[str, Any]:
     if not rows:
         raise ValueError("Generic credit-card statement contains no transaction rows")
     if previous_balance != total_due:
-        raise ValueError(
-            "Generic credit-card closing balance does not equal total amount due"
-        )
+        raise ValueError("Generic credit-card closing balance does not equal total amount due")
     return {
         "statement_date": statement_date,
         "period_start": period[0],
@@ -245,9 +239,7 @@ def _find_header(text: str) -> tuple[str | None, _Header | None]:
     return None, None
 
 
-def _classify_card_event(
-    description: str, *, is_credit: bool
-) -> tuple[str, str]:
+def _classify_card_event(description: str, *, is_credit: bool) -> tuple[str, str]:
     upper = " ".join(description.upper().split())
     if is_credit:
         if re.search(r"\b(?:REFUND|RETURNED|REVERSAL|REVERSED)\b", upper):
@@ -268,8 +260,7 @@ def _classify_card_event(
 
 def _card_last4(text: str) -> str | None:
     match = re.search(
-        r"(?:CREDIT\s+CARD|CARD)\s+(?:NO\.?|NUMBER)\s*[:\-]?\s*"
-        r"(?:(?:X|\*)[\s-]*){2,}(\d{4})\b",
+        r"(?:CREDIT\s+CARD|CARD)\s+(?:NO\.?|NUMBER)\s*[:\-]?\s*" r"(?:(?:X|\*)[\s-]*){2,}(\d{4})\b",
         text,
         re.IGNORECASE,
     )
@@ -308,8 +299,7 @@ def _amount_after(
     exclude_label: str | None = None,
 ) -> Decimal | None:
     amount_pattern = (
-        rf"{label}\s*[:\-]?\s*((?:(?:INR|USD|EUR|GBP|RS\.?)\s*)?"
-        r"\(?-?[\d,]+(?:\.\d{1,2})?\)?)"
+        rf"{label}\s*[:\-]?\s*((?:(?:INR|USD|EUR|GBP|RS\.?)\s*)?" r"\(?-?[\d,]+(?:\.\d{1,2})?\)?)"
     )
     for raw_line in text.splitlines():
         if exclude_label and re.search(exclude_label, raw_line, re.IGNORECASE):

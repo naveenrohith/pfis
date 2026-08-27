@@ -216,7 +216,8 @@ def build_card_portfolio_upcoming(
         next_event=ordered_events[0] if ordered_events else None,
         events=ordered_events[:30],
         cards_needing_review=sum(
-            item.overview.balance_status in {"needs_review", "stale", "incomplete", "needs_observation"}
+            item.overview.balance_status
+            in {"needs_review", "stale", "incomplete", "needs_observation"}
             for item in cards
         ),
         confidence=confidence,

@@ -1189,9 +1189,7 @@ async def test_statement_analysis_review_persists_redacted_generic_evidence_with
         "statement_text": statement_text,
     }
 
-    response = await client.post(
-        f"/api/statements/review/text?user_id={user['id']}", json=payload
-    )
+    response = await client.post(f"/api/statements/review/text?user_id={user['id']}", json=payload)
     response.raise_for_status()
     body = response.json()
     assert body["status"] == "pending_review"
@@ -1201,27 +1199,19 @@ async def test_statement_analysis_review_persists_redacted_generic_evidence_with
     assert "XX0011" not in response.text
     assert "statement_text" not in response.text
 
-    repeated = await client.post(
-        f"/api/statements/review/text?user_id={user['id']}", json=payload
-    )
+    repeated = await client.post(f"/api/statements/review/text?user_id={user['id']}", json=payload)
     repeated.raise_for_status()
     assert repeated.json()["id"] == body["id"]
 
-    listed = await client.get(
-        f"/api/statements/review?user_id={user['id']}&status=pending_review"
-    )
+    listed = await client.get(f"/api/statements/review?user_id={user['id']}&status=pending_review")
     listed.raise_for_status()
     assert [item["id"] for item in listed.json()] == [body["id"]]
 
-    detail = await client.get(
-        f"/api/statements/review/{body['id']}?user_id={user['id']}"
-    )
+    detail = await client.get(f"/api/statements/review/{body['id']}?user_id={user['id']}")
     detail.raise_for_status()
     assert detail.json()["document_fingerprint"] == "r" * 64
 
-    forbidden = await client.get(
-        f"/api/statements/review/{body['id']}?user_id={other['id']}"
-    )
+    forbidden = await client.get(f"/api/statements/review/{body['id']}?user_id={other['id']}")
     assert forbidden.status_code == 404
 
     async with test_session_factory() as db:

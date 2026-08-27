@@ -222,7 +222,9 @@ class CardPortfolioPaymentPlanService:
                 scenario_rows.append((row, scenario))
         scenario_values = [scenario for _, scenario in scenario_rows]
         target_total = self._sum_values(scenario.payment_amount for scenario in scenario_values)
-        planned_total = self._sum_values(scenario.planned_payment_applied for scenario in scenario_values)
+        planned_total = self._sum_values(
+            scenario.planned_payment_applied for scenario in scenario_values
+        )
         additional_total = self._sum_values(
             scenario.additional_payment_amount for scenario in scenario_values
         )
@@ -256,9 +258,7 @@ class CardPortfolioPaymentPlanService:
             paths.append(path)
 
         cards_with_funding_path = sum(len(path.card_ids) for path in paths)
-        cards_covered = sum(
-            path.cards_covered_on_lower_band for path in paths
-        )
+        cards_covered = sum(path.cards_covered_on_lower_band for path in paths)
         cards_at_risk = sum(path.cards_at_risk for path in paths)
         cards_unavailable = len(rows) - cards_with_funding_path
         if not rows or not scenario_values:
@@ -272,8 +272,7 @@ class CardPortfolioPaymentPlanService:
             ] = "unavailable"
         elif not candidates:
             if scenario_rows and all(
-                row.runway.funding_account_id is None
-                for row, scenario in scenario_rows
+                row.runway.funding_account_id is None for row, scenario in scenario_rows
             ):
                 status = "needs_payment_account"
             elif not scenario_rows:
@@ -324,9 +323,7 @@ class CardPortfolioPaymentPlanService:
 
     @staticmethod
     def _scenario(row: _CardPlanRow, strategy: StrategyName) -> CardPaymentScenario | None:
-        return (
-            row.minimum_due_scenario if strategy == "minimum_due" else row.total_due_scenario
-        )
+        return row.minimum_due_scenario if strategy == "minimum_due" else row.total_due_scenario
 
     @staticmethod
     def _build_funding_path(
@@ -374,14 +371,17 @@ class CardPortfolioPaymentPlanService:
             if point is None:
                 missing_date = True
                 continue
-            cumulative_additional += sum(
-                (
-                    Decimal(str(scenario.additional_payment_amount))
-                    for row, scenario in group
-                    if row.runway.due_date is not None and row.runway.due_date <= due_date
-                ),
-                Decimal("0"),
-            ) - cumulative_additional
+            cumulative_additional += (
+                sum(
+                    (
+                        Decimal(str(scenario.additional_payment_amount))
+                        for row, scenario in group
+                        if row.runway.due_date is not None and row.runway.due_date <= due_date
+                    ),
+                    Decimal("0"),
+                )
+                - cumulative_additional
+            )
             expected = _decimal_or_none(point.expected_balance)
             low = _decimal_or_none(point.low_balance)
             high = _decimal_or_none(point.high_balance)

@@ -20,7 +20,9 @@ async def _card(client, user_id: str, suffix: str, label: str) -> dict:
     return response.json()
 
 
-async def _statement(client, user_id: str, card_id: str, fingerprint: str, due_date: date, total: str):
+async def _statement(
+    client, user_id: str, card_id: str, fingerprint: str, due_date: date, total: str
+):
     statement_date = date.today() - timedelta(days=5)
     response = await client.post(
         f"/api/statements/hdfc/text?user_id={user_id}",
@@ -54,9 +56,7 @@ async def test_card_portfolio_upcoming_state_keeps_per_card_evidence_and_known_d
     await _statement(client, user["id"], first["id"], "p" * 64, first_due, "6,000.00")
     await _statement(client, user["id"], second["id"], "q" * 64, second_due, "4,000.00")
 
-    response = await client.get(
-        f"/api/cards/portfolio/upcoming-state?user_id={user['id']}"
-    )
+    response = await client.get(f"/api/cards/portfolio/upcoming-state?user_id={user['id']}")
     response.raise_for_status()
     body = response.json()
 

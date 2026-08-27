@@ -133,9 +133,7 @@ async def test_card_utilization_history_combines_statement_trend_and_daily_rollf
     assert body["credit_limit_breach_count"] == 0
     assert "current_cycle_ledger_estimate_available" in body["reason_codes"]
 
-    denied = await client.get(
-        f"/api/cards/{card['id']}/utilization-history?user_id={other['id']}"
-    )
+    denied = await client.get(f"/api/cards/{card['id']}/utilization-history?user_id={other['id']}")
     assert denied.status_code == 404
 
     bank = await _account(client, user["id"], "bank", "7722")
@@ -159,9 +157,7 @@ async def test_card_utilization_history_fails_closed_without_statement_evidence(
     user = await create_user(client, "utilization-history-empty")
     card = await _account(client, user["id"], "credit_card", "7733")
 
-    response = await client.get(
-        f"/api/cards/{card['id']}/utilization-history?user_id={user['id']}"
-    )
+    response = await client.get(f"/api/cards/{card['id']}/utilization-history?user_id={user['id']}")
     response.raise_for_status()
     body = response.json()
 

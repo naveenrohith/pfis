@@ -90,9 +90,7 @@ class RecurringPattern:
                 "amount_low": self.amount_low,
                 "amount_high": self.amount_high,
                 "next_expected_date_low": (
-                    self.next_expected_date_low.isoformat()
-                    if self.next_expected_date_low
-                    else None
+                    self.next_expected_date_low.isoformat() if self.next_expected_date_low else None
                 ),
                 "next_expected_date_high": (
                     self.next_expected_date_high.isoformat()
@@ -130,14 +128,10 @@ class RecurringPattern:
                 self.next_expected_date.isoformat() if self.next_expected_date else None
             ),
             "next_expected_date_low": (
-                self.next_expected_date_low.isoformat()
-                if self.next_expected_date_low
-                else None
+                self.next_expected_date_low.isoformat() if self.next_expected_date_low else None
             ),
             "next_expected_date_high": (
-                self.next_expected_date_high.isoformat()
-                if self.next_expected_date_high
-                else None
+                self.next_expected_date_high.isoformat() if self.next_expected_date_high else None
             ),
             "data_sufficiency": self.data_sufficiency,
             "ruleset_version": self.ruleset_version,

@@ -33,9 +33,9 @@ class StatementAnalysisReviewService:
         statement_text: str,
         document_fingerprint: str | None = None,
     ) -> StatementAnalysisReviewResponse:
-        fingerprint = document_fingerprint or hashlib.sha256(
-            statement_text.encode("utf-8")
-        ).hexdigest()
+        fingerprint = (
+            document_fingerprint or hashlib.sha256(statement_text.encode("utf-8")).hexdigest()
+        )
         existing = await self.db.scalar(
             select(StatementAnalysisReview).where(
                 StatementAnalysisReview.user_id == user_id,

@@ -58,9 +58,7 @@ async def test_card_upcoming_state_composes_due_and_planned_payment_without_proj
     )
     planned.raise_for_status()
 
-    response = await client.get(
-        f"/api/cards/{card['id']}/upcoming-state?user_id={user['id']}"
-    )
+    response = await client.get(f"/api/cards/{card['id']}/upcoming-state?user_id={user['id']}")
     response.raise_for_status()
     body = response.json()
 

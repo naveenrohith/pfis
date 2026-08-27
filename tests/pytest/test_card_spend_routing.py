@@ -160,7 +160,9 @@ def test_routing_marks_hypothetical_limit_and_target_pressure():
         ledger_currency="INR",
     )
     assert projected_limit_candidate.option.status == "over_limit"
-    assert "projected_statement_exceeds_credit_limit" in projected_limit_candidate.option.reason_codes
+    assert (
+        "projected_statement_exceeds_credit_limit" in projected_limit_candidate.option.reason_codes
+    )
 
 
 async def test_spend_routing_returns_no_active_cards_without_mutation(client):

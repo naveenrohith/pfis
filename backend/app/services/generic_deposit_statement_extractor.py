@@ -20,8 +20,7 @@ EXTRACTOR_VERSION = "generic-deposit-tabular-v1"
 LAYOUT_NAME = "generic-deposit-tabular-v1"
 _DATE_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d")
 _MONEY_RE = re.compile(
-    r"(?<!\w)(?:INR|USD|EUR|GBP|RS\.?\s*)?"
-    r"\(?-?[\d,]+(?:\.\d{1,2})?\)?(?!\w)",
+    r"(?<!\w)(?:INR|USD|EUR|GBP|RS\.?\s*)?" r"\(?-?[\d,]+(?:\.\d{1,2})?\)?(?!\w)",
     re.IGNORECASE,
 )
 
@@ -85,8 +84,8 @@ def extract_generic_deposit_statement(text: str) -> dict[str, Any]:
         assert amount is not None
         if amount <= 0:
             raise ValueError("Generic bank statement row amount must be positive")
-        expected_balance = previous_balance - (withdrawal or Decimal("0")) + (
-            deposit or Decimal("0")
+        expected_balance = (
+            previous_balance - (withdrawal or Decimal("0")) + (deposit or Decimal("0"))
         )
         if row["balance_after"] != expected_balance:
             raise ValueError("Generic bank statement running balance does not reconcile")
@@ -127,7 +126,9 @@ def _find_header(text: str) -> tuple[str | None, _Header | None]:
         normalized = " ".join(raw_line.upper().split())
         if "DATE" not in normalized or "BALANCE" not in normalized:
             continue
-        if not re.search(r"\b(?:NARRATION|DESCRIPTION|PARTICULARS|TRANSACTION\s+DETAILS)\b", normalized):
+        if not re.search(
+            r"\b(?:NARRATION|DESCRIPTION|PARTICULARS|TRANSACTION\s+DETAILS)\b", normalized
+        ):
             continue
         if not re.search(r"\b(?:DEBIT|WITHDRAWAL)\b", normalized):
             continue
@@ -291,7 +292,11 @@ def _statement_period(text: str) -> tuple[date, date] | None:
 
 
 def _opening_balance(text: str) -> Decimal | None:
-    match = re.search(r"OPENING\s+BALANCE\s*[:\-]?\s*((?:INR|USD|EUR|GBP|RS\.?)?\s*[\d,]+(?:\.\d{1,2})?)", text, re.IGNORECASE)
+    match = re.search(
+        r"OPENING\s+BALANCE\s*[:\-]?\s*((?:INR|USD|EUR|GBP|RS\.?)?\s*[\d,]+(?:\.\d{1,2})?)",
+        text,
+        re.IGNORECASE,
+    )
     return _money(match.group(1)) if match else None
 
 

@@ -133,9 +133,7 @@ async def test_auto_import_dispatches_reviewed_generic_bank_statement(client):
         "transfer",
     ]
 
-    repeated = await client.post(
-        f"/api/statements/import/text?user_id={user['id']}", json=payload
-    )
+    repeated = await client.post(f"/api/statements/import/text?user_id={user['id']}", json=payload)
     repeated.raise_for_status()
     assert repeated.json()["deposit_account_statement"]["id"] == statement["id"]
 
@@ -170,9 +168,7 @@ async def test_unknown_deposit_rows_have_owned_review_import_and_ignore_flow(
     assert statement["imported_transaction_count"] == 2
     assert statement["review_count"] == 2
 
-    review = await client.get(
-        f"/api/review/deposit-statement-lines?user_id={user['id']}"
-    )
+    review = await client.get(f"/api/review/deposit-statement-lines?user_id={user['id']}")
     review.raise_for_status()
     items = review.json()
     assert len(items) == 2
@@ -217,9 +213,7 @@ async def test_unknown_deposit_rows_have_owned_review_import_and_ignore_flow(
     assert ignored.json()["new_outcome"] == "ignored_by_rule"
     assert ignored.json()["payment_rail"] == "other"
 
-    remaining = await client.get(
-        f"/api/review/deposit-statement-lines?user_id={user['id']}"
-    )
+    remaining = await client.get(f"/api/review/deposit-statement-lines?user_id={user['id']}")
     remaining.raise_for_status()
     assert remaining.json() == []
 

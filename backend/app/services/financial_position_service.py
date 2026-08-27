@@ -2279,7 +2279,9 @@ class FinancialPositionService:
             return existing_statement
         extracted = extract_generic_credit_card_statement(data.statement_text)
         if extracted["currency"] not in {"unknown", account.currency}:
-            raise ValueError("The statement currency does not match the selected credit-card account")
+            raise ValueError(
+                "The statement currency does not match the selected credit-card account"
+            )
         account_last4 = re.sub(r"\D", "", account.masked_number or "")[-4:]
         if extracted["card_last4"] != account_last4:
             raise ValueError("This statement belongs to a different credit-card account")
@@ -2613,8 +2615,7 @@ class FinancialPositionService:
                 )
                 .join(
                     DepositAccountStatement,
-                    DepositAccountStatement.id
-                    == DepositStatementLine.deposit_account_statement_id,
+                    DepositAccountStatement.id == DepositStatementLine.deposit_account_statement_id,
                 )
                 .join(
                     FinancialAccount,
@@ -2668,8 +2669,7 @@ class FinancialPositionService:
                 select(DepositStatementLine, DepositAccountStatement, FinancialAccount)
                 .join(
                     DepositAccountStatement,
-                    DepositAccountStatement.id
-                    == DepositStatementLine.deposit_account_statement_id,
+                    DepositAccountStatement.id == DepositStatementLine.deposit_account_statement_id,
                 )
                 .join(
                     FinancialAccount,
@@ -2700,9 +2700,7 @@ class FinancialPositionService:
                 and latest_decision.payment_rail == data.payment_rail
             ):
                 return DepositStatementLineReviewResponse(
-                    line=DepositStatementLineResponse.model_validate(
-                        line, from_attributes=True
-                    ),
+                    line=DepositStatementLineResponse.model_validate(line, from_attributes=True),
                     decision=data.decision,
                     previous_outcome=cast(ReviewOutcome, latest_decision.previous_outcome),
                     new_outcome=cast(ReviewOutcome, line.review_outcome),
@@ -3014,13 +3012,10 @@ class FinancialPositionService:
         )
         candidates: list[StatementCardPaymentCandidateResponse] = []
         card_marker = re.compile(
-            r"\b(?:CREDIT\s*CARD|CARD\s*(?:PAYMENT|BILL|SETTLEMENT)|"
-            r"CC\s*(?:PAYMENT|BILL))\b",
+            r"\b(?:CREDIT\s*CARD|CARD\s*(?:PAYMENT|BILL|SETTLEMENT)|" r"CC\s*(?:PAYMENT|BILL))\b",
             re.IGNORECASE,
         )
-        payment_marker = re.compile(
-            r"\b(?:PAYMENT|PAID|BILL|TRANSFER|SETTLEMENT)\b", re.IGNORECASE
-        )
+        payment_marker = re.compile(r"\b(?:PAYMENT|PAID|BILL|TRANSFER|SETTLEMENT)\b", re.IGNORECASE)
         line_reference = (line.reference_id or "").casefold()
         for transaction, paying_account in transactions:
             description = " ".join(
@@ -3052,9 +3047,9 @@ class FinancialPositionService:
             if day_delta == 0:
                 score += Decimal("0.10")
                 evidence.append("same_posting_date")
-                match_method: Literal[
-                    "reference", "same_day_amount", "near_day_amount"
-                ] = "same_day_amount"
+                match_method: Literal["reference", "same_day_amount", "near_day_amount"] = (
+                    "same_day_amount"
+                )
             else:
                 score += Decimal("0.06") if day_delta <= 2 else Decimal("0.02")
                 evidence.append("near_posting_date")
@@ -4304,9 +4299,7 @@ def _build_card_emi_plans(
         status: Literal["observed", "active", "preclosed"] = (
             "preclosed"
             if {"emi_preclosure_principal", "emi_preclosure_interest"} & kinds
-            else "active"
-            if installment_numbers
-            else "observed"
+            else "active" if installment_numbers else "observed"
         )
         latest_statement_id = max(
             {item.credit_card_statement_id for item in ordered},

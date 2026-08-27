@@ -73,9 +73,7 @@ def test_generic_credit_card_profile_proves_liability_balance_and_events():
 def test_generic_credit_card_profile_rejects_unproven_rows(replacement, message):
     tampered = GENERIC_CARD_STATEMENT
     if replacement == "10,500.50":
-        tampered = tampered.replace(
-            "600.50 | | 10,500.50", "600.50 | | 10,500.49"
-        )
+        tampered = tampered.replace("600.50 | | 10,500.50", "600.50 | | 10,500.49")
     elif replacement.startswith("TOTAL"):
         tampered = tampered.replace("TOTAL AMOUNT DUE: INR 10,500.50", replacement)
     else:
@@ -117,9 +115,7 @@ async def test_auto_import_dispatches_reviewed_generic_credit_card_statement(cli
         "statement_text": GENERIC_CARD_STATEMENT,
     }
 
-    imported = await client.post(
-        f"/api/statements/import/text?user_id={user['id']}", json=payload
-    )
+    imported = await client.post(f"/api/statements/import/text?user_id={user['id']}", json=payload)
     imported.raise_for_status()
     body = imported.json()
     assert body["product_type"] == "credit_card"
@@ -137,13 +133,10 @@ async def test_auto_import_dispatches_reviewed_generic_credit_card_statement(cli
     ]
     assert statement["lines"][1]["review_outcome"] == "needs_review"
     assert all(
-        statement["lines"][index]["review_outcome"] == "newly_imported"
-        for index in (0, 2, 3)
+        statement["lines"][index]["review_outcome"] == "newly_imported" for index in (0, 2, 3)
     )
 
-    repeated = await client.post(
-        f"/api/statements/import/text?user_id={user['id']}", json=payload
-    )
+    repeated = await client.post(f"/api/statements/import/text?user_id={user['id']}", json=payload)
     repeated.raise_for_status()
     assert repeated.json()["credit_card_statement"]["id"] == statement["id"]
 

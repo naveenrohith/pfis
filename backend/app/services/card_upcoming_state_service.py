@@ -79,16 +79,16 @@ def build_card_upcoming_state(
     ):
         events.append(
             _event(
-                    event_id=f"issuer-due:{overview.financial_account_id}:{overview.due_date}",
-                    event_type="payment_due",
-                    event_date=overview.due_date,
-                    as_of=as_of,
-                    label="Issuer-stated card payment due",
-                    amount=overview.total_due,
-                    source_kind="issuer",
-                    status="observed",
-                    confidence=1.0,
-                    reason_codes=["issuer_statement_due"],
+                event_id=f"issuer-due:{overview.financial_account_id}:{overview.due_date}",
+                event_type="payment_due",
+                event_date=overview.due_date,
+                as_of=as_of,
+                label="Issuer-stated card payment due",
+                amount=overview.total_due,
+                source_kind="issuer",
+                status="observed",
+                confidence=1.0,
+                reason_codes=["issuer_statement_due"],
             )
         )
 
@@ -230,9 +230,7 @@ def build_card_upcoming_state(
         ),
         CardStatementProjectionEvidence(
             label="Upcoming evidence",
-            value=f"{len(events)} dated event(s)"
-            if events
-            else "No dated upcoming event",
+            value=f"{len(events)} dated event(s)" if events else "No dated upcoming event",
             basis="Only events with explicit dates or bounded projection dates are included.",
         ),
     ]

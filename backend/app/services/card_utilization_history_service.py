@@ -96,12 +96,16 @@ class CardUtilizationHistoryService:
                 source_transaction_count=0,
                 confidence=1.0,
                 reason_codes=[
-                    "issuer_statement_total_due"
-                    if statement.total_due is not None
-                    else "statement_total_due_missing",
-                    "issuer_statement_credit_limit"
-                    if statement.credit_limit is not None and statement.credit_limit > 0
-                    else "statement_credit_limit_missing",
+                    (
+                        "issuer_statement_total_due"
+                        if statement.total_due is not None
+                        else "statement_total_due_missing"
+                    ),
+                    (
+                        "issuer_statement_credit_limit"
+                        if statement.credit_limit is not None and statement.credit_limit > 0
+                        else "statement_credit_limit_missing"
+                    ),
                 ],
             )
             for statement in statements
@@ -110,11 +114,7 @@ class CardUtilizationHistoryService:
         daily_points: list[CardUtilizationHistoryPoint] = []
         daily_reason_codes: set[str] = set()
         latest = statements[-1] if statements else None
-        if (
-            latest is not None
-            and latest.total_due is not None
-            and as_of > latest.statement_date
-        ):
+        if latest is not None and latest.total_due is not None and as_of > latest.statement_date:
             daily_points, daily_reason_codes = await self._daily_points(
                 user_id,
                 account_id,
@@ -126,9 +126,7 @@ class CardUtilizationHistoryService:
 
         trend, trend_basis, trend_delta = self._trend(statement_points, daily_points)
         statement_utilizations = [
-            point.utilization_pct
-            for point in statement_points
-            if point.utilization_pct is not None
+            point.utilization_pct for point in statement_points if point.utilization_pct is not None
         ]
         daily_utilizations = [
             point.utilization_pct for point in daily_points if point.utilization_pct is not None
@@ -219,7 +217,9 @@ class CardUtilizationHistoryService:
             eligible_rows = [row for row in rows if balance_transaction_eligible(row)]
             for transaction in eligible_rows:
                 balance += signed_balance_movement(transaction, "liability")
-            pending_rows = [row for row in rows if is_pending_transaction_status(row.transaction_status)]
+            pending_rows = [
+                row for row in rows if is_pending_transaction_status(row.transaction_status)
+            ]
             unreviewed_rows = [
                 row
                 for row in eligible_rows
@@ -310,9 +310,7 @@ class CardUtilizationHistoryService:
         float | None,
     ]:
         statement_values = [
-            point.utilization_pct
-            for point in statement_points
-            if point.utilization_pct is not None
+            point.utilization_pct for point in statement_points if point.utilization_pct is not None
         ]
         if not statement_values:
             return "unavailable", "unavailable", None

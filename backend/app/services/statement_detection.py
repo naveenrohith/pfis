@@ -238,20 +238,14 @@ def detect_statement(statement_text: str) -> StatementDetection:
             or generic_card_markers["payment_due_date"]
             or generic_card_markers["credit_limit"]
         )
-        and (
-            generic_card_markers["billing_period"]
-            or generic_card_markers["transaction_table"]
-        )
+        and (generic_card_markers["billing_period"] or generic_card_markers["transaction_table"])
     )
     generic_deposit_recognized = (
         generic_deposit_markers["account_statement"]
         and generic_deposit_markers["account_identity"]
         and generic_deposit_markers["transaction_description"]
         and generic_deposit_markers["balance_column"]
-        and (
-            generic_deposit_markers["debit_column"]
-            or generic_deposit_markers["credit_column"]
-        )
+        and (generic_deposit_markers["debit_column"] or generic_deposit_markers["credit_column"])
         and generic_deposit_score >= 5
     )
 

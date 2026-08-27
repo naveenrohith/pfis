@@ -460,7 +460,9 @@ async def backfill_temporal_source_history(
                     await db.scalars(
                         select(DepositStatementLine)
                         .where(DepositStatementLine.user_id == user_id)
-                        .order_by(DepositStatementLine.created_at.asc(), DepositStatementLine.id.asc())
+                        .order_by(
+                            DepositStatementLine.created_at.asc(), DepositStatementLine.id.asc()
+                        )
                         .limit(max_rows_per_source)
                     )
                 ).all()

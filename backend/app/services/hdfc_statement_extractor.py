@@ -99,9 +99,7 @@ def detect_hdfc_statement_document(text: str) -> HdfcStatementDocumentDetection:
     }
     deposit_signals = {
         "hdfc_issuer": hdfc_issuer,
-        "account_statement": _document_has(
-            normalized, "ACCOUNT STATEMENT", "STATEMENT OF ACCOUNT"
-        ),
+        "account_statement": _document_has(normalized, "ACCOUNT STATEMENT", "STATEMENT OF ACCOUNT"),
         "account_identity": _document_has(normalized, "ACCOUNT NO", "ACCOUNT NUMBER"),
         "narration": _document_has(normalized, "NARRATION", "TRANSACTION DESCRIPTION"),
         "reference": _document_has(normalized, "CHQ REF NO", "REFERENCE", "REF NO"),

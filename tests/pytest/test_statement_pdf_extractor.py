@@ -70,7 +70,9 @@ def test_ocr_fallback_renders_in_memory_and_returns_text(monkeypatch):
     def fake_run(command, **kwargs):
         seen["command"] = command
         seen["input"] = kwargs["input"]
-        return SimpleNamespace(returncode=0, stdout=b"OCR recovered statement text with enough fields")
+        return SimpleNamespace(
+            returncode=0, stdout=b"OCR recovered statement text with enough fields"
+        )
 
     monkeypatch.setattr(statement_pdf_extractor.subprocess, "run", fake_run)
 

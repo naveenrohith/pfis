@@ -359,9 +359,7 @@ def build_card_statement_projection(
         credit_limit_breach_date = today
         credit_limit_breach_days = 0
     else:
-        for day_offset, (path_date, daily_balance, _, _) in enumerate(
-            daily_path_balances, start=1
-        ):
+        for day_offset, (path_date, daily_balance, _, _) in enumerate(daily_path_balances, start=1):
             if daily_balance >= credit_limit:
                 credit_limit_breach_date = path_date
                 credit_limit_breach_days = day_offset
@@ -534,9 +532,11 @@ def build_card_statement_projection(
         confidence=float(confidence.quantize(Decimal("0.01"))),
         next_state=next_state,
         reason_codes=[
-            "historical_pace_blended"
-            if calibration == "historical_blend"
-            else "current_cycle_pace_extrapolated",
+            (
+                "historical_pace_blended"
+                if calibration == "historical_blend"
+                else "current_cycle_pace_extrapolated"
+            ),
             "uncertainty_band_not_guarantee",
             *(["daily_projection_path"] if daily_path else []),
             *(["calendar_spending_seasonality_blended"] if seasonal_days_covered > 0 else []),

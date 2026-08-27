@@ -51,9 +51,7 @@ def extract_statement_pdf_text(
         )
     ocr_text, page_count = _extract_ocr_text(payload)
     if len(ocr_text.strip()) < PDF_TEXT_MINIMUM:
-        raise StatementPdfOcrError(
-            "OCR could not recover enough statement text for a safe review"
-        )
+        raise StatementPdfOcrError("OCR could not recover enough statement text for a safe review")
     return StatementPdfText(
         text=ocr_text,
         extraction_mode="ocr",

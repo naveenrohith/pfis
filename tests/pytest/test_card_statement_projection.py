@@ -406,9 +406,13 @@ def test_credit_limit_runway_reports_central_breach_and_daily_pressure():
     assert projection.credit_limit_breach_days == 9
     assert projection.next_state == "reduce_spend_or_pay"
     assert "credit_limit_exceeded" in projection.reason_codes
-    assert next(
-        point for point in projection.daily_path if point.date == date(2026, 8, 29)
-    ).credit_limit_status == "over_limit"
-    assert {
-        item.label for item in projection.evidence
-    } >= {"Credit-limit runway", "Central credit-limit breach timing"}
+    assert (
+        next(
+            point for point in projection.daily_path if point.date == date(2026, 8, 29)
+        ).credit_limit_status
+        == "over_limit"
+    )
+    assert {item.label for item in projection.evidence} >= {
+        "Credit-limit runway",
+        "Central credit-limit breach timing",
+    }

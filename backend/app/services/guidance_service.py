@@ -915,7 +915,11 @@ class GuidanceService:
             if portfolio.state == "limit_pressure":
                 actions = ["Open Card portfolio", "Reduce limit-risk spend", "Review payment plans"]
             elif portfolio.state == "target_pressure":
-                actions = ["Open Card portfolio", "Review utilization targets", "Review payment plans"]
+                actions = [
+                    "Open Card portfolio",
+                    "Review utilization targets",
+                    "Review payment plans",
+                ]
             elif portfolio.state == "payment_due":
                 actions = ["Open Card portfolio", "Open Card due runway"]
             elif portfolio.state == "review_evidence":
@@ -939,7 +943,9 @@ class GuidanceService:
                 ),
                 GuidanceMetric(label="Next dated signal", value=next_signal),
                 GuidanceMetric(label="Next signal date", value=next_date),
-                GuidanceMetric(label="Cards needing review", value=str(portfolio.cards_needing_review)),
+                GuidanceMetric(
+                    label="Cards needing review", value=str(portfolio.cards_needing_review)
+                ),
                 GuidanceMetric(label="Confidence", value=f"{portfolio.confidence:.0%}"),
             ],
             month,
@@ -961,9 +967,7 @@ class GuidanceService:
 
         portfolio = await CardPortfolioPaymentPlanService(self.db).compare(user_id)
         if portfolio.state == "no_active_cards":
-            answer = (
-                "No active credit-card accounts are confirmed, so PFIS cannot compare payment plans."
-            )
+            answer = "No active credit-card accounts are confirmed, so PFIS cannot compare payment plans."
             actions = ["Open Cards", "Confirm a credit-card account"]
         else:
             minimum = portfolio.minimum_due_plan
@@ -1040,7 +1044,9 @@ class GuidanceService:
                         else "Unavailable"
                     ),
                 ),
-                GuidanceMetric(label="Cards needing review", value=str(portfolio.cards_needing_review)),
+                GuidanceMetric(
+                    label="Cards needing review", value=str(portfolio.cards_needing_review)
+                ),
                 GuidanceMetric(label="Confidence", value=f"{portfolio.confidence:.0%}"),
             ],
             month,
@@ -1108,12 +1114,18 @@ class GuidanceService:
             next_event_date = "Not available"
         else:
             event_date = next_event.date.isoformat()
-            relative = "today" if next_event.days_from_today == 0 else (
-                f"in {next_event.days_from_today} day"
-                f"{'s' if next_event.days_from_today != 1 else ''}"
+            relative = (
+                "today"
+                if next_event.days_from_today == 0
+                else (
+                    f"in {next_event.days_from_today} day"
+                    f"{'s' if next_event.days_from_today != 1 else ''}"
+                )
             )
             amount = (
-                f" for {self._money(next_event.amount, currency)}" if next_event.amount is not None else ""
+                f" for {self._money(next_event.amount, currency)}"
+                if next_event.amount is not None
+                else ""
             )
             answer = (
                 f"{card.institution_name}'s upcoming card state is {state_label}. The next dated "

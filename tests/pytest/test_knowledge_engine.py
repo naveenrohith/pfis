@@ -66,9 +66,7 @@ def test_variable_monthly_bill_keeps_cadence_and_lower_amount_confidence():
 
 
 def test_variable_monthly_intervals_expose_a_bounded_next_date_window():
-    pattern = _pattern(
-        [date(2026, 4, 1), date(2026, 4, 29), date(2026, 5, 31), date(2026, 6, 30)]
-    )
+    pattern = _pattern([date(2026, 4, 1), date(2026, 4, 29), date(2026, 5, 31), date(2026, 6, 30)])
 
     assert pattern is not None
     assert pattern.cadence == "monthly"
