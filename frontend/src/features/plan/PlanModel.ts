@@ -10,6 +10,23 @@ export type PlanView =
 
 export type PlanStageId = 'available' | 'position' | 'commitments' | 'outlook';
 
+export type PlanNavigationId =
+  | 'cash-plan'
+  | 'networth'
+  | 'cards'
+  | 'obligations'
+  | 'analytics'
+  | 'budgets';
+
+export const PLAN_NAV_ITEMS = [
+  { id: 'cash-plan', label: 'Safe to spend' },
+  { id: 'networth', label: 'Position' },
+  { id: 'cards', label: 'Cards' },
+  { id: 'obligations', label: 'Commitments' },
+  { id: 'analytics', label: 'Outlook' },
+  { id: 'budgets', label: 'Budgets' },
+] as const satisfies ReadonlyArray<{ id: PlanNavigationId; label: string }>;
+
 export const PLAN_STAGES = [
   {
     id: 'available',
@@ -55,6 +72,15 @@ const PLAN_VIEWS: readonly PlanView[] = [
 
 export function planViewFromSection(section: string): PlanView {
   return PLAN_VIEWS.includes(section as PlanView) ? (section as PlanView) : 'cash-plan';
+}
+
+export function planNavigationForView(view: PlanView): PlanNavigationId {
+  if (view === 'liabilities' || view === 'household') return 'obligations';
+  return view;
+}
+
+export function planSectionForNavigation(navigation: PlanNavigationId): PlanView {
+  return navigation;
 }
 
 export function planStageForView(view: PlanView): PlanStageId {

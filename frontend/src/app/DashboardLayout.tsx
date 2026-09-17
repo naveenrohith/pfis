@@ -58,7 +58,7 @@ function DashboardWorkspace() {
   return (
     <div
       className={cn(
-        'grid min-h-screen bg-background lg:grid-cols-[224px_minmax(0,1fr)]',
+        'grid min-h-screen bg-background lg:grid-cols-[88px_minmax(0,1fr)]',
         preferences.data?.density === 'compact' && 'dashboard-compact',
       )}
     >
@@ -74,7 +74,7 @@ function DashboardWorkspace() {
         <main
           id="workspace-content"
           tabIndex={-1}
-          className="mx-auto w-full max-w-[1440px] px-4 py-7 sm:px-6 lg:px-10 lg:py-10 xl:px-12"
+          className="mx-auto w-full max-w-[1320px] px-4 py-8 sm:px-6 lg:px-10 lg:py-12"
         >
           <WorkspaceErrorBoundary>
             {activeWorkspace === 'today' ? (

@@ -1,20 +1,15 @@
 import { Suspense } from 'react';
-import { HeartPulse, Plus } from 'lucide-react';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { PageIntro } from '@/components/system';
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
 import { Tabs } from '@/components/ui/Tabs';
-import { useWorkspaceSnapshot } from '@/features/workspace/queries';
 import { lazyWithRetry } from '@/lib/lazyWithRetry';
-import { cn } from '@/lib/utils';
 import { TemporalEvidencePanel } from './TemporalEvidencePanel';
 import {
-  PLAN_STAGES,
-  planStageForView,
+  PLAN_NAV_ITEMS,
+  planNavigationForView,
+  planSectionForNavigation,
   planViewFromSection,
-  stageForId,
-  type PlanStageId,
+  type PlanNavigationId,
   type PlanView,
 } from './PlanModel';
 
@@ -59,59 +54,39 @@ const RoadmapExtensionsSection = lazyWithRetry(
 );
 
 export function PlanExperience() {
-  const { activeSection, scrollTo, setQuickAddOpen } = useDashboardUi();
-  const workspace = useWorkspaceSnapshot();
-  const health = workspace.data?.financial_health;
+  const { activeSection, scrollTo } = useDashboardUi();
   const view = planViewFromSection(activeSection);
-  const stage = planStageForView(view);
-  const stageDefinition = stageForId(stage);
+  const navigation = planNavigationForView(view);
 
   return (
     <div className="space-y-7">
       <PageIntro
         eyebrow="Plan"
-        title="Decide what the money can safely do next."
-        description="Follow the evidence in order: establish position, account for commitments, then choose the guardrails for what comes next."
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            {health ? (
-              <Badge variant={health.monthly_stability >= 70 ? 'success' : 'warning'}>
-                <HeartPulse className="h-3.5 w-3.5" /> Stability {health.monthly_stability}
-              </Badge>
-            ) : null}
-            <Button variant="outline" onClick={() => setQuickAddOpen(true)}>
-              <Plus className="h-4 w-4" /> Record movement
-            </Button>
-          </div>
-        }
+        title="Give the month a direction."
+        description="Start with what is safe today, then move through position, cards, commitments, and the choices that shape what comes next."
       />
-
-      <PlanningEquation />
 
       <div className="sticky top-[5.75rem] z-20 -mx-4 bg-background/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:top-[6.5rem] lg:-mx-10 lg:px-10">
         <Tabs
-          ariaLabel="Planning decision stages"
-          value={stage}
+          ariaLabel="Plan views"
+          value={navigation}
           onValueChange={(value) => {
-            const destination = PLAN_STAGES.find((definition) => definition.id === value)?.destination;
-            if (destination) scrollTo(destination);
+            if (PLAN_NAV_ITEMS.some((item) => item.id === value)) {
+              scrollTo(planSectionForNavigation(value as PlanNavigationId));
+            }
           }}
-          options={PLAN_STAGES.map(({ id, label }) => ({ value: id, label }))}
+          options={PLAN_NAV_ITEMS.map(({ id, label }) => ({ value: id, label }))}
           className="w-full max-w-full sm:w-auto sm:max-w-max"
         />
       </div>
 
       <div id={view} className="animate-fade-in scroll-mt-[10.5rem] lg:scroll-mt-[11.5rem]">
-        <PlanningStageContext
-          stage={stage}
-          stageDescription={stageDefinition.description}
-          view={view}
-          onNavigate={scrollTo}
-        />
+        <PlanViewContext view={view} onNavigate={scrollTo} />
         <Suspense fallback={<PlanSkeleton label={view} />}>
           {view === 'cash-plan' ? (
             <>
               <FinancialPositionSection view="cash-plan" />
+              <PlanningEquationDisclosure />
               <TemporalEvidencePanel />
             </>
           ) : null}
@@ -130,103 +105,73 @@ export function PlanExperience() {
   );
 }
 
-function PlanningEquation() {
+function PlanningEquationDisclosure() {
   return (
-    <section
-      className="border-y border-border/70 py-4"
-      aria-labelledby="planning-equation-title"
-    >
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-8">
-        <div className="min-w-0">
-          <p
-            id="planning-equation-title"
-            className="text-[11px] font-extrabold uppercase tracking-[0.12em] text-muted-foreground"
-          >
-            How PFIS builds the answer
-          </p>
-          <p className="mt-1 text-sm font-extrabold tracking-[-0.01em] sm:text-base">
-            <span>Verified position</span>
-            <span className="px-2 text-muted-foreground/60" aria-hidden="true">
-              −
-            </span>
-            <span>confirmed commitments</span>
-            <span className="px-2 text-muted-foreground/60" aria-hidden="true">
-              −
-            </span>
-            <span>approved reserves</span>
-            <span className="px-2 text-muted-foreground/60" aria-hidden="true">
-              =
-            </span>
-            <span className="text-primary">safe to spend</span>
-          </p>
-        </div>
-        <p className="max-w-md text-xs leading-5 text-muted-foreground lg:text-right">
-          Every stage below answers one part of the same decision. Estimates stay labelled when
-          evidence is incomplete.
+    <details className="border-t border-border/65 pt-4 text-sm">
+      <summary className="focus-ring cursor-pointer rounded-md py-2 font-bold text-muted-foreground hover:text-foreground">
+        How PFIS calculates safe to spend
+      </summary>
+      <div className="mt-3 flex flex-col gap-2 text-muted-foreground sm:flex-row sm:items-center sm:gap-3">
+        <p className="font-extrabold text-foreground">
+          Verified position − confirmed commitments − approved reserves = safe to spend
+        </p>
+        <p className="text-xs leading-5">
+          Estimates stay labelled when evidence is incomplete.
         </p>
       </div>
-    </section>
+    </details>
   );
 }
 
-type PlanningStageContextProps = {
-  stage: PlanStageId;
-  stageDescription: string;
+type PlanViewContextProps = {
   view: PlanView;
   onNavigate: (section: string) => void;
 };
 
-function PlanningStageContext({
-  stage,
-  stageDescription,
-  view,
-  onNavigate,
-}: PlanningStageContextProps) {
-  const tools =
-    stage === 'commitments'
-      ? [
-          { id: 'obligations', label: 'Bills & safeguards' },
-          { id: 'cards', label: 'Cards' },
-          { id: 'liabilities', label: 'All liabilities' },
-          { id: 'household', label: 'Household' },
-        ]
-      : stage === 'outlook'
-        ? [
-            { id: 'analytics', label: 'Forecast & scenarios' },
-            { id: 'budgets', label: 'Budgets' },
-          ]
-        : [];
+function PlanViewContext({ view, onNavigate }: PlanViewContextProps) {
+  const navigation = planNavigationForView(view);
+  const commitmentDetails = [
+    { id: 'obligations', label: 'Bills & safeguards' },
+    { id: 'liabilities', label: 'All liabilities' },
+    { id: 'household', label: 'Household' },
+  ] as const;
 
   return (
     <div className="mb-5 flex flex-col gap-3 border-b border-border/65 pb-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <p className="text-[11px] font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
-          Current stage
+          Plan view
         </p>
         <p className="mt-1 text-sm font-extrabold tracking-[-0.01em]">
-          {stageForId(stage).label}
-          <span className="ml-2 font-medium text-muted-foreground">{stageDescription}</span>
+          {PLAN_NAV_ITEMS.find((item) => item.id === navigation)?.label}
+          <span className="ml-2 font-medium text-muted-foreground">
+            {navigation === 'obligations'
+              ? 'Bills, liabilities, and household plans in one place.'
+              : 'One decision surface, with supporting evidence below.'}
+          </span>
         </p>
       </div>
-      {tools.length ? (
+      {navigation === 'obligations' ? (
         <nav
-          aria-label={`${stageForId(stage).label} views`}
+          aria-label="Commitment details"
           className="flex max-w-full flex-wrap items-center gap-1"
         >
-          {tools.map((tool) => {
-            const active = tool.id === view;
+          {commitmentDetails.map((detail) => {
+            const active = detail.id === view;
             return (
-              <Button
-                key={tool.id}
+              <button
+                key={detail.id}
                 type="button"
-                size="sm"
-                variant={active ? 'secondary' : 'ghost'}
                 aria-current={active ? 'page' : undefined}
-                className={cn('min-h-10 px-2.5 text-xs', !active && 'text-muted-foreground')}
-                onClick={() => onNavigate(tool.id)}
+                className={`focus-ring min-h-10 rounded-md px-2.5 text-xs font-bold transition-colors ${
+                  active
+                    ? 'bg-secondary text-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                }`}
+                onClick={() => onNavigate(detail.id)}
               >
-                {tool.label}
-              </Button>
+                {detail.label}
+              </button>
             );
           })}
         </nav>

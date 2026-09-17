@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { PLAN_STAGES, planStageForView, planViewFromSection } from './PlanModel';
+import {
+  PLAN_NAV_ITEMS,
+  PLAN_STAGES,
+  planNavigationForView,
+  planSectionForNavigation,
+  planStageForView,
+  planViewFromSection,
+} from './PlanModel';
 
 describe('Planning decision trail', () => {
   it('uses a short, ordered path that matches the financial decision', () => {
@@ -32,5 +39,21 @@ describe('Planning decision trail', () => {
     expect(planViewFromSection('overview')).toBe('cash-plan');
     expect(planViewFromSection('cash-plan')).toBe('cash-plan');
     expect(planViewFromSection('budgets')).toBe('budgets');
+  });
+
+  it('keeps Cards visible in the flat Plan navigation', () => {
+    expect(PLAN_NAV_ITEMS.map((item) => item.label)).toEqual([
+      'Safe to spend',
+      'Position',
+      'Cards',
+      'Commitments',
+      'Outlook',
+      'Budgets',
+    ]);
+    expect(planNavigationForView('cards')).toBe('cards');
+    expect(planNavigationForView('liabilities')).toBe('obligations');
+    expect(planNavigationForView('household')).toBe('obligations');
+    expect(planSectionForNavigation('cards')).toBe('cards');
+    expect(planSectionForNavigation('obligations')).toBe('obligations');
   });
 });
