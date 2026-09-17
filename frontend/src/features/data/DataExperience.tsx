@@ -85,13 +85,7 @@ export function DataExperience() {
         }
       />
 
-      <ProductBoundaryCard />
-      <OperationalStatusCard onNavigate={scrollTo} />
-
-      <WorkspaceContextBar
-        label="Data views"
-        description="Connect, recover, and tune the evidence pipeline."
-      >
+      <WorkspaceContextBar label="Data views">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
           <Tabs
             ariaLabel="Data views"
@@ -100,32 +94,79 @@ export function DataExperience() {
             options={[
               { value: 'inbox', label: 'Connections' },
               { value: 'statements', label: 'Statements' },
+              { value: 'settings', label: 'Preferences & privacy' },
               { value: 'pipeline', label: 'Diagnostics' },
-              { value: 'settings', label: 'Preferences & data' },
             ]}
             className="w-full max-w-full sm:w-auto sm:max-w-max"
           />
-          <p className="px-1 text-xs text-muted-foreground sm:px-0">
-            {status.data?.latest_status
-              ? `Last run: ${status.data.latest_status}`
-              : 'No completed sync run yet'}
-          </p>
         </div>
       </WorkspaceContextBar>
 
       <div id={view} className="animate-fade-in scroll-mt-[10.5rem] lg:scroll-mt-[11.5rem]">
         <Suspense fallback={<DataSkeleton label={view} />}>
           {view === 'inbox' ? <InboxSection embedded /> : null}
-          {view === 'pipeline' ? <PipelineHealthSection embedded /> : null}
+          {view === 'pipeline' ? (
+            <div className="space-y-6">
+              <section
+                aria-label="Latest diagnostic run"
+                className="flex flex-col gap-2 rounded-xl border border-border/70 bg-card px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:px-5"
+              >
+                <span className="font-extrabold">Diagnostics</span>
+                <span className="text-muted-foreground">
+                  {status.data?.latest_status
+                    ? `Last run: ${status.data.latest_status}`
+                    : 'No completed sync run yet'}
+                </span>
+              </section>
+              <ProductBoundaryCard />
+              <OperationalStatusCard onNavigate={scrollTo} />
+              <IntelligenceReadinessPanel />
+              <PipelineHealthSection embedded />
+            </div>
+          ) : null}
           {view === 'statements' ? <StatementImportSection /> : null}
           {view === 'settings' ? (
             <div className="space-y-6">
-              <IntelligenceReadinessPanel />
-              <FinancialDaySettings />
-              <RawEmailRetentionSettings />
-              <TemporalHistoryBackfillSettings />
-              <DataExportSettings />
-              <AccountDeletionSettings />
+              <section aria-labelledby="preferences-title" className="space-y-4">
+                <div>
+                  <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
+                    Preferences & privacy
+                  </p>
+                  <h2 id="preferences-title" className="mt-1 text-2xl font-extrabold tracking-[-0.035em]">
+                    Tune the workspace and control your data.
+                  </h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                    Everyday preferences stay separate from diagnostics. Export and deletion keep
+                    their existing safeguards and confirmation steps.
+                  </p>
+                </div>
+                <div className="grid gap-6 xl:grid-cols-2">
+                  <FinancialDaySettings />
+                  <RawEmailRetentionSettings />
+                </div>
+              </section>
+              <section aria-labelledby="privacy-title" className="space-y-4">
+                <div>
+                  <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
+                    Portability & deletion
+                  </p>
+                  <h2 id="privacy-title" className="mt-1 text-xl font-extrabold tracking-[-0.03em]">
+                    Keep control of your records.
+                  </h2>
+                </div>
+                <div className="grid gap-6 xl:grid-cols-2">
+                  <DataExportSettings />
+                  <AccountDeletionSettings />
+                </div>
+              </section>
+              <details className="rounded-xl border border-border/70 bg-card p-5 sm:p-6">
+                <summary className="focus-ring cursor-pointer rounded text-base font-extrabold">
+                  Advanced data maintenance
+                </summary>
+                <div className="mt-5">
+                  <TemporalHistoryBackfillSettings />
+                </div>
+              </details>
             </div>
           ) : null}
         </Suspense>

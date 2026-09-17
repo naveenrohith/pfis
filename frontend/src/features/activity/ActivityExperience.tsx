@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { ListChecks, Plus } from 'lucide-react';
+import { ListChecks } from 'lucide-react';
 import { PageIntro, WorkspaceContextBar } from '@/components/system';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -34,7 +34,7 @@ type ActivityView = 'transactions' | 'review' | 'timeline';
 
 export function ActivityExperience() {
   const transactions = useTransactions();
-  const { activeSection, scrollTo, setQuickAddOpen } = useDashboardUi();
+  const { activeSection, scrollTo } = useDashboardUi();
   const pendingCount = (transactions.data ?? []).filter(
     (transaction) => !transaction.reviewed_flag,
   ).length;
@@ -56,17 +56,11 @@ export function ActivityExperience() {
             ) : (
               <Badge variant="success">Queue clear</Badge>
             )}
-            <Button onClick={() => setQuickAddOpen(true)}>
-              <Plus className="h-4 w-4" /> Add activity
-            </Button>
           </div>
         }
       />
 
-      <WorkspaceContextBar
-        label="Activity views"
-        description="One ledger, three ways to verify it."
-      >
+      <WorkspaceContextBar label="Activity views">
         <Tabs
           ariaLabel="Activity views"
           value={view}

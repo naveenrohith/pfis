@@ -99,7 +99,7 @@ export const WORKSPACES: WorkspaceDefinition[] = [
       { id: 'inbox', label: 'Connections' },
       { id: 'statements', label: 'Statements' },
       { id: 'pipeline', label: 'Diagnostics' },
-      { id: 'settings', label: 'Preferences & data' },
+      { id: 'settings', label: 'Preferences & privacy' },
     ],
   },
 ];

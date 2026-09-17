@@ -1,8 +1,7 @@
 import { Suspense } from 'react';
-import { ArrowUpRight, Sparkles } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { PageIntro, WorkspaceContextBar } from '@/components/system';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Tabs } from '@/components/ui/Tabs';
 import { useSummary } from '@/features/workspace/queries';
@@ -43,26 +42,16 @@ export function InsightsExperience() {
     <div className="space-y-6">
       <PageIntro
         eyebrow="Insights"
-        title="See what is really driving the month."
-        description="Move from totals to causes: the categories, merchants, days, and recurring patterns behind your position."
+        title={leadingCategory ? `Start with ${leadingCategory.name}.` : 'See what is driving the month.'}
+        description="Follow the largest measured driver to its ledger evidence, then review recurring and unusual patterns."
         action={
-          <div className="flex flex-wrap items-center gap-2">
-            {leadingCategory ? (
-              <Badge variant="info">
-                <Sparkles className="h-3.5 w-3.5" /> Leading: {leadingCategory.name}
-              </Badge>
-            ) : null}
-            <Button variant="outline" onClick={() => scrollTo('transactions')}>
-              Open ledger <ArrowUpRight className="h-4 w-4" />
-            </Button>
-          </div>
+          <Button variant="outline" onClick={() => scrollTo('transactions')}>
+            Open ledger <ArrowUpRight className="h-4 w-4" />
+          </Button>
         }
       />
 
-      <WorkspaceContextBar
-        label="Insight views"
-        description="Start with the driver, then trace it to a record."
-      >
+      <WorkspaceContextBar label="Insight views">
         <Tabs
           ariaLabel="Insight views"
           value={view}

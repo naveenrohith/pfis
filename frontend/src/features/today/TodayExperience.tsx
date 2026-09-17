@@ -13,7 +13,6 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ActionSurface,
-  DecisionStrip,
   FinancialHero,
   InsightSurface,
   PageIntro,
@@ -194,26 +193,6 @@ export function TodayExperience() {
         </div>
       ) : null}
 
-      <DecisionStrip
-        items={[
-          {
-            label: 'Position',
-            value: `${formatCurrency(netCashFlow, currency)} net movement`,
-            tone: netCashFlow >= 0 ? 'positive' : 'attention',
-          },
-          {
-            label: 'Evidence',
-            value: lowData ? 'More activity needed' : `${transactionCount} observed entries`,
-            tone: lowData ? 'attention' : 'neutral',
-          },
-          {
-            label: 'Next move',
-            value: primaryAction?.title ?? 'Explore this month',
-            tone: primaryAction ? 'attention' : 'neutral',
-          },
-        ]}
-      />
-
       <div
         id="recommendations"
         className="grid scroll-mt-24 gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,.65fr)]"
@@ -285,96 +264,103 @@ export function TodayExperience() {
           }
           footer={
             primaryAction && !decisions.isLoading ? (
-              <div className="grid gap-3">
-                {actionResolution ||
-                primaryAction.consequence ||
-                primaryAction.smallest_action ||
-                actionConflicts.length ? (
-                  <div className="text-background/72 grid gap-1.5 text-xs">
-                    {actionResolution ? (
-                      <p>
-                        <span className="font-bold text-background">{actionResolution.label}:</span>{' '}
-                        {actionResolution.next_step}
-                      </p>
-                    ) : null}
-                    {primaryAction.consequence ? (
-                      <p>
-                        <span className="font-bold text-background">Bounded consequence:</span>{' '}
-                        {formatRecommendationConsequence(primaryAction.consequence, currency)}
-                      </p>
-                    ) : null}
-                    {primaryAction.smallest_action ? (
-                      <p>
-                        <span className="font-bold text-background">Smallest feasible step:</span>{' '}
-                        {primaryAction.smallest_action}
-                      </p>
-                    ) : null}
-                    {actionConflicts.slice(0, 2).map((conflict) => (
-                      <p key={conflict.code}>
-                        <span className="font-bold text-warning">{conflict.title}:</span>{' '}
-                        {conflict.description}
-                      </p>
-                    ))}
-                    {actionGoals.length ? (
-                      <p>
-                        <span className="font-bold text-background">Supports:</span>{' '}
-                        {actionGoals.map((goal) => goal.label).join(', ')}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={
-                      updateRecommendation.isPending || actionResolution?.status === 'blocked'
-                    }
-                    onClick={() =>
-                      updateRecommendation.mutate({
-                        recommendationId: primaryAction.id,
-                        state: 'accepted',
-                      })
-                    }
-                  >
-                    <Check aria-hidden="true" className="h-3.5 w-3.5" /> Use this action
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-background hover:bg-background/10"
-                    disabled={updateRecommendation.isPending}
-                    aria-label={`Snooze ${primaryAction.title} for 7 days`}
-                    onClick={() =>
-                      updateRecommendation.mutate({
-                        recommendationId: primaryAction.id,
-                        state: 'snoozed',
-                      })
-                    }
-                  >
-                    <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-background hover:bg-background/10"
-                    disabled={updateRecommendation.isPending}
-                    aria-label={`Mark ${primaryAction.title} as not relevant`}
-                    onClick={() =>
-                      updateRecommendation.mutate({
-                        recommendationId: primaryAction.id,
-                        state: 'not_relevant',
-                      })
-                    }
-                  >
-                    <X aria-hidden="true" className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={
+                    updateRecommendation.isPending || actionResolution?.status === 'blocked'
+                  }
+                  onClick={() =>
+                    updateRecommendation.mutate({
+                      recommendationId: primaryAction.id,
+                      state: 'accepted',
+                    })
+                  }
+                >
+                  <Check aria-hidden="true" className="h-3.5 w-3.5" /> Use this action
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-background hover:bg-background/10"
+                  disabled={updateRecommendation.isPending}
+                  aria-label={`Snooze ${primaryAction.title} for 7 days`}
+                  onClick={() =>
+                    updateRecommendation.mutate({
+                      recommendationId: primaryAction.id,
+                      state: 'snoozed',
+                    })
+                  }
+                >
+                  <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-background hover:bg-background/10"
+                  disabled={updateRecommendation.isPending}
+                  aria-label={`Mark ${primaryAction.title} as not relevant`}
+                  onClick={() =>
+                    updateRecommendation.mutate({
+                      recommendationId: primaryAction.id,
+                      state: 'not_relevant',
+                    })
+                  }
+                >
+                  <X aria-hidden="true" className="h-3.5 w-3.5" />
+                </Button>
               </div>
             ) : undefined
           }
         />
       </div>
+
+      {primaryAction &&
+      !decisions.isLoading &&
+      (actionResolution ||
+        primaryAction.consequence ||
+        primaryAction.smallest_action ||
+        actionConflicts.length ||
+        actionGoals.length) ? (
+        <details className="rounded-xl border border-border/70 bg-card px-4 py-3 sm:px-5">
+          <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
+            Show recommendation evidence and trade-offs
+          </summary>
+          <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+            {actionResolution ? (
+              <p>
+                <span className="font-bold text-foreground">{actionResolution.label}:</span>{' '}
+                {actionResolution.next_step}
+              </p>
+            ) : null}
+            {primaryAction.consequence ? (
+              <p>
+                <span className="font-bold text-foreground">Bounded consequence:</span>{' '}
+                {formatRecommendationConsequence(primaryAction.consequence, currency)}
+              </p>
+            ) : null}
+            {primaryAction.smallest_action ? (
+              <p>
+                <span className="font-bold text-foreground">Smallest feasible step:</span>{' '}
+                {primaryAction.smallest_action}
+              </p>
+            ) : null}
+            {actionConflicts.slice(0, 2).map((conflict) => (
+              <p key={conflict.code}>
+                <span className="font-bold text-warning">{conflict.title}:</span>{' '}
+                {conflict.description}
+              </p>
+            ))}
+            {actionGoals.length ? (
+              <p>
+                <span className="font-bold text-foreground">Supports:</span>{' '}
+                {actionGoals.map((goal) => goal.label).join(', ')}
+              </p>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
 
       <RecommendationFollowUp />
 

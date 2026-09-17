@@ -76,14 +76,19 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
             candidates remain labelled; they are not treated as facts.
           </p>
         </div>
-        <dl className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-3">
-          <HeadlineAmount label="Observed spend" value={formatCurrency(spend, currency)} />
-          <HeadlineAmount label="Observed income" value={formatCurrency(income, currency)} />
-          <HeadlineAmount
-            label="vs prior month"
-            value={spendChange == null ? 'No baseline' : formatChange(spendChange)}
-          />
-        </dl>
+        <div className="max-w-sm text-sm leading-6 text-muted-foreground">
+          <p>
+            <span className="font-extrabold text-foreground">
+              {formatCurrency(spend, currency)} observed spend
+            </span>{' '}
+            against {formatCurrency(income, currency)} observed income.
+          </p>
+          <p className="mt-2 text-xs">
+            {spendChange == null
+              ? 'There is no prior-month baseline yet.'
+              : `${formatChange(spendChange)} versus the prior month.`}
+          </p>
+        </div>
       </header>
 
       <div className="grid lg:grid-cols-[minmax(0,1.55fr)_minmax(18rem,0.75fr)]">
@@ -211,8 +216,8 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
       <section className="border-t border-border/70 px-5 py-7 sm:px-8">
         <SectionHeading
           index="02"
-          title="Category pressure"
-          description="Relative contribution to observed spend. Select a row to inspect its transactions."
+          title="Ranked drivers"
+          description="Start with the largest measured contributor, then open its ledger evidence."
         />
         <div className="mt-6 divide-y divide-border/65">
           {categories.length ? (
@@ -250,7 +255,7 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
             ))
           ) : (
             <div className="rounded-xl bg-muted/45 px-4 py-5 text-sm text-muted-foreground">
-              Category pressure will appear after PFIS has observed classified activity.
+              Ranked drivers will appear after PFIS has observed classified activity.
             </div>
           )}
         </div>
@@ -484,15 +489,6 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
         </footer>
       ) : null}
     </article>
-  );
-}
-
-function HeadlineAmount({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-xs font-bold text-muted-foreground">{label}</dt>
-      <dd className="money-value mt-1 whitespace-nowrap text-base font-extrabold">{value}</dd>
-    </div>
   );
 }
 
