@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CardsSection } from './CardsSection';
 
-const { cardDisputes, cardOverview } = vi.hoisted(() => ({
+const { cardDisputes, cardOverview, saveCardPreferences } = vi.hoisted(() => ({
   cardDisputes: vi.fn(),
   cardOverview: vi.fn(),
+  saveCardPreferences: vi.fn(),
 }));
 
 vi.mock('@/features/auth/AuthContext', () => ({
@@ -177,6 +178,7 @@ vi.mock('@/lib/api', () => ({
   api: {
     cardDisputes,
     cardOverview,
+    saveCardPreferences,
     createCardDispute: vi.fn(),
     updateCardDispute: vi.fn(),
   },
@@ -396,6 +398,11 @@ describe('CardsSection activity centre', () => {
       ],
     });
     cardDisputes.mockResolvedValue([]);
+    saveCardPreferences.mockResolvedValue({
+      financial_account_id: 'card-1',
+      utilization_target_pct: 30,
+      reward_rules: [{ label: 'Dining', rate_pct: 2 }],
+    });
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -462,5 +469,20 @@ describe('CardsSection activity centre', () => {
     expect(
       screen.getByText(/PFIS cannot block, reverse, or dispute card activity/i),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Set a utilization and reward rule'));
+    fireEvent.change(screen.getByLabelText('Explicit reward rule'), {
+      target: { value: 'Dining' },
+    });
+    fireEvent.change(screen.getByLabelText('Rate (%)'), {
+      target: { value: '2' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save card guardrails' }));
+    await waitFor(() =>
+      expect(saveCardPreferences).toHaveBeenCalledWith('user-1', 'card-1', {
+        preferred_payment_account_id: null,
+        utilization_target_pct: 30,
+        reward_rules: [{ label: 'Dining', rate_pct: 2 }],
+      }),
+    );
   });
 });

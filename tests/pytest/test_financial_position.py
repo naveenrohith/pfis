@@ -4,6 +4,7 @@ import hashlib
 import sys
 from contextlib import nullcontext
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,12 +15,14 @@ from app.models.financial_position import (
     CreditCardStatement,
     DepositAccountStatement,
     DepositStatementLine,
+    DepositStatementLineReviewDecision,
     StatementAnalysisReview,
     StatementImport,
     StatementLine,
     StatementLineMatch,
     StatementLineReviewDecision,
 )
+from app.models.knowledge import TemporalEventDecision
 from app.models.sync import ConnectorAuditEvent, SyncRun, SyncStatus, UserCorrection
 from app.models.transaction import CardEvent, Transaction, TransactionType
 from app.schemas.financial_position import StatementTextImport
@@ -277,6 +280,33 @@ async def test_commitment_and_reserve_approval_lifecycle_is_explicit_and_user_sc
         json={"approved": False},
     )
     assert forbidden.status_code == 404
+
+
+async def test_commitment_rejects_a_liability_owned_by_another_user(client):
+    user = await create_user(client, "commitment-owner")
+    other = await create_user(client, "commitment-liability-owner")
+    liability = await client.post(
+        f"/api/liabilities?user_id={other['id']}",
+        json={
+            "label": "Other user's loan",
+            "liability_type": "loan",
+            "complete_schedule": False,
+        },
+    )
+    liability.raise_for_status()
+
+    response = await client.post(
+        f"/api/commitments?user_id={user['id']}",
+        json={
+            "label": "Spoofed liability payment",
+            "commitment_type": "loan",
+            "amount": 1000,
+            "due_date": (date.today() + timedelta(days=5)).isoformat(),
+            "liability_id": liability.json()["id"],
+        },
+    )
+
+    assert response.status_code == 404
 
 
 async def test_cash_plan_rejects_stale_verified_balance(client):
@@ -1078,6 +1108,30 @@ async def test_hdfc_text_statement_import_is_idempotent_and_keeps_card_payment_f
     assert body["unbilled_activity_decrease"] == 0
     assert body["refund_tracker"]["status"] == "clear"
     assert body["refund_tracker"]["pending_count"] == 0
+
+
+async def test_hdfc_text_import_rejects_marker_only_legacy_documents(client):
+    user = await create_user(client, "hdfc-marker-only")
+    card = await _account(client, user["id"], "credit_card", "9911")
+
+    response = await client.post(
+        f"/api/statements/hdfc/text?user_id={user['id']}",
+        json={
+            "financial_account_id": card["id"],
+            "document_fingerprint": "b" * 64,
+            "statement_text": """
+            HDFC BANK CREDIT CARD STATEMENT
+            CREDIT CARD NO XX9911
+            TOTAL AMOUNT DUE 500.00
+            MINIMUM AMOUNT DUE 50.00
+            TOTAL CREDIT LIMIT 100000.00
+            PAYMENT DUE DATE 10/09/2026
+            """,
+        },
+    )
+
+    assert response.status_code == 409
+    assert "supported HDFC digital statement layout" in response.json()["error"]["message"]
 
 
 async def test_hdfc_pdf_route_extracts_without_retaining_document_bytes(
@@ -2309,6 +2363,60 @@ async def test_deposit_import_rejects_account_mismatch_before_writes(client, tes
         )
 
 
+async def test_deposit_import_rejects_a_fingerprint_reused_by_another_account(
+    client,
+    test_session_factory,
+):
+    user = await create_user(client, "hdfc-deposit-fingerprint-account")
+    first_account = await client.post(
+        f"/api/accounts?user_id={user['id']}",
+        json={
+            "institution_name": "HDFC Bank",
+            "account_type": "bank",
+            "balance_kind": "asset",
+            "masked_number": "********1234",
+            "currency": "INR",
+        },
+    )
+    second_account = await client.post(
+        f"/api/accounts?user_id={user['id']}",
+        json={
+            "institution_name": "HDFC Bank",
+            "account_type": "bank",
+            "balance_kind": "asset",
+            "masked_number": "XXXX1234",
+            "currency": "INR",
+        },
+    )
+    first_account.raise_for_status()
+    second_account.raise_for_status()
+    payload = {
+        "document_fingerprint": "1" * 64,
+        "statement_text": HDFC_DEPOSIT_FIXTURE,
+    }
+
+    imported = await client.post(
+        f"/api/statements/import/text?user_id={user['id']}",
+        json={**payload, "financial_account_id": first_account.json()["id"]},
+    )
+    imported.raise_for_status()
+    repeated_for_other_account = await client.post(
+        f"/api/statements/import/text?user_id={user['id']}",
+        json={**payload, "financial_account_id": second_account.json()["id"]},
+    )
+
+    assert repeated_for_other_account.status_code == 409
+    async with test_session_factory() as db:
+        assert (
+            await db.scalar(
+                select(func.count(DepositAccountStatement.id)).where(
+                    DepositAccountStatement.user_id == user["id"]
+                )
+            )
+            == 1
+        )
+
+
 async def test_deposit_import_runtime_failure_rolls_back_source_and_ledger_rows(
     client, test_session_factory, monkeypatch
 ):
@@ -2357,6 +2465,152 @@ async def test_deposit_import_runtime_failure_rolls_back_source_and_ledger_rows(
                 select(func.count()).select_from(model).where(model.user_id == user["id"])
             )
             assert count == 0
+
+
+async def test_transaction_delete_clears_statement_and_review_references(
+    client,
+    test_session_factory,
+):
+    user = await create_user(client, "transaction-delete-statement-references")
+    card = await _account(client, user["id"], "credit_card", "9971")
+    bank = await _account(client, user["id"], "bank", "9972")
+    imported = await client.post(
+        f"/api/statements/hdfc/text?user_id={user['id']}",
+        json={
+            "financial_account_id": card["id"],
+            "document_fingerprint": "2" * 64,
+            "statement_text": """
+            HDFC BANK CREDIT CARD STATEMENT
+            STATEMENT DATE: 05/01/2026
+            STATEMENT PERIOD: 06/12/2025 TO 05/01/2026
+            TOTAL AMOUNT DUE: 1,000.00
+            MINIMUM AMOUNT DUE: 100.00
+            PAYMENT DUE DATE: 25/01/2026
+            TOTAL CREDIT LIMIT: 100,000.00
+            AVAILABLE CREDIT LIMIT: 99,000.00
+            22/12/2025 DELETE ME 1,000.00
+            """,
+        },
+    )
+    imported.raise_for_status()
+
+    async with test_session_factory() as db:
+        statement = await db.scalar(
+            select(CreditCardStatement).where(CreditCardStatement.user_id == user["id"])
+        )
+        assert statement is not None
+        card_line = await db.scalar(
+            select(StatementLine).where(StatementLine.credit_card_statement_id == statement.id)
+        )
+        assert card_line is not None
+        transaction = await db.get(Transaction, card_line.created_transaction_id)
+        assert transaction is not None
+        deposit_import = StatementImport(
+            user_id=user["id"],
+            financial_account_id=bank["id"],
+            issuer="HDFC",
+            document_fingerprint="3" * 64,
+            extractor_version="test",
+        )
+        db.add(deposit_import)
+        await db.flush()
+        deposit_statement = DepositAccountStatement(
+            user_id=user["id"],
+            statement_import_id=deposit_import.id,
+            financial_account_id=bank["id"],
+            period_start=date(2026, 1, 1),
+            period_end=date(2026, 1, 2),
+            opening_balance=Decimal("1000.00"),
+            closing_balance=Decimal("1000.00"),
+            currency="INR",
+        )
+        db.add(deposit_statement)
+        await db.flush()
+        deposit_line = DepositStatementLine(
+            user_id=user["id"],
+            deposit_account_statement_id=deposit_statement.id,
+            line_number=1,
+            transaction_date=date(2026, 1, 1),
+            value_date=date(2026, 1, 1),
+            description="DELETE ME EVIDENCE",
+            amount=Decimal("1000.00"),
+            transaction_type="debit",
+            payment_rail="other",
+            balance_after=Decimal("0.00"),
+            review_outcome="matched",
+            created_transaction_id=transaction.id,
+        )
+        db.add(deposit_line)
+        await db.flush()
+        db.add_all(
+            [
+                StatementLineMatch(
+                    user_id=user["id"],
+                    statement_line_id=card_line.id,
+                    transaction_id=transaction.id,
+                    match_method="test",
+                    confidence=Decimal("1.000"),
+                ),
+                StatementLineReviewDecision(
+                    user_id=user["id"],
+                    statement_line_id=card_line.id,
+                    decision="matched",
+                    previous_outcome="needs_review",
+                    new_outcome="matched",
+                    matched_transaction_id=transaction.id,
+                ),
+                DepositStatementLineReviewDecision(
+                    user_id=user["id"],
+                    deposit_statement_line_id=deposit_line.id,
+                    decision="matched",
+                    previous_outcome="needs_review",
+                    new_outcome="matched",
+                    created_transaction_id=transaction.id,
+                ),
+                TemporalEventDecision(
+                    user_id=user["id"],
+                    event_id="delete-me-event",
+                    event_kind="bill",
+                    source_type="test",
+                    source_id="delete-me",
+                    occurrence_date=date(2026, 1, 1),
+                    event_ruleset_version="test",
+                    decision="linked",
+                    transaction_id=transaction.id,
+                ),
+            ]
+        )
+        await db.commit()
+
+        assert await TransactionService(db).delete_transaction(transaction.id) is True
+
+        assert await db.get(Transaction, transaction.id) is None
+        assert (await db.get(StatementLine, card_line.id)).created_transaction_id is None
+        assert (await db.get(DepositStatementLine, deposit_line.id)).created_transaction_id is None
+        assert (
+            await db.scalar(
+                select(StatementLineMatch).where(
+                    StatementLineMatch.transaction_id == transaction.id
+                )
+            )
+            is None
+        )
+        card_decision = await db.scalar(
+            select(StatementLineReviewDecision).where(
+                StatementLineReviewDecision.statement_line_id == card_line.id
+            )
+        )
+        deposit_decision = await db.scalar(
+            select(DepositStatementLineReviewDecision).where(
+                DepositStatementLineReviewDecision.deposit_statement_line_id == deposit_line.id
+            )
+        )
+        temporal_decision = await db.scalar(
+            select(TemporalEventDecision).where(TemporalEventDecision.event_id == "delete-me-event")
+        )
+        assert card_decision is not None and card_decision.matched_transaction_id is None
+        assert deposit_decision is not None and deposit_decision.created_transaction_id is None
+        assert temporal_decision is not None and temporal_decision.transaction_id is None
 
 
 async def test_deposit_import_does_not_swallow_a_duplicate_that_rolled_back_the_unit_of_work(

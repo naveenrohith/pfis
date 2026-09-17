@@ -36,6 +36,13 @@ class UserUpdate(BaseModel):
     timezone: str | None = Field(None, min_length=1, max_length=64)
     raw_email_retention_days: int | None = Field(default=None)
 
+    @field_validator("name", "timezone", mode="before")
+    @classmethod
+    def reject_null_required_fields(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("name and timezone cannot be null")
+        return value
+
     @field_validator("raw_email_retention_days")
     @classmethod
     def validate_raw_email_retention_days(cls, value: int | None) -> int | None:

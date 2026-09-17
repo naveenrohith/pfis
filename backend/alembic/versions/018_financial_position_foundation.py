@@ -14,8 +14,35 @@ branch_labels = None
 depends_on = None
 
 
+def _assert_credit_account_normalization_safe(bind) -> None:
+    collision = bind.execute(
+        sa.text(
+            """
+            SELECT 1
+            FROM financial_accounts
+            WHERE LOWER(account_type) IN ('credit', 'credit card', 'credit_card')
+            GROUP BY user_id, institution_name, masked_number
+            HAVING COUNT(*) > 1
+            LIMIT 1
+            """
+        )
+    ).first()
+    if collision is not None:
+        raise RuntimeError(
+            "Cannot normalize legacy credit-card accounts because account identities collide"
+        )
+
+
 def upgrade() -> None:
-    op.execute("UPDATE financial_accounts SET account_type = 'credit_card' WHERE account_type IN ('credit', 'credit card')")
+    _assert_credit_account_normalization_safe(op.get_bind())
+    op.execute(
+        "UPDATE financial_accounts SET account_type = 'credit_card' "
+        "WHERE LOWER(account_type) IN ('credit', 'credit card')"
+    )
+    op.execute(
+        "UPDATE financial_accounts SET balance_kind = 'liability' "
+        "WHERE account_type = 'credit_card'"
+    )
     op.add_column("transactions", sa.Column("payment_rail", sa.String(length=20), nullable=False, server_default="other"))
     op.add_column("transactions", sa.Column("card_event", sa.String(length=20), nullable=False, server_default="none"))
     op.add_column("transactions", sa.Column("source_kind", sa.String(length=24), nullable=False, server_default="manual"))

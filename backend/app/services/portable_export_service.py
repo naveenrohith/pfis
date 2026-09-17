@@ -284,15 +284,7 @@ async def _fetch_rows(
 
 def _table_filter(table: Table, user_id: str) -> ColumnElement[bool]:
     tables = Base.metadata.tables
-    household_ids = (
-        select(tables["households"].c.id)
-        .where(tables["households"].c.owner_user_id == user_id)
-        .union(
-            select(tables["household_members"].c.household_id).where(
-                tables["household_members"].c.user_id == user_id
-            )
-        )
-    )
+    household_ids = _household_ids_for_user(user_id)
     if table.name == "users":
         return table.c.id == user_id
     if table.name == "categories":
@@ -318,15 +310,7 @@ def _table_filter(table: Table, user_id: str) -> ColumnElement[bool]:
 
 async def _shared_household_aliases(db: AsyncSession, user_id: str) -> dict[str, str]:
     tables = Base.metadata.tables
-    household_ids = (
-        select(tables["households"].c.id)
-        .where(tables["households"].c.owner_user_id == user_id)
-        .union(
-            select(tables["household_members"].c.household_id).where(
-                tables["household_members"].c.user_id == user_id
-            )
-        )
-    )
+    household_ids = _household_ids_for_user(user_id)
     member_ids = (
         await db.scalars(
             select(tables["household_members"].c.user_id)
@@ -344,6 +328,20 @@ async def _shared_household_aliases(db: AsyncSession, user_id: str) -> dict[str,
         }
     )
     return aliases
+
+
+def _household_ids_for_user(user_id: str):
+    tables = Base.metadata.tables
+    return (
+        select(tables["households"].c.id)
+        .where(tables["households"].c.owner_user_id == user_id)
+        .union(
+            select(tables["household_members"].c.household_id).where(
+                tables["household_members"].c.user_id == user_id,
+                tables["household_members"].c.left_at.is_(None),
+            )
+        )
+    )
 
 
 def _portable_record(

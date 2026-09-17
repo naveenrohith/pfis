@@ -76,7 +76,7 @@ PACKET_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"^frontend/|^backend/requirements\.txt$|^backend/app/|^tests/pytest/|^\.github/|^Makefile$"
         ),
     ),
-    ("IR-6", re.compile(r"^docs/")),
+    ("IR-6", re.compile(r"^README\.md$|^docs/")),
 )
 
 
@@ -101,19 +101,27 @@ def _git_paths(workspace: Path, *arguments: str) -> list[str]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
-def changed_paths(workspace: Path) -> list[str]:
-    """Return modified and untracked files, expanding untracked directories."""
+def changed_paths(workspace: Path, *, base_ref: str | None = None) -> list[str]:
+    """Return committed changes from a base plus modified and untracked files."""
 
-    paths = {
-        *_git_paths(workspace, "diff", "--name-only", "HEAD"),
-        *_git_paths(workspace, "ls-files", "--others", "--exclude-standard"),
-    }
+    effective_base_ref = base_ref if base_ref and base_ref != "0" * 40 else None
+    paths = set(
+        _git_paths(
+            workspace,
+            "diff",
+            "--name-only",
+            f"{effective_base_ref}...HEAD" if effective_base_ref else "HEAD",
+        )
+    )
+    if effective_base_ref:
+        paths.update(_git_paths(workspace, "diff", "--name-only", "HEAD"))
+    paths.update(_git_paths(workspace, "ls-files", "--others", "--exclude-standard"))
     return sorted(paths)
 
 
-def build_report(workspace: Path) -> dict[str, object]:
+def build_report(workspace: Path, *, base_ref: str | None = None) -> dict[str, object]:
     assignments = []
-    for path in changed_paths(workspace):
+    for path in changed_paths(workspace, base_ref=base_ref):
         assignments.append({"path": path, "packet": classify_path(path)})
     counts = Counter(item["packet"] for item in assignments if item["packet"] is not None)
     return {
@@ -128,11 +136,15 @@ def build_report(workspace: Path) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, default=Path.cwd())
+    parser.add_argument(
+        "--base-ref",
+        help="Compare committed changes from this ref to HEAD instead of only the worktree.",
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
     workspace = args.workspace.resolve()
-    report = build_report(workspace)
+    report = build_report(workspace, base_ref=args.base_ref)
     rendered = json.dumps(report, indent=2, sort_keys=True)
     if args.output:
         args.output.write_text(rendered + "\n", encoding="utf-8")

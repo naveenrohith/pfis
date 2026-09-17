@@ -42,8 +42,12 @@ start them explicitly with `npm run supabase:start:full` when needed.
 
 Then open:
 
-- Dashboard: http://127.0.0.1:8000/dashboard
-- API docs: http://127.0.0.1:8000/docs
+- Dashboard: http://localhost:8000/dashboard
+- API docs: http://localhost:8000/docs
+
+Use `localhost` consistently during Google sign-in. The local OAuth callback
+and state cookie are configured for that host; switching between `localhost`
+and `127.0.0.1` during one sign-in flow causes the callback to be rejected.
 
 ### Optional manual startup
 

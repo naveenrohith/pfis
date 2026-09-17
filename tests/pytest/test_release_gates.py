@@ -9,7 +9,7 @@ import httpx
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from scripts import postgres_restore_drill
+from scripts import check_worktree_inventory, postgres_restore_drill
 from scripts.check_migration_parity import database_url_for
 from scripts.check_worktree_inventory import build_report, classify_path
 from scripts.intelligence_release_gate import validate_balance_reconciliation_report
@@ -60,6 +60,7 @@ def test_worktree_inventory_uses_ordered_packet_ownership():
     )
     assert classify_path("frontend/src/app/App.tsx") == "IR-5"
     assert classify_path("docs/security.md") == "IR-6"
+    assert classify_path("README.md") == "IR-6"
     assert classify_path("UNASSIGNED_ROOT_FILE.txt") is None
 
 
@@ -78,6 +79,28 @@ def test_current_worktree_inventory_has_no_unassigned_files():
 
     assert sum(report["packet_counts"].values()) == report["total"]
     assert report["unassigned"] == []
+
+
+def test_worktree_inventory_compares_committed_changes_from_base(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_git_paths(_workspace: Path, *arguments: str) -> list[str]:
+        calls.append(arguments)
+        if arguments == ("diff", "--name-only", "base-sha...HEAD"):
+            return ["frontend/src/app/App.tsx"]
+        return []
+
+    monkeypatch.setattr(check_worktree_inventory, "_git_paths", fake_git_paths)
+
+    report = check_worktree_inventory.build_report(Path("."), base_ref="base-sha")
+
+    assert report["total"] == 1
+    assert report["packet_counts"] == {"IR-5": 1}
+    assert calls == [
+        ("diff", "--name-only", "base-sha...HEAD"),
+        ("diff", "--name-only", "HEAD"),
+        ("ls-files", "--others", "--exclude-standard"),
+    ]
 
 
 def test_release_gate_requires_provider_control_identifiers():

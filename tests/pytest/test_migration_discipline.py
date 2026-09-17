@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import uuid
 from collections.abc import Iterator
@@ -91,6 +92,35 @@ def test_migrations_use_portable_boolean_server_defaults():
 
     assert 'server_default=sa.text("1")' not in source
     assert 'server_default=sa.text("0")' not in source
+
+
+def test_credit_account_normalization_fails_closed_on_identity_collisions():
+    migration_path = (
+        ROOT / "backend" / "alembic" / "versions" / "018_financial_position_foundation.py"
+    )
+    spec = importlib.util.spec_from_file_location("financial_position_018", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    class Result:
+        def __init__(self, row):
+            self.row = row
+
+        def first(self):
+            return self.row
+
+    class Bind:
+        def __init__(self, row):
+            self.row = row
+
+        def execute(self, statement):
+            assert "LOWER(account_type)" in str(statement)
+            return Result(self.row)
+
+    migration._assert_credit_account_normalization_safe(Bind(None))
+    with pytest.raises(RuntimeError, match="account identities collide"):
+        migration._assert_credit_account_normalization_safe(Bind((1,)))
 
 
 def test_alembic_head_matches_orm_and_database_constraints():

@@ -157,6 +157,11 @@ layout coverage; new layouts require reviewed de-identified samples and new
 regression tests. Unknown or mixed signatures fail closed as `unsupported` or
 `ambiguous`.
 
+The direct HDFC card text endpoint also retains a compact de-identified fixture
+profile for API regression coverage. It is accepted only when the complete
+statement date, billing period, due date, due/minimum-due, and credit-limit
+facts are present; marker-only or unfamiliar text is rejected before extraction.
+
 An issuer-neutral `generic-deposit-tabular-v1` profile is also write-enabled
 when a non-HDFC bank statement proves the same minimum evidence: a masked
 account suffix, statement period, opening balance, explicit debit/credit and

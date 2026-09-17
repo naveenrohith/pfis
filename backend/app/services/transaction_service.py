@@ -19,7 +19,14 @@ from sqlalchemy.orm import selectinload
 from app.models.account import AccountLinkRule, FinancialAccount
 from app.models.category import Category, UserMerchantRule
 from app.models.email import RawEmail
-from app.models.financial_position import StatementLine, StatementLineMatch
+from app.models.financial_position import (
+    DepositStatementLine,
+    DepositStatementLineReviewDecision,
+    StatementLine,
+    StatementLineMatch,
+    StatementLineReviewDecision,
+)
+from app.models.knowledge import TemporalEventDecision
 from app.models.summary import MonthlySummary
 from app.models.sync import PipelineEvent, UserCorrection
 from app.models.transaction import (
@@ -1226,6 +1233,38 @@ class TransactionService:
             )
             await self.db.execute(
                 delete(TransactionSplit).where(TransactionSplit.transaction_id.in_(transaction_ids))
+            )
+            await self.db.execute(
+                update(DepositStatementLine)
+                .where(DepositStatementLine.created_transaction_id.in_(transaction_ids))
+                .values(created_transaction_id=None)
+            )
+            await self.db.execute(
+                update(DepositStatementLineReviewDecision)
+                .where(
+                    DepositStatementLineReviewDecision.created_transaction_id.in_(transaction_ids)
+                )
+                .values(created_transaction_id=None)
+            )
+            await self.db.execute(
+                update(StatementLine)
+                .where(StatementLine.created_transaction_id.in_(transaction_ids))
+                .values(created_transaction_id=None)
+            )
+            await self.db.execute(
+                delete(StatementLineMatch).where(
+                    StatementLineMatch.transaction_id.in_(transaction_ids)
+                )
+            )
+            await self.db.execute(
+                update(StatementLineReviewDecision)
+                .where(StatementLineReviewDecision.matched_transaction_id.in_(transaction_ids))
+                .values(matched_transaction_id=None)
+            )
+            await self.db.execute(
+                update(TemporalEventDecision)
+                .where(TemporalEventDecision.transaction_id.in_(transaction_ids))
+                .values(transaction_id=None)
             )
             await self.db.execute(delete(Transaction).where(Transaction.id.in_(transaction_ids)))
             for user_id, transaction_date in affected_periods:

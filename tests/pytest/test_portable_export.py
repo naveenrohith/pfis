@@ -268,7 +268,8 @@ async def test_portable_export_is_owned_complete_and_secret_free(
             )
         )
         household = Household(owner_user_id=user["id"], name="Portable household")
-        db.add(household)
+        closed_household = Household(owner_user_id=other["id"], name="Closed household")
+        db.add_all([household, closed_household])
         await db.flush()
         db.add_all(
             [
@@ -300,6 +301,21 @@ async def test_portable_export_is_owned_complete_and_secret_free(
                     amount=Decimal("40.00"),
                     currency="INR",
                     settlement_date=date(2026, 7, 3),
+                ),
+                HouseholdMember(
+                    household_id=closed_household.id,
+                    user_id=user["id"],
+                    role="member",
+                    left_at=datetime(2026, 7, 4, tzinfo=UTC),
+                ),
+                HouseholdExpense(
+                    household_id=closed_household.id,
+                    created_by_user_id=other["id"],
+                    payer_user_id=other["id"],
+                    label="Closed household evidence",
+                    amount=Decimal("99.00"),
+                    currency="INR",
+                    expense_date=date(2026, 7, 4),
                 ),
             ]
         )
@@ -341,6 +357,7 @@ async def test_portable_export_is_owned_complete_and_secret_free(
         corrections = _records(archive, "user_corrections")
         members = _records(archive, "household_members")
         expenses = _records(archive, "household_expenses")
+        households = _records(archive, "households")
         temporal_decisions = _records(archive, "temporal_event_decisions")
         forecast_snapshots = _records(archive, "cash_flow_forecast_snapshots")
         forecast_outcomes = _records(archive, "cash_flow_forecast_outcomes")
@@ -350,6 +367,8 @@ async def test_portable_export_is_owned_complete_and_secret_free(
         assert corrections[0]["new_value"] == "Portable Merchant"
         assert {row["user_id"] for row in members} == {user["id"], "shared-member-001"}
         assert set(expenses[0]["splits_json"]) == {user["id"], "shared-member-001"}
+        assert all(row["id"] != closed_household.id for row in households)
+        assert all(row["label"] != "Closed household evidence" for row in expenses)
         assert [row["event_id"] for row in temporal_decisions] == ["portable-owned-temporal-event"]
         assert temporal_decisions[0]["transaction_id"] == transactions[0]["id"]
         assert [row["id"] for row in forecast_snapshots] == [own_forecast.id]

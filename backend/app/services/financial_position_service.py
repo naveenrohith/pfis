@@ -133,6 +133,7 @@ from app.services.hdfc_statement_extractor import (
     EXTRACTOR_VERSION,
     classify_emi_component,
     extract_hdfc_statement,
+    is_legacy_layout,
     is_reviewed_layout,
 )
 from app.services.knowledge.recurring_knowledge import RecurringPatternService
@@ -714,6 +715,15 @@ class FinancialPositionService:
 
     async def create_commitment(self, user_id: str, data: CommitmentCreate) -> CommitmentResponse:
         await self._validate_optional_account(user_id, data.financial_account_id)
+        if data.liability_id is not None:
+            liability_id = await self.db.scalar(
+                select(Liability.id).where(
+                    Liability.id == data.liability_id,
+                    Liability.user_id == user_id,
+                )
+            )
+            if liability_id is None:
+                raise LookupError("Liability not found")
         commitment = Commitment(user_id=user_id, **data.model_dump())
         self.db.add(commitment)
         await self.db.flush()
@@ -2234,10 +2244,7 @@ class FinancialPositionService:
             raise ValueError("HDFC statements require a credit-card account")
         if account.currency != "INR":
             raise ValueError("HDFC statement imports currently support INR accounts only")
-        if (
-            "HDFC" not in data.statement_text.upper()
-            or "TOTAL AMOUNT DUE" not in data.statement_text.upper()
-        ):
+        if not (is_reviewed_layout(data.statement_text) or is_legacy_layout(data.statement_text)):
             raise ValueError("This is not the supported HDFC digital statement layout")
         existing_statement = await self._existing_credit_card_statement(user_id, data, account)
         if existing_statement is not None:

@@ -47,6 +47,8 @@ async def persist_deposit_statement(
         )
     )
     if existing_import is not None:
+        if existing_import.financial_account_id != account.id:
+            raise ValueError("The statement fingerprint belongs to a different account")
         existing_statement = await service.db.scalar(
             select(DepositAccountStatement).where(
                 DepositAccountStatement.statement_import_id == existing_import.id,

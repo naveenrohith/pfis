@@ -61,6 +61,32 @@ def is_reviewed_layout(text: str) -> bool:
     return all(marker in upper for marker in REVIEWED_LAYOUT_MARKERS)
 
 
+def is_legacy_layout(text: str) -> bool:
+    """Recognize only the compact, de-identified fixture-compatible profile."""
+
+    upper = text.upper()
+    if "HDFC BANK CREDIT CARD STATEMENT" not in upper:
+        return False
+    if _labelled_date(text, r"STATEMENT\s+DATE") is None:
+        return False
+    if not re.search(
+        rf"(?:STATEMENT|BILLING)\s+PERIOD\s*:?\s*"
+        rf"({_DATE_PATTERN})\s*(?:TO|-)\s*({_DATE_PATTERN})",
+        text,
+        re.IGNORECASE,
+    ):
+        return False
+    return all(
+        (
+            _amount_after(text, r"TOTAL\s+AMOUNT\s+DUE") is not None,
+            _amount_after(text, r"MINIMUM(?:\s+AMOUNT)?\s+DUE") is not None,
+            _amount_after(text, r"TOTAL\s+CREDIT\s+LIMIT") is not None,
+            _amount_after(text, r"AVAILABLE\s+CREDIT\s+LIMIT") is not None,
+            _labelled_date(text, r"(?:PAYMENT\s+)?DUE\s+DATE") is not None,
+        )
+    )
+
+
 def detect_hdfc_statement_document(text: str) -> HdfcStatementDocumentDetection:
     """Classify a complete HDFC card/deposit document without extracting values.
 
@@ -178,6 +204,8 @@ def _unique_signal_codes(codes: tuple[str, ...]) -> tuple[str, ...]:
 
 def extract_hdfc_statement(text: str) -> dict[str, Any]:
     """Extract a reviewed layout or the de-identified legacy fixture format."""
+    if not (is_reviewed_layout(text) or is_legacy_layout(text)):
+        raise ValueError("The HDFC statement does not match a supported layout")
     statement_date = _labelled_date(text, r"STATEMENT\s+DATE")
     period = re.search(
         rf"(?:STATEMENT|BILLING)\s+PERIOD\s*:?\s*"

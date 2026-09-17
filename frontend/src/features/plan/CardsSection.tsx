@@ -858,7 +858,7 @@ export function CardsSection() {
           paymentDraft.paying_account_id || overview.data?.preferred_payment_account_id || null,
         utilization_target_pct: preferenceDraft.utilization_target_pct
           ? Number(preferenceDraft.utilization_target_pct)
-          : null,
+          : (overview.data?.utilization_target_pct ?? null),
         reward_rules:
           preferenceDraft.reward_label.trim() && preferenceDraft.reward_rate
             ? [

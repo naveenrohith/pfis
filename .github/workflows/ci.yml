@@ -35,6 +35,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v5
@@ -48,7 +50,11 @@ jobs:
           pip install -r backend/requirements-dev.txt
 
       - name: Validate integration packet ownership
-        run: python scripts/check_worktree_inventory.py --workspace . --output worktree-inventory.json
+        run: >-
+          python scripts/check_worktree_inventory.py
+          --workspace .
+          --base-ref "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}"
+          --output worktree-inventory.json
 
       - name: Ruff (lint)
         run: ruff check backend/app scripts tests

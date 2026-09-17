@@ -64,6 +64,16 @@ async def test_timezone_update_is_validated_and_user_scoped(client):
         json={"timezone": "Mars/Olympus_Mons"},
         headers=auth_headers(owner_token),
     )
+    null_name = await client.patch(
+        f"/api/users/{owner['id']}",
+        json={"name": None},
+        headers=auth_headers(owner_token),
+    )
+    null_timezone = await client.patch(
+        f"/api/users/{owner['id']}",
+        json={"timezone": None},
+        headers=auth_headers(owner_token),
+    )
     forbidden = await client.patch(
         f"/api/users/{other['id']}",
         json={"timezone": "UTC"},
@@ -73,6 +83,8 @@ async def test_timezone_update_is_validated_and_user_scoped(client):
     updated.raise_for_status()
     assert updated.json()["timezone"] == "America/New_York"
     assert invalid.status_code == 422
+    assert null_name.status_code == 422
+    assert null_timezone.status_code == 422
     assert forbidden.status_code == 403
 
 
