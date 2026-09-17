@@ -92,7 +92,7 @@ test('all five destinations and their primary tabs are deep-linkable', async ({ 
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
   await expect(page).toHaveURL(/#cash-plan$/);
-  await page.getByRole('tab', { name: 'Verified position', exact: true }).click();
+  await page.getByRole('tab', { name: 'Position', exact: true }).click();
   await expect(page).toHaveURL(/#networth$/);
 
   await page.getByRole('button', { name: 'Insights', exact: true }).click();
@@ -113,7 +113,7 @@ test('financial roadmap workspaces are responsive, keyboard reachable, and acces
   await openDemoWorkspace(page);
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
-  for (const tabName of ['Safe to spend', 'Verified position', 'Commitments', 'Outlook & guardrails']) {
+  for (const tabName of ['Safe to spend', 'Position', 'Cards', 'Commitments', 'Outlook', 'Budgets']) {
     const tab = page.getByRole('tab', { name: tabName, exact: true });
     await tab.scrollIntoViewIfNeeded();
     await tab.focus();
@@ -130,10 +130,10 @@ test('financial roadmap workspaces are responsive, keyboard reachable, and acces
     await expectNoHorizontalOverflow(page);
   }
 
+  await page.getByRole('tab', { name: 'Cards', exact: true }).click();
+  await expect(page).toHaveURL(/#cards$/);
   await page.getByRole('tab', { name: 'Commitments', exact: true }).click();
   await expect(page).toHaveURL(/#obligations$/);
-  await page.getByRole('button', { name: 'Cards', exact: true }).click();
-  await expect(page).toHaveURL(/#cards$/);
   await page.getByRole('button', { name: 'All liabilities', exact: true }).click();
   await expect(page).toHaveURL(/#liabilities$/);
 
@@ -188,7 +188,7 @@ test('scenario preview and briefing rhythm stay user controlled', async ({ page 
   await openDemoWorkspace(page);
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
-  await page.getByRole('tab', { name: 'Outlook & guardrails', exact: true }).click();
+  await page.getByRole('tab', { name: 'Outlook', exact: true }).click();
   await page.getByLabel('Add expected income', { exact: true }).fill('5000');
   await page.getByRole('button', { name: 'Preview change', exact: true }).click();
   const studio = page.getByRole('region', { name: 'Test one change before you commit to it.' });

@@ -3,15 +3,74 @@
 PFIS is evolving from a long dashboard into a financial decision workspace. The canonical React UI groups
 features by the decisions users are trying to make while preserving existing section hashes and API contracts.
 
+## Quiet-ledger overhaul record
+
+The September 2026 overhaul is implemented on `codex/pfis-uiux-overhaul`, branched from
+`chore/pfis-phased-integration`. The current integration branch remains the source of truth for financial
+behavior; the main branch was used only as the visual shell reference.
+
+The phase commits are intentionally reviewable:
+
+| Phase | Commit | Scope |
+|---|---|---|
+| Quiet-ledger shell | `a643a0f` · `ui: restore quiet ledger shell` | Slim rail, concise header, flat Plan labels, calmer spacing |
+| Plan Cards | `08151b9` · `ui: make plan cards first-class` | Flat Plan views, Cards decision workspace, progressive disclosure, typed observation client |
+| Financial workspaces | `e7e33d9` · `ui: simplify financial workspaces` | Today, Activity, Insights, and Data & settings hierarchy |
+
+The implementation keeps the existing `DashboardSectionId` values and section hashes, including
+`#cards`, `#liabilities`, `#household`, `#obligations`, `#networth`, `#analytics`, and `#budgets`.
+No new frontend framework, hosted component runtime, analytics processor, provider, migration, or financial
+calculation rule was introduced.
+
+### External component and source register
+
+The following research queries and sources were reviewed for interaction patterns. They are references for
+PFIS primitives, not instructions to copy catalog blocks into the product.
+
+| Query / source | License or access note | Adoption decision |
+|---|---|---|
+| `accessible collapsible finance dashboard sidebar mobile sheet` | PFIS-local design research | Adapted into the existing rail and five-tab mobile navigation; hashes and keyboard behavior remain PFIS-owned. |
+| `shadcn card workspace tabs progressive disclosure` | Official [shadcn MCP documentation](https://ui.shadcn.com/docs/mcp); registry discovery only | Retain existing Base UI/Radix-compatible PFIS primitives and adapt the existing `Tabs`, `Dialog`, `PageIntro`, and disclosure patterns. No registry package was added. |
+| `credit card financial dashboard utilization runway evidence` | PFIS product-domain research | Used to organize existing card read models as position → utilization → runway → evidence; no new calculation rule was added. |
+| `accessible tabs disclosure dialog focus restoration` | PFIS accessibility research plus the local dialog implementation | Use native disclosures and existing focus-managed dialogs; verify keyboard, escape, focus restoration, reduced motion, and no sticky-header clipping. |
+| `quiet finance dashboard activity ledger insights ranked drivers` | PFIS visual hierarchy research | Applied to Today, Activity, Insights, and Data surfaces; no generic dashboard grid was introduced. |
+| [21st repository](https://github.com/serafimcloud/21st) | Repository license reviewed as MIT | Reference only for isolated interaction ideas. No hosted 21st runtime, catalog block, or copied dependency was added. |
+| [21st hosted MCP setup](https://github.com/21st-dev/magic-mcp/blob/main/llms-install.md) | Requires external authentication/API key | Not configured or used. PFIS does not depend on hosted design tooling at runtime. |
+| [Annnimate 21st alternatives](https://annnimate.com/alternatives/21st-dev) | Catalog/comparison page; no component license adopted | Not used as a code or dependency source. Core dashboard motion remains restrained PFIS motion. |
+| [Web Interface Guidelines](https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/main/command.md) | Public guideline document | Used as a final review checklist for responsive behavior, forms, motion, accessibility, and performance; no code copied. |
+
+### Cards contract decision
+
+The existing `POST /accounts/{account_id}/card-observations` route accepts issuer/connector observations and
+requires connector provenance and a complete coverage envelope. The frontend now exposes a typed
+`createCardPositionObservation` client method for that contract, but the visible “Record verified position”
+dialog deliberately uses the existing manual `POST /accounts/{account_id}/balances` route. This keeps a
+user-entered value labelled user-observed instead of incorrectly presenting it as issuer-confirmed. Successful
+saves alone invalidate the card overview, forecast, due-runway, utilization, and account-position queries.
+
+### Current gate status
+
+The integrated gate completed locally on 2026-09-17:
+
+- `npm run lint`: passed.
+- `npm run test`: 38 files and 95 tests passed.
+- `npm run build`: passed; `npm run quality:bundle`: passed (92.8 KB initial-route gzip, 47 lazy chunks).
+- `npm run test:e2e:ci`: 26 passed and 10 intentional project skips across 360px, 768px, and 1440px light/dark projects. The run covered keyboard navigation, hash deep links, axe serious/critical checks, reduced motion, responsive overflow, and the flat Plan labels.
+- Visual baselines: 6 passed after regenerating the intentional Today quiet-ledger shell snapshots for light/dark mobile, tablet, and desktop.
+- `npm run quality:lighthouse`: passed all configured assertions across three runs against the local release-like host at `/dashboard/`.
+
+The separate staging/release-host approval remains an operational follow-up. Pushing the branch is a separate
+authorized action.
+
 ## Workspace Model
 
 | Workspace | Sections | User outcome |
 |---|---|---|
-| Home | Overview, Guidance, Recommendations | See monthly position, a deterministic brief, and next priorities |
-| Understand | Timeline, Insights, Merchants, Categories | Explain what changed and why |
-| Plan | Net Worth, Analytics, Budgets | Track owned balances and adjust future financial behavior |
-| Act | Review, Transactions | Resolve uncertainty and inspect records |
-| System | Inbox/Connectors, Pipeline Health | Operate ingestion and recover failures |
+| Today | Financial Horizon, one priority action, up to three supporting signals | Understand the month and choose the next safe action |
+| Activity | Transactions, Review, Timeline | Inspect the ledger and resolve uncertainty |
+| Plan | Safe to spend, Position, Cards, Commitments, Outlook, Budgets | Move from current position to deliberate financial choices |
+| Insights | Drivers, Categories, Merchants | Explain what changed and rank the evidence behind it |
+| Data & settings | Connections, Statements, Preferences & privacy, Diagnostics | Control sources, privacy, recovery, and technical health |
 
 Desktop navigation uses a persistent workspace sidebar. Mobile navigation uses five persistent bottom tabs plus
 a global quick-add action.
@@ -66,6 +125,11 @@ performance, privacy, and maintenance review before adoption. Never copy a block
 
 ## Delivery Tracker
 
+- [x] Quiet-ledger shell phase: slim rail, concise header, and stable five-destination navigation.
+- [x] Flat Plan phase: Cards is a first-class destination with compatible legacy section helpers.
+- [x] Cards phase: decision-led first viewport, progressive disclosure, typed connector client, and user-observed position dialog.
+- [x] Financial workspaces phase: Today, Activity, Insights, and Data & settings hierarchy aligned to the quiet-ledger model.
+- [x] Integrated overhaul gate: full lint, test, build, bundle, e2e, accessibility, responsive, visual, and release-like performance checks.
 - [x] Audit current React shell and reusable primitives.
 - [x] Configure official shadcn MCP discovery for VS Code.
 - [x] Establish MCP adoption rules and the initial decision record.
