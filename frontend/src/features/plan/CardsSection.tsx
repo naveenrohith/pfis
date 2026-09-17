@@ -12,11 +12,12 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FinancialHero, LedgerRow } from '@/components/system';
+import { FinancialHero, LedgerRow, PageIntro } from '@/components/system';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input, Label, Select } from '@/components/ui/Input';
 import { EmptyState } from '@/components/ui/Skeleton';
+import { Tabs } from '@/components/ui/Tabs';
 import { useAuth } from '@/features/auth/AuthContext';
 import {
   useAccountBalanceForecast,
@@ -44,6 +45,15 @@ import type {
   CardStatementLine,
 } from '@/lib/types';
 import { CardUtilizationHistoryPanel } from './CardUtilizationHistoryPanel';
+
+type CardWorkspaceView = 'overview' | 'activity' | 'plan' | 'evidence';
+
+const CARD_WORKSPACE_TABS = [
+  { value: 'overview', label: 'Overview' },
+  { value: 'activity', label: 'Activity' },
+  { value: 'plan', label: 'Payment plan' },
+  { value: 'evidence', label: 'Evidence & controls' },
+] as const;
 
 const projectionStatusCopy: Record<
   Exclude<CardStatementProjection['status'], 'available'>,
@@ -768,7 +778,7 @@ function EmiEvidenceRow({ plan, currency }: { plan: CardEmiPlan; currency: strin
   );
 }
 
-export function CardsSection() {
+export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
   const { user } = useAuth();
   const financialToday = dateInputValueInTimezone(user?.timezone ?? 'Asia/Kolkata');
   const queryClient = useQueryClient();
@@ -778,6 +788,12 @@ export function CardsSection() {
     [accounts.data],
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [cardView, setCardView] = useState<CardWorkspaceView>('overview');
+  const [positionDialogOpen, setPositionDialogOpen] = useState(false);
+  const [positionDraft, setPositionDraft] = useState({
+    amount: '',
+    asOf: financialToday,
+  });
   const [disputeDraft, setDisputeDraft] = useState({
     statement_line_id: '',
     label: '',
@@ -813,6 +829,29 @@ export function CardsSection() {
     queryFn: () => api.cardOverview(user!.id, cardId),
     enabled: Boolean(user && cardId),
     staleTime: 5 * 60 * 1000,
+  });
+  const savePosition = useMutation({
+    mutationFn: () =>
+      api.addBalance(user!.id, cardId, Number(positionDraft.amount), positionDraft.asOf),
+    onSuccess: async () => {
+      setPositionDialogOpen(false);
+      setPositionDraft({ amount: '', asOf: financialToday });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ['cardOverview', user!.id, cardId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['balanceForecast', user!.id, cardId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['cardDueRunway', user!.id, cardId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['cardUtilizationHistory', user!.id, cardId],
+        }),
+        queryClient.invalidateQueries({ queryKey: ['accountPosition', user!.id, cardId] }),
+      ]);
+    },
   });
   const disputes = useQuery({
     queryKey: ['cardDisputes', user?.id ?? '', cardId],
@@ -997,38 +1036,123 @@ export function CardsSection() {
       : 'Import a statement or record a verified card balance before PFIS estimates current outstanding.';
 
   return (
-    <div className="space-y-6">
-      <CardPortfolioUpcomingPanel
-        portfolio={portfolioUpcoming.data}
-        currency={card.currency}
-        isLoading={portfolioUpcoming.isLoading}
-        error={portfolioUpcoming.error}
+    <div id={anchorId} className="scroll-mt-[10.5rem] space-y-6 lg:scroll-mt-[11.5rem]">
+      <PageIntro
+        eyebrow="Cards"
+        title="Cards"
+        description="See what is due, what is currently outstanding, and what needs attention next."
       />
 
-      <CardPortfolioPaymentPlanPanel
-        plan={portfolioPaymentPlan.data}
-        currency={card.currency}
-        isLoading={portfolioPaymentPlan.isLoading}
-        error={portfolioPaymentPlan.error}
-      />
-
-      <CardSpendRoutingPanel cardCount={cards.length} currency={card.currency} />
-
-      {cards.length > 1 ? (
-        <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Credit cards">
+      <div
+        className="flex flex-col gap-3 rounded-xl border border-border/70 bg-card/60 p-2 sm:flex-row sm:items-center sm:justify-between"
+        aria-label="Card context"
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <span className="px-2 text-xs font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
+            Card
+          </span>
           {cards.map((item) => (
             <button
               type="button"
               key={item.id}
-              onClick={() => setSelectedId(item.id)}
+              onClick={() => {
+                setSelectedId(item.id);
+                setCardView('overview');
+              }}
               aria-pressed={item.id === cardId}
-              className="focus-ring min-h-11 shrink-0 rounded-lg border border-border px-3 text-sm font-bold hover:bg-muted"
+              className={`focus-ring min-h-10 rounded-md px-3 text-sm font-bold transition-colors ${
+                item.id === cardId
+                  ? 'bg-secondary text-foreground'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
             >
               {item.institution_name} · {item.masked_number}
             </button>
           ))}
         </div>
-      ) : null}
+        <div className="flex flex-wrap items-center gap-2 px-2 pb-1 sm:pb-0">
+          <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-bold text-muted-foreground">
+            {providerObserved ? 'Observed' : 'Estimated'}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setPositionDialogOpen(true)}
+            aria-haspopup="dialog"
+          >
+            Record verified position
+          </Button>
+        </div>
+      </div>
+
+      <Dialog
+        open={positionDialogOpen}
+        onClose={() => {
+          if (!savePosition.isPending) setPositionDialogOpen(false);
+        }}
+        title="Record a verified position"
+        description="This saves a user-observed balance for planning. It does not confirm an issuer value or contact your bank."
+      >
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (positionDraft.amount.trim() && Number(positionDraft.amount) >= 0) {
+              savePosition.mutate();
+            }
+          }}
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="card-position-amount">Current outstanding</Label>
+            <Input
+              id="card-position-amount"
+              data-dialog-initial-focus
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              value={positionDraft.amount}
+              onChange={(event) =>
+                setPositionDraft((current) => ({ ...current, amount: event.target.value }))
+              }
+              required
+            />
+            <p className="text-xs leading-5 text-muted-foreground">
+              Enter the balance you verified yourself. PFIS will label it user-observed.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="card-position-as-of">As of</Label>
+            <Input
+              id="card-position-as-of"
+              type="date"
+              value={positionDraft.asOf}
+              onChange={(event) =>
+                setPositionDraft((current) => ({ ...current, asOf: event.target.value }))
+              }
+              required
+            />
+          </div>
+          {savePosition.error ? (
+            <p role="alert" className="text-sm font-bold text-danger">
+              {savePosition.error.message}
+            </p>
+          ) : null}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setPositionDialogOpen(false)}
+              disabled={savePosition.isPending}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={savePosition.isPending}>
+              {savePosition.isPending ? 'Saving…' : 'Save user-observed position'}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
 
       <FinancialHero className="bg-intelligence/10">
         <div className="grid gap-7 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)] lg:items-end">
@@ -1081,88 +1205,97 @@ export function CardsSection() {
                     ? ' Provider history is incomplete; PFIS keeps this amount reviewable rather than treating it as safe current truth.'
                     : ''}
               </p>
-              {card.billed_total_due != null ? (
-                <dl
-                  className="mt-4 grid grid-cols-1 gap-3 border-t border-border/65 pt-4 sm:grid-cols-3"
-                  aria-label="Current outstanding proof"
-                >
-                  <div>
-                    <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
-                      Billed at statement
-                    </dt>
-                    <dd className="mt-1 text-sm font-extrabold">
-                      {formatCurrency(card.billed_total_due, card.currency)}
-                      {card.billed_total_due_as_of
-                        ? ` · ${formatDate(card.billed_total_due_as_of)}`
-                        : ''}
-                    </dd>
+              {card.billed_total_due != null || card.provider_current_outstanding != null ? (
+                <details className="mt-4 border-t border-border/65 pt-4">
+                  <summary className="focus-ring cursor-pointer rounded text-xs font-extrabold text-muted-foreground hover:text-foreground">
+                    Show position evidence
+                  </summary>
+                  <div className="space-y-4 pt-3">
+                    {card.billed_total_due != null ? (
+                      <dl
+                        className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+                        aria-label="Current outstanding proof"
+                      >
+                        <div>
+                          <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
+                            Billed at statement
+                          </dt>
+                          <dd className="mt-1 text-sm font-extrabold">
+                            {formatCurrency(card.billed_total_due, card.currency)}
+                            {card.billed_total_due_as_of
+                              ? ` · ${formatDate(card.billed_total_due_as_of)}`
+                              : ''}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
+                            Paid since statement
+                          </dt>
+                          <dd className="mt-1 text-sm font-extrabold">
+                            {card.paid_since_statement == null
+                              ? '—'
+                              : formatCurrency(card.paid_since_statement, card.currency)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
+                            Net unbilled activity
+                          </dt>
+                          <dd className="mt-1 text-sm font-extrabold">
+                            {card.unbilled_activity == null
+                              ? '—'
+                              : formatCurrency(card.unbilled_activity, card.currency)}
+                          </dd>
+                        </div>
+                      </dl>
+                    ) : null}
+                    {card.provider_current_outstanding != null ? (
+                      <dl
+                        className="grid grid-cols-2 gap-3 sm:grid-cols-4"
+                        aria-label="Issuer card facts"
+                      >
+                        <div>
+                          <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
+                            Issuer outstanding
+                          </dt>
+                          <dd className="mt-1 text-sm font-extrabold">
+                            {formatCurrency(card.provider_current_outstanding, card.currency)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
+                            Issuer pending
+                          </dt>
+                          <dd className="mt-1 text-sm font-extrabold">
+                            {card.provider_pending_amount == null
+                              ? '—'
+                              : formatCurrency(card.provider_pending_amount, card.currency)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
+                            Available credit
+                          </dt>
+                          <dd className="mt-1 text-sm font-extrabold">
+                            {card.provider_available_credit == null
+                              ? '—'
+                              : formatCurrency(card.provider_available_credit, card.currency)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
+                            Issuer limit
+                          </dt>
+                          <dd className="mt-1 text-sm font-extrabold">
+                            {card.provider_credit_limit == null
+                              ? '—'
+                              : formatCurrency(card.provider_credit_limit, card.currency)}
+                          </dd>
+                        </div>
+                      </dl>
+                    ) : null}
                   </div>
-                  <div>
-                    <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
-                      Paid since statement
-                    </dt>
-                    <dd className="mt-1 text-sm font-extrabold">
-                      {card.paid_since_statement == null
-                        ? '—'
-                        : formatCurrency(card.paid_since_statement, card.currency)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
-                      Net unbilled activity
-                    </dt>
-                    <dd className="mt-1 text-sm font-extrabold">
-                      {card.unbilled_activity == null
-                        ? '—'
-                        : formatCurrency(card.unbilled_activity, card.currency)}
-                    </dd>
-                  </div>
-                </dl>
-              ) : null}
-              {card.provider_current_outstanding != null ? (
-                <dl
-                  className="mt-4 grid grid-cols-2 gap-3 border-t border-border/65 pt-4 sm:grid-cols-4"
-                  aria-label="Issuer card facts"
-                >
-                  <div>
-                    <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
-                      Issuer outstanding
-                    </dt>
-                    <dd className="mt-1 text-sm font-extrabold">
-                      {formatCurrency(card.provider_current_outstanding, card.currency)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
-                      Issuer pending
-                    </dt>
-                    <dd className="mt-1 text-sm font-extrabold">
-                      {card.provider_pending_amount == null
-                        ? '—'
-                        : formatCurrency(card.provider_pending_amount, card.currency)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
-                      Available credit
-                    </dt>
-                    <dd className="mt-1 text-sm font-extrabold">
-                      {card.provider_available_credit == null
-                        ? '—'
-                        : formatCurrency(card.provider_available_credit, card.currency)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[0.68rem] font-extrabold uppercase tracking-[0.08em] text-muted-foreground">
-                      Issuer limit
-                    </dt>
-                    <dd className="mt-1 text-sm font-extrabold">
-                      {card.provider_credit_limit == null
-                        ? '—'
-                        : formatCurrency(card.provider_credit_limit, card.currency)}
-                    </dd>
-                  </div>
-                </dl>
+                </details>
               ) : null}
             </div>
           </div>
@@ -1191,32 +1324,108 @@ export function CardsSection() {
         </div>
       </FinancialHero>
 
-      <BalancePathPanel forecast={balanceForecast.data} isLoading={balanceForecast.isLoading} />
+      <dl
+        className="grid gap-px overflow-hidden rounded-xl border border-border/70 bg-border/70 sm:grid-cols-3"
+        aria-label="Card decision summary"
+      >
+        <div className="bg-card p-4 sm:p-5">
+          <dt className="text-xs font-bold text-muted-foreground">Next payment</dt>
+          <dd className="money-value mt-1 text-lg font-extrabold">
+            {card.total_due == null ? 'Not available' : formatCurrency(card.total_due, card.currency)}
+          </dd>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {card.due_date ? `Due ${formatDate(card.due_date)}` : 'Import a statement for a due date'}
+          </p>
+        </div>
+        <div className="bg-card p-4 sm:p-5">
+          <dt className="text-xs font-bold text-muted-foreground">Current position</dt>
+          <dd className="money-value mt-1 text-lg font-extrabold">
+            {providerOutstanding == null && card.estimated_current_balance == null
+              ? 'Needs anchor'
+              : formatCurrency(
+                  providerOutstanding ?? card.estimated_current_balance!,
+                  card.currency,
+                )}
+          </dd>
+          <p className="mt-1 text-xs text-muted-foreground">{balanceStatusLabel(card)}</p>
+        </div>
+        <div className="bg-card p-4 sm:p-5">
+          <dt className="text-xs font-bold text-muted-foreground">Utilization · runway</dt>
+          <dd className="mt-1 text-lg font-extrabold">
+            {card.estimated_utilization_pct == null && card.statement_utilization_pct == null
+              ? 'Not available'
+              : `${(card.estimated_utilization_pct ?? card.statement_utilization_pct!).toFixed(1)}%`}
+          </dd>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {dueRunway.data ? dueRunwayStatusLabel(dueRunway.data.status) : 'Checking payment runway…'}
+          </p>
+        </div>
+      </dl>
 
-      <CardStatementProjectionPanel
-        projection={card.next_statement_projection}
-        currency={card.currency}
-        targetPct={card.utilization_target_pct}
+      <Tabs
+        ariaLabel="Card workspace views"
+        value={cardView}
+        onValueChange={(value) => {
+          if (CARD_WORKSPACE_TABS.some((tab) => tab.value === value)) {
+            setCardView(value as CardWorkspaceView);
+          }
+        }}
+        options={CARD_WORKSPACE_TABS.map(({ value, label }) => ({ value, label }))}
+        className="w-full"
       />
 
-      <CardDailyPathPanel
-        projection={card.next_statement_projection}
-        currency={card.currency}
-        targetPct={card.utilization_target_pct}
-      />
+      {cardView === 'overview' ? (
+        <div className="space-y-6">
+          <BalancePathPanel forecast={balanceForecast.data} isLoading={balanceForecast.isLoading} />
 
-      <CardUtilizationHistoryPanel
-        history={utilizationHistory.data}
-        currency={card.currency}
-        isLoading={utilizationHistory.isLoading}
-        error={utilizationHistory.error}
-      />
+          <CardStatementProjectionPanel
+            projection={card.next_statement_projection}
+            currency={card.currency}
+            targetPct={card.utilization_target_pct}
+          />
 
-      <CardDueRunwayPanel runway={dueRunway.data} isLoading={dueRunway.isLoading} />
+          <CardDailyPathPanel
+            projection={card.next_statement_projection}
+            currency={card.currency}
+            targetPct={card.utilization_target_pct}
+          />
 
-      <CardPaymentScenarioPanel runway={dueRunway.data} />
+          <CardUtilizationHistoryPanel
+            history={utilizationHistory.data}
+            currency={card.currency}
+            isLoading={utilizationHistory.isLoading}
+            error={utilizationHistory.error}
+          />
 
-      <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="statement-anatomy">
+          <CardDueRunwayPanel runway={dueRunway.data} isLoading={dueRunway.isLoading} />
+        </div>
+      ) : null}
+
+      {cardView === 'plan' ? (
+        <div className="space-y-6">
+          <CardPortfolioUpcomingPanel
+            portfolio={portfolioUpcoming.data}
+            currency={card.currency}
+            isLoading={portfolioUpcoming.isLoading}
+            error={portfolioUpcoming.error}
+          />
+
+          <CardPortfolioPaymentPlanPanel
+            plan={portfolioPaymentPlan.data}
+            currency={card.currency}
+            isLoading={portfolioPaymentPlan.isLoading}
+            error={portfolioPaymentPlan.error}
+          />
+
+          <CardSpendRoutingPanel cardCount={cards.length} currency={card.currency} />
+
+          <CardPaymentScenarioPanel runway={dueRunway.data} />
+        </div>
+      ) : null}
+
+      {cardView === 'evidence' ? (
+        <div className="space-y-6">
+          <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="statement-anatomy">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
@@ -1478,7 +1687,12 @@ export function CardsSection() {
         </section>
       </div>
 
-      <section className="overflow-hidden rounded-xl bg-card" aria-labelledby="statement-ledger">
+        </div>
+      ) : null}
+
+      {cardView === 'activity' ? (
+        <div className="space-y-6">
+          <section className="overflow-hidden rounded-xl bg-card" aria-labelledby="statement-ledger">
         <div className="border-b border-border/65 p-5 sm:p-6">
           <div className="flex items-start gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
@@ -1641,7 +1855,7 @@ export function CardsSection() {
         </section>
       ) : null}
 
-      <section className="rounded-xl bg-card p-5 sm:p-6">
+          <section className="rounded-xl bg-card p-5 sm:p-6">
         <h2 className="text-lg font-extrabold tracking-[-0.025em]">Activity centre</h2>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">
           Deterministic checks from PFIS evidence. Review with your issuer; PFIS cannot block,
@@ -1687,8 +1901,12 @@ export function CardsSection() {
             No duplicate, high-value, or pending-reversal signals in the available evidence.
           </p>
         )}
-      </section>
+          </section>
+        </div>
+      ) : null}
 
+      {cardView === 'evidence' ? (
+        <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="card-calendar-title">
           <div className="flex items-start gap-3">
@@ -2023,7 +2241,12 @@ export function CardsSection() {
         </section>
       </div>
 
-      <section className="rounded-xl bg-card p-5 sm:p-6">
+        </div>
+      ) : null}
+
+      {cardView === 'plan' ? (
+        <div className="space-y-6">
+          <section className="rounded-xl bg-card p-5 sm:p-6">
         <h2 className="text-lg font-extrabold tracking-[-0.025em]">
           Payment intentions & manual records
         </h2>
@@ -2169,7 +2392,9 @@ export function CardsSection() {
             </div>
           </form>
         </details>
-      </section>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

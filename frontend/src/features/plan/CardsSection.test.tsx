@@ -3,7 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CardsSection } from './CardsSection';
 
-const { cardDisputes, cardOverview, saveCardPreferences } = vi.hoisted(() => ({
+const { addBalance, cardDisputes, cardOverview, saveCardPreferences } = vi.hoisted(() => ({
+  addBalance: vi.fn(),
   cardDisputes: vi.fn(),
   cardOverview: vi.fn(),
   saveCardPreferences: vi.fn(),
@@ -176,6 +177,7 @@ vi.mock('@/features/workspace/queries', () => ({
 
 vi.mock('@/lib/api', () => ({
   api: {
+    addBalance,
     cardDisputes,
     cardOverview,
     saveCardPreferences,
@@ -413,19 +415,40 @@ describe('CardsSection activity centre', () => {
       </QueryClientProvider>,
     );
 
+    expect(
+      await screen.findByRole('heading', { name: 'Cards' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Record verified position' })).toBeInTheDocument();
+
+    addBalance.mockResolvedValue({ id: 'snapshot-1' });
+    fireEvent.click(screen.getByRole('button', { name: 'Record verified position' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent(
+      'This saves a user-observed balance for planning.',
+    );
+    fireEvent.change(screen.getByLabelText('Current outstanding'), {
+      target: { value: '11500' },
+    });
+    fireEvent.change(screen.getByLabelText('As of'), {
+      target: { value: '2026-02-12' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save user-observed position' }));
+    await waitFor(() =>
+      expect(addBalance).toHaveBeenCalledWith('user-1', 'card-1', 11500, '2026-02-12'),
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
     expect(await screen.findByText('Activity centre')).toBeInTheDocument();
     const refundTracker = screen.getByRole('region', { name: 'Refund tracker' });
     expect(refundTracker).toHaveTextContent('Refunds in flight');
     expect(refundTracker).toHaveTextContent('₹750');
     expect(refundTracker).toHaveTextContent('oldest 10 Feb 2026');
-    expect(screen.getByText('Provider-observed · fresh')).toBeInTheDocument();
-    expect(screen.getByText('How this statement arrived at the due')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    expect(screen.getAllByText('Provider-observed · fresh')).not.toHaveLength(0);
     expect(screen.getByText('NEXT STATEMENT FORECAST')).toBeInTheDocument();
     expect(screen.getByText('DAILY PATH TO STATEMENT CLOSE')).toBeInTheDocument();
     expect(screen.getByText('View 3 day-by-day evidence points')).toBeInTheDocument();
     expect(screen.getAllByText('Recurring: STREAMCO')).not.toHaveLength(0);
-    expect(screen.getByText('PAYMENT SCENARIOS')).toBeInTheDocument();
-    expect(screen.getByText('Minimum due vs total due')).toBeInTheDocument();
     expect(screen.getByText('UTILIZATION HISTORY')).toBeInTheDocument();
     expect(screen.getByText('Moving up')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /Utilization moved from 12.0%/i })).toBeInTheDocument();
@@ -456,19 +479,30 @@ describe('CardsSection activity centre', () => {
       '₹13,200 projected headroom at close against your 30.0% target.',
     );
     expect(screen.getByText('Keep monitoring this billing cycle.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Evidence & controls' }));
+    expect(screen.getByText('How this statement arrived at the due')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
     expect(screen.getByText('Latest statement ledger')).toBeInTheDocument();
     expect(screen.getAllByText('DE-IDENTIFIED MERCHANT')).toHaveLength(2);
     expect(screen.getByText('Possible duplicate statement lines')).toBeInTheDocument();
     expect(screen.getByText('Pending reversal needs follow-up')).toBeInTheDocument();
+    expect(
+      screen.getByText(/PFIS cannot block, reverse, or dispute card activity/i),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Payment plan' }));
+    expect(screen.getByText('PAYMENT SCENARIOS')).toBeInTheDocument();
+    expect(screen.getByText('Minimum due vs total due')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Record manual transfer' })).toBeEnabled();
+    expect(screen.getByText(/Neither action contacts your bank or issuer/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Evidence & controls' }));
     fireEvent.click(screen.getByRole('button', { name: /Annual fee review/i }));
     fireEvent.click(screen.getByText('Edit fee or milestone reminder'));
     expect(screen.getByRole('button', { name: 'Update reminder' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Delete reminder' })).toBeEnabled();
-    expect(screen.getByText(/Neither action contacts your bank or issuer/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/PFIS cannot block, reverse, or dispute card activity/i),
-    ).toBeInTheDocument();
     fireEvent.click(screen.getByText('Set a utilization and reward rule'));
     fireEvent.change(screen.getByLabelText('Explicit reward rule'), {
       target: { value: 'Dining' },

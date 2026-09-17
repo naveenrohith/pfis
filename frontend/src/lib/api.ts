@@ -62,6 +62,7 @@ import type {
   BalanceProviderAccountCandidate,
   BalanceProviderStatus,
   CardPositionObservation,
+  CardPositionObservationCreate,
   AccountPosition,
   AccountBalanceForecast,
   AccountBalanceForecastEvaluation,
@@ -773,6 +774,17 @@ export const api = {
   cardPositionObservations: (userId: string, accountId: string, limit = 20) =>
     request<CardPositionObservation[]>(`/accounts/${accountId}/card-observations`, {
       query: { user_id: userId, limit },
+    }),
+  /** Connector-only issuer facts; user-entered positions use addBalance instead. */
+  createCardPositionObservation: (
+    userId: string,
+    accountId: string,
+    payload: CardPositionObservationCreate,
+  ) =>
+    request<CardPositionObservation>(`/accounts/${accountId}/card-observations`, {
+      method: 'POST',
+      query: { user_id: userId },
+      body: payload,
     }),
   createTransfer: (
     userId: string,

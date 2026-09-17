@@ -80,7 +80,10 @@ export function PlanExperience() {
         />
       </div>
 
-      <div id={view} className="animate-fade-in scroll-mt-[10.5rem] lg:scroll-mt-[11.5rem]">
+      <div
+        id={view === 'cards' ? 'plan-cards' : view}
+        className="animate-fade-in scroll-mt-[10.5rem] lg:scroll-mt-[11.5rem]"
+      >
         <PlanViewContext view={view} onNavigate={scrollTo} />
         <Suspense fallback={<PlanSkeleton label={view} />}>
           {view === 'cash-plan' ? (
@@ -181,7 +184,11 @@ function PlanViewContext({ view, onNavigate }: PlanViewContextProps) {
 }
 
 function DebtWorkspace({ view }: { view: 'liabilities' | 'cards' }) {
-  return view === 'cards' ? <CardsSection /> : <FinancialPositionSection view="liabilities" />;
+  return view === 'cards' ? (
+    <CardsSection anchorId="cards" />
+  ) : (
+    <FinancialPositionSection view="liabilities" />
+  );
 }
 
 function PlanSkeleton({ label }: { label: string }) {

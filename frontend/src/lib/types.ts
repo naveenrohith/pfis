@@ -1117,6 +1117,25 @@ export interface CardPositionObservation {
   created_at: string;
 }
 
+/** Issuer/connector payload accepted by POST /accounts/{account_id}/card-observations. */
+export interface CardPositionObservationCreate {
+  current_outstanding: number;
+  billed_due?: number | null;
+  pending_amount?: number | null;
+  credit_limit?: number | null;
+  available_credit?: number | null;
+  currency: string;
+  as_of: string;
+  source_record_id: string;
+  source_account_id?: string | null;
+  observed_at?: string | null;
+  effective_at?: string | null;
+  expected_cadence_minutes?: number | null;
+  coverage_start?: string | null;
+  coverage_end?: string | null;
+  coverage_complete?: boolean;
+}
+
 export interface AccountPosition {
   financial_account_id: string;
   currency: string;

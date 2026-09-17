@@ -73,4 +73,34 @@ describe('API session handling', () => {
     expect(result.filename).toBe('pfis-portable-export-20260731.zip');
     expect(await result.blob.text()).toBe('archive');
   });
+
+  it('posts connector card observations through the typed issuer route', async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        id: 'observation-1',
+        financial_account_id: 'card-1',
+        current_outstanding: 12000,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const payload = {
+      current_outstanding: 12000,
+      currency: 'INR',
+      as_of: '2026-02-12',
+      source_record_id: 'connector-record-1',
+      coverage_start: '2026-02-01T00:00:00Z',
+      coverage_end: '2026-02-12T00:00:00Z',
+    };
+
+    await api.createCardPositionObservation('user-1', 'card-1', payload);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/accounts/card-1/card-observations?user_id=user-1',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      }),
+    );
+  });
 });
