@@ -19,11 +19,11 @@ from app.models.roadmap import (
     HouseholdMember,
     HouseholdSettlement,
 )
-from app.models.sync import ConnectorAuditEvent
+from app.models.sync import ConnectorAuditEvent, OAuthState
 from app.models.transaction import PaymentMethod, Transaction, TransactionType
 from app.models.user import User
 from app.models.workspace import RecommendationOutcome, RecommendationState
-from app.security import encrypt_secret
+from app.security import encrypt_secret, hash_session_token
 from app.services import account_deletion_service
 from app.services.account_deletion_service import (
     ACCOUNT_DELETION_PRIVATE_TABLES,
@@ -110,6 +110,17 @@ async def test_account_deletion_removes_private_data_and_preserves_shared_audit(
                 google_account_id="delete-google-account",
                 access_token_ref=encrypt_secret("delete-access-token"),
                 refresh_token_ref=encrypt_secret("delete-refresh-token"),
+            )
+        )
+        db.add(
+            OAuthState(
+                state="delete-pending-gmail-state",
+                user_id=owner["id"],
+                flow_type="gmail_connect",
+                browser_token_hash=hash_session_token("delete-browser-token"),
+                code_verifier_ref=encrypt_secret("delete-verifier"),
+                nonce_ref=encrypt_secret("delete-nonce"),
+                expires_at=datetime.now(UTC) + timedelta(minutes=10),
             )
         )
         db.add(
@@ -256,8 +267,10 @@ async def test_account_deletion_removes_private_data_and_preserves_shared_audit(
         assert tombstone.is_active is False
         assert tombstone.deleted_at is not None
         assert tombstone.deletion_started_at is None
+        assert tombstone.gmail_connection_generation == 1
         assert tombstone.email == f"deleted-{owner['id']}@deleted.invalid"
         assert tombstone.name == "Deleted participant"
+        assert await db.get(OAuthState, "delete-pending-gmail-state") is None
         assert tombstone.password_hash is None
 
         assert (

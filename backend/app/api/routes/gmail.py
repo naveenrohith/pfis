@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,6 +58,7 @@ _OAUTH_STATE_TTL_MINUTES = 10
 _GMAIL_ACCOUNT_CONFLICT_DETAIL = "This Gmail account cannot be connected to this workspace"
 _GMAIL_ACCOUNT_MISMATCH_DETAIL = "A different Gmail account is already connected to this workspace"
 _GMAIL_SCOPE_REQUIRED_DETAIL = "Gmail read-only permission was not granted"
+_GMAIL_OAUTH_INVALIDATED_DETAIL = "This Gmail connection request is no longer valid"
 
 
 class AutoSyncUpdate(BaseModel):
@@ -91,6 +92,19 @@ def _parse_token_expiry(value: object) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+async def _revoke_unclaimed_google_grant(token_data: dict) -> None:
+    token = token_data.get("refresh_token") or token_data.get("access_token")
+    if not token:
+        return
+    try:
+        await revoke_google_token(token)
+    except Exception as exc:
+        logger.warning(
+            "Google grant from invalidated Gmail OAuth could not be revoked exception=%s",
+            type(exc).__name__,
+        )
+
+
 def _gmail_redirect(*, error: str | None = None) -> RedirectResponse:
     """Return a safe browser redirect without reflecting provider input."""
     query = {"gmail_error": error} if error else {"gmail_auth": "success"}
@@ -118,6 +132,8 @@ def _exception_error_code(exc: HTTPException) -> str:
         return "gmail_account_conflict"
     if exc.detail == _GMAIL_ACCOUNT_MISMATCH_DETAIL:
         return "gmail_account_mismatch"
+    if exc.detail == _GMAIL_OAUTH_INVALIDATED_DETAIL:
+        return "gmail_connection_invalidated"
     return {
         400: "gmail_transaction_invalid",
         401: "gmail_identity_invalid",
@@ -147,6 +163,12 @@ async def gmail_connect(
             offline=True,
         )
         browser_token = token_urlsafe(32)
+        owner_result = await db.execute(
+            select(User).where(User.id == user_id).with_for_update()
+        )
+        owner = owner_result.scalar_one_or_none()
+        if owner is None or not owner.is_active or owner.deletion_started_at is not None:
+            raise HTTPException(status_code=403, detail="User account is inactive")
         # Persist state in DB
         oauth_state = OAuthState(
             state=state,
@@ -155,6 +177,7 @@ async def gmail_connect(
             browser_token_hash=hash_session_token(browser_token),
             code_verifier_ref=encrypt_secret(code_verifier),
             nonce_ref=encrypt_secret(nonce),
+            connection_generation=owner.gmail_connection_generation,
             expires_at=datetime.now(UTC) + timedelta(minutes=_OAUTH_STATE_TTL_MINUTES),
         )
         db.add(oauth_state)
@@ -222,6 +245,7 @@ async def gmail_callback(
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
     user_id = oauth_state.user_id
+    connection_generation = oauth_state.connection_generation
     code_verifier_ref = oauth_state.code_verifier_ref
     nonce_ref = oauth_state.nonce_ref
     await db.delete(oauth_state)
@@ -255,6 +279,18 @@ async def gmail_callback(
             token_data,
             expected_nonce=decrypt_secret(nonce_ref),
         )
+        owner_result = await db.execute(
+            select(User).where(User.id == user_id).with_for_update()
+        )
+        owner = owner_result.scalar_one_or_none()
+        if (
+            owner is None
+            or not owner.is_active
+            or owner.deletion_started_at is not None
+            or owner.gmail_connection_generation != connection_generation
+        ):
+            await _revoke_unclaimed_google_grant(token_data)
+            raise HTTPException(status_code=409, detail=_GMAIL_OAUTH_INVALIDATED_DETAIL)
         token_expires_at = _parse_token_expiry(token_data.get("expiry"))
         google_account_id = profile["google_account_id"]
 
@@ -265,10 +301,10 @@ async def gmail_callback(
             select(GmailAccount).where(GmailAccount.user_id == user_id)
         )
         existing = account_result.scalar_one_or_none()
-        owner_result = await db.execute(
+        account_owner_result = await db.execute(
             select(GmailAccount).where(GmailAccount.google_account_id == google_account_id)
         )
-        existing_owner = owner_result.scalar_one_or_none()
+        existing_owner = account_owner_result.scalar_one_or_none()
 
         if existing_owner is not None and existing_owner.user_id != user_id:
             raise HTTPException(status_code=409, detail=_GMAIL_ACCOUNT_CONFLICT_DETAIL)
@@ -495,7 +531,13 @@ async def disconnect_gmail(
 ):
     """Stop future Gmail access while retaining already imported financial records."""
     user_id = resolve_user_scope(user_id, current_user)
-    result = await db.execute(select(GmailAccount).where(GmailAccount.user_id == user_id))
+    owner_result = await db.execute(select(User).where(User.id == user_id).with_for_update())
+    owner = owner_result.scalar_one_or_none()
+    if owner is None or not owner.is_active or owner.deletion_started_at is not None:
+        raise HTTPException(status_code=404, detail="User account is not available.")
+    result = await db.execute(
+        select(GmailAccount).where(GmailAccount.user_id == user_id).with_for_update()
+    )
     gmail_account = result.scalar_one_or_none()
     if not gmail_account:
         raise HTTPException(status_code=404, detail="No Gmail account is connected.")
@@ -503,6 +545,13 @@ async def disconnect_gmail(
     gmail_account.auto_sync_enabled = False
     gmail_account.auto_sync_status = "disconnecting"
     gmail_account.auto_sync_error = None
+    owner.gmail_connection_generation += 1
+    await db.execute(
+        delete(OAuthState).where(
+            OAuthState.user_id == user_id,
+            OAuthState.flow_type == "gmail_connect",
+        )
+    )
     await db.commit()
 
     # Establish the local fence before revocation/deletion. This prevents an

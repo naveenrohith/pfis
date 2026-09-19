@@ -49,6 +49,37 @@ def _assert_no_duplicates(bind, table: str, columns: tuple[str, ...]) -> None:
         )
 
 
+def _deduplicate_gmail_accounts(bind, key_column: str) -> None:
+    """Keep one deterministic credential row before adding ownership uniques."""
+    if key_column not in {"user_id", "google_account_id"}:
+        raise ValueError(f"Unsupported Gmail deduplication key: {key_column}")
+
+    bind.execute(
+        sa.text(
+            f"""
+            DELETE FROM gmail_accounts
+            WHERE id IN (
+                SELECT id
+                FROM (
+                    SELECT id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY {key_column}
+                               ORDER BY
+                                   (refresh_token_ref IS NULL) ASC,
+                                   (access_token_ref IS NULL) ASC,
+                                   (last_synced_at IS NULL) ASC,
+                                   last_synced_at DESC,
+                                   id DESC
+                           ) AS duplicate_rank
+                    FROM gmail_accounts
+                ) ranked
+                WHERE duplicate_rank > 1
+            )
+            """
+        )
+    )
+
+
 def _assert_positive_money(bind, table: str, column: str, *, allow_zero: bool) -> None:
     operator = "<" if allow_zero else "<="
     invalid = bind.execute(
@@ -64,8 +95,8 @@ def _assert_positive_money(bind, table: str, column: str, *, allow_zero: bool) -
 def upgrade() -> None:
     bind = op.get_bind()
     _assert_no_duplicates(bind, "budgets", ("user_id", "category_id"))
-    _assert_no_duplicates(bind, "gmail_accounts", ("user_id",))
-    _assert_no_duplicates(bind, "gmail_accounts", ("google_account_id",))
+    _deduplicate_gmail_accounts(bind, "user_id")
+    _deduplicate_gmail_accounts(bind, "google_account_id")
     _assert_positive_money(bind, "transactions", "amount", allow_zero=False)
     _assert_positive_money(bind, "budgets", "monthly_limit", allow_zero=False)
     _assert_positive_money(bind, "account_balance_snapshots", "amount", allow_zero=True)

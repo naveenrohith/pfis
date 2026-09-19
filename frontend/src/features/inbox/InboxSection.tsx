@@ -38,6 +38,8 @@ const GMAIL_ERROR_MESSAGES: Record<string, string> = {
   gmail_account_conflict: 'This Gmail account could not be connected to this workspace.',
   gmail_account_mismatch:
     'A different Gmail account is already connected. Reconnect the existing account instead.',
+  gmail_connection_invalidated:
+    'That Gmail connection request expired or was canceled. Start a new connection if you still want to sync Gmail.',
   gmail_identity_invalid: 'Google could not verify the Gmail account. Try connecting again.',
   gmail_connection_forbidden:
     'Gmail connection was not allowed. Try again or contact your administrator.',

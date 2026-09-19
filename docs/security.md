@@ -42,6 +42,7 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
   metadata. Imported evidence is retained explicitly rather than silently
   deleted with the connection.
 - Persist state in `OAuthState`, bind it to a short-lived `HttpOnly` browser cookie, enforce expiry and flow type, and delete it before exchanging the authorization code.
+- Gmail OAuth states carry the owner's persisted connection generation. Disconnect and account deletion increment that generation and delete pending Gmail states; the callback locks the owner row and rejects stale or inactive intents before storing credentials, revoking any unclaimed provider grant.
 - Use PKCE for both Google flows and verify the OpenID Connect nonce, issuer/audience, stable `sub`, and `email_verified` claim.
 - Link Google identities by provider `sub`, never by email alone. An existing password account requires an explicit account-linking flow.
 - Keep both redirect URIs configured through settings and registered exactly with Google.

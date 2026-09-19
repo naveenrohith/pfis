@@ -182,7 +182,7 @@ def test_alembic_head_matches_orm_and_database_constraints():
         for table in Base.metadata.sorted_tables
     }
     assert schema["columns"] == orm_columns
-    assert schema["revision"] == "055_deposit_line_review"
+    assert schema["revision"] == "056_gmail_connection_fences"
     assert "uq_user_merchant_rule_descriptor" in schema["merchant_unique"]
     assert {
         "ix_user_merchant_rules_user_id",

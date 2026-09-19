@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import Base
 from app.models.email import GmailAccount, RawEmail
 from app.models.roadmap import Household, HouseholdMember, HouseholdSettlement
-from app.models.sync import ConnectorAuditEvent, ParseFailure, UserCorrection
+from app.models.sync import ConnectorAuditEvent, OAuthState, ParseFailure, UserCorrection
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.security import decrypt_secret, get_active_auth_session
@@ -94,12 +94,23 @@ async def delete_owned_account(
         instant = instant.replace(tzinfo=UTC)
     instant = instant.astimezone(UTC)
 
+    locked_user = await db.scalar(select(User).where(User.id == user.id).with_for_update())
+    if locked_user is None:
+        raise LookupError("User account not found")
+    user = locked_user
     account = await db.scalar(select(GmailAccount).where(GmailAccount.user_id == user.id))
     user.deletion_started_at = instant
+    user.gmail_connection_generation += 1
     if account is not None:
         account.auto_sync_enabled = False
         account.auto_sync_status = "disconnecting"
         account.auto_sync_error = None
+    await db.execute(
+        delete(OAuthState).where(
+            OAuthState.user_id == user.id,
+            OAuthState.flow_type == "gmail_connect",
+        )
+    )
     await db.commit()
 
     try:

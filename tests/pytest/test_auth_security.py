@@ -6,14 +6,15 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.api.routes import auth as auth_routes
 from app.api.routes import gmail as gmail_routes
 from app.models.auth import AuthSession
 from app.models.email import GmailAccount, RawEmail
-from app.models.sync import ConnectorAuditEvent
-from app.security import decrypt_secret, encrypt_secret
+from app.models.sync import ConnectorAuditEvent, OAuthState
+from app.models.user import User
+from app.security import decrypt_secret, encrypt_secret, hash_session_token
 from app.services.gmail import oauth_service
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -456,6 +457,14 @@ async def test_gmail_disconnect_revokes_grant_and_retains_imported_evidence(
                 body="Imported content remains after connector removal",
             )
         )
+        db.add(
+            OAuthState(
+                state="pending-disconnect-state",
+                user_id=user["id"],
+                flow_type="gmail_connect",
+                expires_at=datetime.now(UTC) + timedelta(minutes=10),
+            )
+        )
         await db.commit()
 
     async def fake_revoke(token: str) -> bool:
@@ -498,6 +507,8 @@ async def test_gmail_disconnect_revokes_grant_and_retains_imported_evidence(
 
     async with test_session_factory() as db:
         account = await db.scalar(select(GmailAccount).where(GmailAccount.user_id == user["id"]))
+        owner = await db.get(User, user["id"])
+        pending_state = await db.get(OAuthState, "pending-disconnect-state")
         retained_email = await db.scalar(select(RawEmail).where(RawEmail.user_id == user["id"]))
         audit = await db.scalar(
             select(ConnectorAuditEvent)
@@ -509,6 +520,9 @@ async def test_gmail_disconnect_revokes_grant_and_retains_imported_evidence(
         )
 
     assert account is None
+    assert owner is not None
+    assert owner.gmail_connection_generation == 1
+    assert pending_state is None
     assert retained_email is not None
     assert audit is not None
     assert json.loads(audit.payload_json) == {
@@ -516,6 +530,75 @@ async def test_gmail_disconnect_revokes_grant_and_retains_imported_evidence(
         "retained_raw_email_count": 1,
         "derived_records_retained": True,
     }
+
+
+async def test_gmail_callback_rejects_an_oauth_state_invalidated_by_disconnect(
+    client,
+    monkeypatch,
+    test_session_factory,
+):
+    demo = await client.post("/api/auth/demo")
+    demo.raise_for_status()
+    user = demo.json()["user"]
+    state = "invalidated-gmail-state"
+    browser_token = "invalidated-browser-token"
+
+    async with test_session_factory() as db:
+        owner = await db.get(User, user["id"])
+        assert owner is not None
+        owner.gmail_connection_generation = 1
+        db.add(
+            OAuthState(
+                state=state,
+                user_id=user["id"],
+                flow_type="gmail_connect",
+                browser_token_hash=hash_session_token(browser_token),
+                code_verifier_ref=encrypt_secret("invalidated-verifier"),
+                nonce_ref=encrypt_secret("invalidated-nonce"),
+                connection_generation=0,
+                expires_at=datetime.now(UTC) + timedelta(minutes=10),
+            )
+        )
+        await db.commit()
+
+    monkeypatch.setattr(
+        gmail_routes,
+        "exchange_code_for_tokens",
+        lambda *args, **kwargs: {
+            "access_token": "unclaimed-access-token",
+            "refresh_token": "unclaimed-refresh-token",
+            "id_token": "invalidated-id-token",
+            "scopes": gmail_routes.GMAIL_SCOPES,
+        },
+    )
+    monkeypatch.setattr(
+        gmail_routes,
+        "verify_google_identity",
+        lambda *args, **kwargs: {
+            "google_account_id": "invalidated-subject",
+            "email": "invalidated@example.com",
+            "name": "Invalidated",
+        },
+    )
+    revoked: list[str] = []
+
+    async def fake_revoke(token: str) -> bool:
+        revoked.append(token)
+        return True
+
+    monkeypatch.setattr(gmail_routes, "revoke_google_token", fake_revoke)
+    client.cookies.set(gmail_routes.settings.OAUTH_COOKIE_NAME, browser_token)
+
+    response = await client.get(
+        f"/api/auth/gmail/callback?code=invalidated-code&state={state}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/dashboard?gmail_error=gmail_connection_invalidated"
+    assert revoked == ["unclaimed-refresh-token"]
+    async with test_session_factory() as db:
+        assert await db.scalar(select(GmailAccount).where(GmailAccount.user_id == user["id"])) is None
 
 
 async def test_gmail_disconnect_removes_local_grant_when_provider_is_unavailable(

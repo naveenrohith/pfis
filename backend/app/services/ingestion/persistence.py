@@ -55,7 +55,12 @@ async def persist_source_records(
             async with db.begin_nested():
                 if scoped_message_id:
                     existing = await db.execute(
-                        select(RawEmail).where(RawEmail.gmail_message_id == scoped_message_id)
+                        select(RawEmail).where(
+                            RawEmail.user_id == user_id,
+                            RawEmail.gmail_message_id.in_(
+                                _message_id_candidates(user_id, record.source_message_id)
+                            ),
+                        )
                     )
                     if existing.scalar_one_or_none():
                         stats["emails_skipped_duplicate"] += 1
@@ -99,7 +104,12 @@ async def persist_source_records(
             stats["emails_processed"] += 1
             stats["emails_stored"] += 1
         except IntegrityError:
-            if scoped_message_id and await _message_exists(db, scoped_message_id):
+            if scoped_message_id and await _message_exists(
+                db,
+                user_id,
+                record.source_message_id,
+                scoped_message_id,
+            ):
                 stats["emails_skipped_duplicate"] += 1
             else:
                 stats["emails_failed"] += 1
@@ -127,12 +137,30 @@ def _scoped_message_id(user_id: str, message_id: str | None) -> str | None:
     return message_id if message_id.startswith(f"{user_id}:") else f"{user_id}:{message_id}"
 
 
+def _message_id_candidates(user_id: str, message_id: str | None) -> list[str]:
+    scoped_message_id = _scoped_message_id(user_id, message_id)
+    if scoped_message_id is None:
+        return []
+    candidates = [scoped_message_id]
+    if message_id and message_id != scoped_message_id:
+        candidates.append(message_id)
+    return candidates
+
+
 def _increment(counts: dict[str, int], key: str) -> None:
     counts[key] = counts.get(key, 0) + 1
 
 
-async def _message_exists(db: AsyncSession, scoped_message_id: str) -> bool:
+async def _message_exists(
+    db: AsyncSession,
+    user_id: str,
+    message_id: str | None,
+    scoped_message_id: str,
+) -> bool:
     existing = await db.scalar(
-        select(RawEmail.id).where(RawEmail.gmail_message_id == scoped_message_id)
+        select(RawEmail.id).where(
+            RawEmail.user_id == user_id,
+            RawEmail.gmail_message_id.in_(_message_id_candidates(user_id, message_id)),
+        )
     )
     return existing is not None

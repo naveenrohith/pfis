@@ -279,6 +279,12 @@ class OAuthState(Base):
     flow_type: Mapped[str] = mapped_column(
         String(50), nullable=False
     )  # "google_login" or "gmail_connect"
+    connection_generation: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

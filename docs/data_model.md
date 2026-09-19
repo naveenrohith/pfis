@@ -78,7 +78,14 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 - `ParseFailure`: dead-letter queue for failed parser attempts.
 - `UserCorrection`: feedback loop for corrected merchant/category/amount fields.
 - `BackgroundJob`: async job tracking.
-- `OAuthState`: single-use OAuth transaction with expiry, flow type, browser binding, encrypted PKCE verifier, and encrypted OIDC nonce.
+- `OAuthState`: single-use OAuth transaction with expiry, flow type, browser binding, encrypted PKCE verifier, encrypted OIDC nonce, and the owner's Gmail connection generation. A disconnect or account deletion increments the owner generation and invalidates pending Gmail states.
+
+`User.gmail_connection_generation` is a persisted fence for Gmail OAuth intents.
+Callbacks lock the owner row and may persist credentials only when the state
+generation still matches an active user. Legacy raw Gmail message IDs are
+normalized to an owner-prefixed identity by migration 056; ingestion also
+recognizes an unprefixed row during the compatibility window so evidence is not
+duplicated on the first resync.
 
 `User.currency` is the currency of the user's complete private ledger, not a
 display preference. New financial accounts, balances, transactions, transfers,

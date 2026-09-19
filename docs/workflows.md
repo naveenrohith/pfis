@@ -24,14 +24,19 @@
 
 1. After sign-in, the user explicitly chooses `GET /api/auth/gmail/connect?user_id=...`.
 2. Request identity plus read-only Gmail scope and offline access; this consent is separate from sign-in.
-3. Persist browser-bound OAuth state, encrypted PKCE verifier, nonce, flow type, and expiry.
+3. Persist browser-bound OAuth state, encrypted PKCE verifier, nonce, flow type, expiry, and the owner's Gmail connection generation.
 4. Google redirects to callback; PFIS validates and consumes the transaction.
-5. Exchange code for tokens and verify the Google identity.
+5. Exchange code for tokens and verify the Google identity. The callback locks the owner row and rejects a state invalidated by disconnect or account deletion; any unclaimed grant is revoked.
 6. Encrypt and store token references. A healthy connection may preserve its existing refresh token, but recovery from a paused credential state requires Google to issue a replacement grant.
 7. A successful reconnect clears the credential error and returns enabled auto-sync to `idle`.
 8. Record a connector audit event.
 9. `POST /api/gmail/sync` or auto-sync invokes the ingestion coordinator.
 10. `GmailConnector` fetches records, `SourceRecord` values are classified and stored, then the parser pipeline processes them.
+
+Migration 056 normalizes legacy unscoped Gmail message IDs to the owner-prefixed
+identity used by multi-user ingestion. During the compatibility window, a
+resync checks both identities for the same owner before creating a raw-email
+row.
 
 ## Automatic Sync
 

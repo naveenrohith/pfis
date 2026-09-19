@@ -524,7 +524,7 @@ Auth router (`/api/auth/gmail`):
 | Method | Path | Query | Success | Errors | Returns |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/auth/gmail/connect` | `user_id` | `307` | `500` | Redirect to Google consent; state is bound to the browser and target user |
-| `GET` | `/api/auth/gmail/callback` | `state`, `code?`, `error?` | `303` | `400` | Stores encrypted connector tokens on success and redirects to dashboard; provider denial, missing code, scope failure, and ownership conflicts use `gmail_error` |
+| `GET` | `/api/auth/gmail/callback` | `state`, `code?`, `error?` | `303` | `400` | Stores encrypted connector tokens on success and redirects to dashboard; provider denial, missing code, scope failure, stale connection, and ownership conflicts use `gmail_error` |
 
 Operations router (`/api/gmail`):
 

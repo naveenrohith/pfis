@@ -95,3 +95,29 @@ async def test_duplicate_source_records_are_counted_without_double_storage(
     assert stats["emails_stored"] == 1
     assert stats["emails_skipped_duplicate"] == 1
     assert len(list(stored)) == 1
+
+
+async def test_legacy_unscoped_message_id_is_reused_without_duplicate_evidence(
+    client, test_session_factory
+):
+    user = await create_user(client, "legacy-message-id")
+    record = _record(user["id"], "legacy-message")
+
+    async with test_session_factory() as db:
+        db.add(
+            RawEmail(
+                user_id=user["id"],
+                gmail_message_id="legacy-message",
+                subject="Existing legacy source",
+                body="The pre-multi-user row remains the canonical evidence.",
+            )
+        )
+        await db.commit()
+
+        stats = await persist_source_records(db, user["id"], SourceType.GMAIL, [record])
+        await db.commit()
+        stored = list(await db.scalars(select(RawEmail).where(RawEmail.user_id == user["id"])))
+
+    assert stats["emails_stored"] == 0
+    assert stats["emails_skipped_duplicate"] == 1
+    assert len(stored) == 1
