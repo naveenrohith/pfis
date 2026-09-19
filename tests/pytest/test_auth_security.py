@@ -11,10 +11,13 @@ from app.api.routes import auth as auth_routes
 from app.api.routes import gmail as gmail_routes
 from app.models.auth import AuthSession
 from app.models.email import GmailAccount
+from app.security import decrypt_secret
 from app.services.gmail import oauth_service
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.pytest.helpers import auth_headers, register_user
+from tests.pytest.helpers import auth_headers, create_user, register_user
 
 
 def test_google_identity_signin_does_not_include_prior_gmail_grants(monkeypatch):
@@ -37,7 +40,7 @@ def test_google_identity_signin_does_not_include_prior_gmail_grants(monkeypatch)
     assert captured["access_type"] == "online"
 
 
-def test_gmail_consent_can_include_existing_google_grants(monkeypatch):
+def test_gmail_consent_does_not_include_existing_google_grants(monkeypatch):
     captured: dict = {}
 
     class FakeFlow:
@@ -53,8 +56,51 @@ def test_gmail_consent_can_include_existing_google_grants(monkeypatch):
         offline=True,
     )
 
-    assert captured["include_granted_scopes"] == "true"
+    assert captured["include_granted_scopes"] == "false"
     assert captured["access_type"] == "offline"
+
+
+def test_gmail_scope_checker_requires_provider_returned_readonly_scope():
+    assert oauth_service.has_gmail_readonly_scope({"scopes": [oauth_service.GMAIL_READONLY_SCOPE]})
+    assert oauth_service.has_gmail_readonly_scope(
+        {"scopes": f"openid {oauth_service.GMAIL_READONLY_SCOPE}"}
+    )
+    assert not oauth_service.has_gmail_readonly_scope({"scopes": oauth_service.IDENTITY_SCOPES})
+    assert not oauth_service.has_gmail_readonly_scope(
+        {
+            "scopes": [
+                oauth_service.GMAIL_READONLY_SCOPE,
+                "https://www.googleapis.com/auth/drive.readonly",
+            ]
+        }
+    )
+    assert not oauth_service.has_gmail_readonly_scope({})
+
+
+def test_token_exchange_uses_provider_granted_scopes(monkeypatch):
+    granted_scopes = [oauth_service.GMAIL_READONLY_SCOPE]
+
+    class FakeCredentials:
+        token = "access-token"
+        refresh_token = "refresh-token"
+        id_token = "id-token"
+        expiry = None
+
+    FakeCredentials.granted_scopes = granted_scopes
+
+    class FakeFlow:
+        credentials = FakeCredentials()
+
+        def fetch_token(self, **kwargs):
+            assert kwargs["code"] == "oauth-code"
+
+    monkeypatch.setattr(oauth_service, "create_oauth_flow", lambda **kwargs: FakeFlow())
+
+    token_data = oauth_service.exchange_code_for_tokens(
+        "oauth-code", scopes=oauth_service.GMAIL_SCOPES
+    )
+
+    assert token_data["scopes"] == granted_scopes
 
 
 async def test_demo_seed_user_can_login_with_configured_password(client):
@@ -105,8 +151,8 @@ async def test_google_callback_creates_session_and_user(client, monkeypatch):
         assert expected_nonce == "nonce"
         return {
             "google_account_id": "google-sub-1",
-            "email": "naveenrohith2056@gmail.com",
-            "name": "Naveen Rohith",
+            "email": "first-real-user@example.com",
+            "name": "First Real User",
         }
 
     monkeypatch.setattr(auth_routes.oauth_service, "get_authorization_url", fake_authorization_url)
@@ -128,7 +174,7 @@ async def test_google_callback_creates_session_and_user(client, monkeypatch):
 
     session_response = await client.get("/api/auth/session")
     session_response.raise_for_status()
-    assert session_response.json()["user"]["email"] == "naveenrohith2056@gmail.com"
+    assert session_response.json()["user"]["email"] == "first-real-user@example.com"
 
 
 async def test_cookie_session_requires_csrf_and_logout_revokes_it(client, test_session_factory):
@@ -224,6 +270,7 @@ async def test_gmail_consent_is_separate_and_stores_verified_encrypted_tokens(
             "refresh_token": "raw-refresh-token",
             "id_token": "gmail-id-token",
             "expiry": "2026-07-21T18:00:00+00:00",
+            "scopes": gmail_routes.GMAIL_SCOPES,
         }
 
     def fake_identity(token_data, *, expected_nonce=None):
@@ -302,9 +349,352 @@ async def test_gmail_callback_failure_does_not_log_provider_secret(client, monke
             follow_redirects=False,
         )
 
-    assert callback.status_code == 500
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/dashboard?gmail_error=gmail_connection_failed"
     assert secret not in caplog.text
     assert "exception=RuntimeError" in caplog.text
+
+
+async def test_gmail_callback_redirects_denied_consent_and_consumes_state(client, monkeypatch):
+    state = "gmail-denied-state"
+    monkeypatch.setattr(
+        gmail_routes,
+        "get_authorization_url",
+        lambda redirect_uri=None, scopes=None, offline=True: (
+            "https://accounts.google.test/gmail",
+            state,
+            "verifier",
+            "nonce",
+        ),
+    )
+
+    user = await create_user(client, "gmaildenied")
+    connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={user['id']}",
+        follow_redirects=False,
+    )
+    assert connect.status_code == 307
+
+    denied = await client.get(
+        f"/api/auth/gmail/callback?state={state}&error=access_denied",
+        follow_redirects=False,
+    )
+    assert denied.status_code == 303
+    assert denied.headers["location"] == "/dashboard?gmail_error=access_denied"
+
+    replay = await client.get(
+        f"/api/auth/gmail/callback?state={state}&code=late-code",
+        follow_redirects=False,
+    )
+    assert replay.status_code == 400
+
+
+async def test_gmail_callback_redirects_when_provider_omits_code(client, monkeypatch):
+    state = "gmail-missing-code-state"
+    monkeypatch.setattr(
+        gmail_routes,
+        "get_authorization_url",
+        lambda redirect_uri=None, scopes=None, offline=True: (
+            "https://accounts.google.test/gmail",
+            state,
+            "verifier",
+            "nonce",
+        ),
+    )
+
+    user = await create_user(client, "gmailmissing")
+    connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={user['id']}",
+        follow_redirects=False,
+    )
+    assert connect.status_code == 307
+
+    callback = await client.get(
+        f"/api/auth/gmail/callback?state={state}",
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/dashboard?gmail_error=missing_code"
+
+
+async def test_gmail_callback_requires_readonly_scope_before_persisting(
+    client, monkeypatch, test_session_factory
+):
+    state = "gmail-missing-scope-state"
+    user = await create_user(client, "gmailscope")
+
+    monkeypatch.setattr(
+        gmail_routes,
+        "get_authorization_url",
+        lambda redirect_uri=None, scopes=None, offline=True: (
+            "https://accounts.google.test/gmail",
+            state,
+            "verifier",
+            "nonce",
+        ),
+    )
+    monkeypatch.setattr(
+        gmail_routes,
+        "exchange_code_for_tokens",
+        lambda *args, **kwargs: {
+            "access_token": "scope-access",
+            "refresh_token": "scope-refresh",
+            "id_token": "scope-id",
+            "scopes": oauth_service.IDENTITY_SCOPES,
+        },
+    )
+
+    connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={user['id']}",
+        follow_redirects=False,
+    )
+    assert connect.status_code == 307
+
+    callback = await client.get(
+        f"/api/auth/gmail/callback?state={state}&code=scope-code",
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/dashboard?gmail_error=gmail_scope_required"
+
+    async with test_session_factory() as db:
+        result = await db.execute(select(GmailAccount).where(GmailAccount.user_id == user["id"]))
+        assert result.scalar_one_or_none() is None
+
+
+async def test_gmail_callback_rejects_cross_user_mailbox_takeover(
+    client, monkeypatch, test_session_factory
+):
+    first_user = await create_user(client, "gmailowner")
+    second_user = await create_user(client, "gmailintruder")
+    states = iter(("gmail-owner-state", "gmail-takeover-state"))
+
+    monkeypatch.setattr(
+        gmail_routes,
+        "get_authorization_url",
+        lambda redirect_uri=None, scopes=None, offline=True: (
+            "https://accounts.google.test/gmail",
+            next(states),
+            "verifier",
+            "nonce",
+        ),
+    )
+    monkeypatch.setattr(
+        gmail_routes,
+        "exchange_code_for_tokens",
+        lambda code, *args, **kwargs: {
+            "access_token": f"access-{code}",
+            "refresh_token": f"refresh-{code}",
+            "id_token": "shared-id",
+            "scopes": gmail_routes.GMAIL_SCOPES,
+        },
+    )
+    monkeypatch.setattr(
+        gmail_routes,
+        "verify_google_identity",
+        lambda token_data, *, expected_nonce=None: {
+            "google_account_id": "shared-google-subject",
+            "email": "shared-mailbox@example.com",
+            "name": "Shared Mailbox",
+        },
+    )
+
+    first_connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={first_user['id']}",
+        follow_redirects=False,
+    )
+    assert first_connect.status_code == 307
+    first_callback = await client.get(
+        "/api/auth/gmail/callback?state=gmail-owner-state&code=owner-code",
+        follow_redirects=False,
+    )
+    assert first_callback.headers["location"] == "/dashboard?gmail_auth=success"
+
+    second_connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={second_user['id']}",
+        follow_redirects=False,
+    )
+    assert second_connect.status_code == 307
+    second_callback = await client.get(
+        "/api/auth/gmail/callback?state=gmail-takeover-state&code=takeover-code",
+        follow_redirects=False,
+    )
+    assert second_callback.status_code == 303
+    assert second_callback.headers["location"] == "/dashboard?gmail_error=gmail_account_conflict"
+
+    async with test_session_factory() as db:
+        accounts = (await db.execute(select(GmailAccount))).scalars().all()
+        assert len(accounts) == 1
+        assert accounts[0].user_id == first_user["id"]
+
+    first_status = await client.get(f"/api/gmail/auto-sync?user_id={first_user['id']}")
+    second_status = await client.get(f"/api/gmail/auto-sync?user_id={second_user['id']}")
+    assert first_status.status_code == 200
+    assert first_status.json()["connection_status"] == "connected"
+    assert second_status.status_code == 404
+
+
+async def test_gmail_reconnect_preserves_cursor_and_rejects_mailbox_replacement(
+    client,
+    monkeypatch,
+    test_session_factory,
+):
+    user = await create_user(client, "gmailreconnect")
+    states = iter(("gmail-initial-state", "gmail-reconnect-state", "gmail-replace-state"))
+
+    monkeypatch.setattr(
+        gmail_routes,
+        "get_authorization_url",
+        lambda redirect_uri=None, scopes=None, offline=True: (
+            "https://accounts.google.test/gmail",
+            next(states),
+            "verifier",
+            "nonce",
+        ),
+    )
+    monkeypatch.setattr(
+        gmail_routes,
+        "exchange_code_for_tokens",
+        lambda code, *args, **kwargs: {
+            "access_token": f"access-{code}",
+            "refresh_token": f"refresh-{code}",
+            "id_token": "reconnect-id",
+            "scopes": gmail_routes.GMAIL_SCOPES,
+        },
+    )
+
+    def fake_identity(token_data, *, expected_nonce=None):
+        subject = (
+            "subject-two" if token_data["access_token"] == "access-replace-code" else "subject-one"
+        )
+        return {
+            "google_account_id": subject,
+            "email": f"{subject}@example.com",
+            "name": subject,
+        }
+
+    monkeypatch.setattr(gmail_routes, "verify_google_identity", fake_identity)
+
+    connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={user['id']}",
+        follow_redirects=False,
+    )
+    assert connect.status_code == 307
+    initial = await client.get(
+        "/api/auth/gmail/callback?state=gmail-initial-state&code=initial-code",
+        follow_redirects=False,
+    )
+    assert initial.headers["location"] == "/dashboard?gmail_auth=success"
+
+    async with test_session_factory() as db:
+        account = (await db.execute(select(GmailAccount))).scalar_one()
+        account.last_history_id = "cursor-before-reconnect"
+        account.auto_sync_status = "paused"
+        account.auto_sync_error = "Gmail authorization is invalid or revoked"
+        await db.commit()
+
+    reauth_status = await client.get(f"/api/gmail/auto-sync?user_id={user['id']}")
+    assert reauth_status.status_code == 200
+    assert reauth_status.json()["connection_status"] == "reauthorization_required"
+
+    connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={user['id']}",
+        follow_redirects=False,
+    )
+    assert connect.status_code == 307
+    reconnect = await client.get(
+        "/api/auth/gmail/callback?state=gmail-reconnect-state&code=reconnect-code",
+        follow_redirects=False,
+    )
+    assert reconnect.headers["location"] == "/dashboard?gmail_auth=success"
+
+    async with test_session_factory() as db:
+        account = (await db.execute(select(GmailAccount))).scalar_one()
+        assert account.google_account_id == "subject-one"
+        assert account.last_history_id == "cursor-before-reconnect"
+        assert decrypt_secret(account.access_token_ref) == "access-reconnect-code"
+        assert decrypt_secret(account.refresh_token_ref) == "refresh-reconnect-code"
+        assert account.auto_sync_status == "idle"
+        assert account.auto_sync_error is None
+
+    connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={user['id']}",
+        follow_redirects=False,
+    )
+    assert connect.status_code == 307
+    replacement = await client.get(
+        "/api/auth/gmail/callback?state=gmail-replace-state&code=replace-code",
+        follow_redirects=False,
+    )
+    assert replacement.status_code == 303
+    assert replacement.headers["location"] == "/dashboard?gmail_error=gmail_account_mismatch"
+
+    async with test_session_factory() as db:
+        account = (await db.execute(select(GmailAccount))).scalar_one()
+        assert account.google_account_id == "subject-one"
+        assert decrypt_secret(account.access_token_ref) == "access-reconnect-code"
+
+
+async def test_gmail_callback_converts_ownership_race_to_safe_redirect(
+    client,
+    monkeypatch,
+    test_session_factory,
+):
+    state = "gmail-race-state"
+    user = await create_user(client, "gmailrace")
+    monkeypatch.setattr(
+        gmail_routes,
+        "get_authorization_url",
+        lambda redirect_uri=None, scopes=None, offline=True: (
+            "https://accounts.google.test/gmail",
+            state,
+            "verifier",
+            "nonce",
+        ),
+    )
+    monkeypatch.setattr(
+        gmail_routes,
+        "exchange_code_for_tokens",
+        lambda *args, **kwargs: {
+            "access_token": "race-access",
+            "refresh_token": "race-refresh",
+            "id_token": "race-id",
+            "scopes": gmail_routes.GMAIL_SCOPES,
+        },
+    )
+    monkeypatch.setattr(
+        gmail_routes,
+        "verify_google_identity",
+        lambda token_data, *, expected_nonce=None: {
+            "google_account_id": "race-google-subject",
+            "email": "race@example.com",
+            "name": "Race User",
+        },
+    )
+
+    connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={user['id']}",
+        follow_redirects=False,
+    )
+    assert connect.status_code == 307
+
+    original_flush = AsyncSession.flush
+
+    async def fail_for_new_gmail_account(self, *args, **kwargs):
+        if any(isinstance(item, GmailAccount) for item in self.new):
+            raise IntegrityError("duplicate Gmail ownership", {}, RuntimeError("constraint"))
+        return await original_flush(self, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "flush", fail_for_new_gmail_account)
+    callback = await client.get(
+        f"/api/auth/gmail/callback?state={state}&code=race-code",
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/dashboard?gmail_error=gmail_account_conflict"
+
+    async with test_session_factory() as db:
+        assert (await db.execute(select(GmailAccount))).scalar_one_or_none() is None
 
 
 async def test_protected_route_requires_auth_when_enabled(client, auth_required):

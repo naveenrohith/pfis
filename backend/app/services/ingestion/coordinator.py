@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.email import GmailAccount
@@ -27,6 +27,7 @@ from app.services.sync_events import sync_event_manager
 
 logger = logging.getLogger(__name__)
 MAX_TRANSIENT_ATTEMPTS = 3
+CredentialSnapshot = tuple[str | None, str | None]
 
 
 class IngestionMode(str, Enum):
@@ -51,21 +52,55 @@ class IngestionCoordinator:
         await self.db.commit()
         await self.db.refresh(sync_run)
         sync_run_id = sync_run.id
+        sync_run_start_time = sync_run.start_time
         started_at = datetime.now(UTC)
+        credential_snapshot: CredentialSnapshot | None = None
+        credential_replaced = False
 
         try:
             account = await self._get_gmail_account(user_id, gmail_account_id)
+            credential_snapshot = (account.access_token_ref, account.refresh_token_ref)
             await sync_event_manager.broadcast(user_id, "sync_started", {"mode": mode.value})
             await self._audit(user_id, account.id, "sync_started", {"mode": mode.value})
             account.auto_sync_status = "running"
             account.auto_sync_error = None
-            account.last_sync_started_at = sync_run.start_time
+            account.last_sync_started_at = sync_run_start_time
             await self.db.commit()
 
             connector = GmailConnector(account)
             batch = await self._fetch_with_retry(connector, user_id, account, mode, max_results)
             if batch.metrics.get("credentials_refreshed"):
-                await self._audit(user_id, gmail_account_id, "token_refreshed", {})
+                refreshed_snapshot = (account.access_token_ref, account.refresh_token_ref)
+                refreshed_expiry = account.token_expires_at
+                if credential_snapshot is None:
+                    raise RuntimeError("Gmail credential refresh did not produce new credentials")
+
+                # GmailConnector updates the in-memory account after a provider
+                # refresh. Roll back those ORM mutations before any flush can
+                # overwrite a concurrent reconnect, then persist them with the
+                # original credential snapshot as the compare-and-set guard.
+                await self.db.rollback()
+                account = await self._get_gmail_account(user_id, gmail_account_id)
+                refreshed_update = (
+                    update(GmailAccount)
+                    .where(*_credential_conditions(user_id, gmail_account_id, credential_snapshot))
+                    .values(
+                        access_token_ref=refreshed_snapshot[0],
+                        refresh_token_ref=refreshed_snapshot[1],
+                        token_expires_at=refreshed_expiry,
+                    )
+                )
+                with self.db.no_autoflush:
+                    refreshed_update_result = await self.db.execute(refreshed_update)
+                if refreshed_update_result.rowcount == 1:
+                    await self.db.commit()
+                    await self.db.refresh(account)
+                    credential_snapshot = refreshed_snapshot
+                    await self._audit(user_id, gmail_account_id, "token_refreshed", {})
+                else:
+                    credential_replaced = True
+                    await self.db.refresh(account)
+                    logger.info("Gmail token refresh skipped after credential replacement")
             await domain_event_dispatcher.publish(
                 DomainEvent(
                     "SourceRecordFetched",
@@ -110,11 +145,35 @@ class IngestionCoordinator:
             )
 
             now = datetime.now(UTC)
-            account.last_synced_at = now
-            account.last_sync_started_at = sync_run.start_time
-            account.last_history_id = batch.cursor.history_id
-            account.auto_sync_status = "idle"
-            account.auto_sync_error = None
+            if credential_snapshot is None:
+                raise RuntimeError("Gmail account credential snapshot unavailable")
+            if credential_replaced:
+                logger.info("Gmail sync completion skipped after credential replacement")
+            else:
+                account_update = (
+                    update(GmailAccount)
+                    .where(*_credential_conditions(user_id, gmail_account_id, credential_snapshot))
+                    .values(
+                        access_token_ref=account.access_token_ref,
+                        refresh_token_ref=account.refresh_token_ref,
+                        token_expires_at=account.token_expires_at,
+                        last_synced_at=now,
+                        last_sync_started_at=sync_run_start_time,
+                        last_history_id=batch.cursor.history_id,
+                        auto_sync_status="idle",
+                        auto_sync_error=None,
+                    )
+                )
+                # A reconnect or another worker may have replaced credentials
+                # while Gmail was being fetched. The compare-and-set prevents
+                # this stale sync from overwriting the new token or cursor.
+                with self.db.no_autoflush:
+                    account_update_result = await self.db.execute(account_update)
+                if account_update_result.rowcount != 1:
+                    logger.info(
+                        "Gmail sync completion skipped account update after credential replacement"
+                    )
+                await self.db.refresh(account)
             await domain_event_dispatcher.publish(
                 DomainEvent(
                     "ConnectorHealthChanged",
@@ -139,7 +198,13 @@ class IngestionCoordinator:
             await self._audit(user_id, gmail_account_id, "sync_completed", stats)
             return stats
         except Exception as exc:
-            await self._handle_failure(sync_run_id, user_id, gmail_account_id, exc)
+            await self._handle_failure(
+                sync_run_id,
+                user_id,
+                gmail_account_id,
+                exc,
+                credential_snapshot,
+            )
             raise
 
     async def _fetch_with_retry(
@@ -187,6 +252,7 @@ class IngestionCoordinator:
         user_id: str,
         gmail_account_id: str,
         exc: Exception,
+        credential_snapshot: CredentialSnapshot | None,
     ) -> None:
         await self.db.rollback()
         error_type = classify_connector_exception(exc)
@@ -204,17 +270,30 @@ class IngestionCoordinator:
             logger.error("Gmail sync failure could not find its persisted sync run")
             return
         account = await self.db.scalar(
-            select(GmailAccount).where(
+            select(GmailAccount)
+            .where(
                 GmailAccount.id == gmail_account_id,
                 GmailAccount.user_id == user_id,
             )
+            .execution_options(populate_existing=True)
         )
-        if account is not None:
-            account.auto_sync_status = (
-                "paused" if error_type == ConnectorErrorType.PERMANENT else "error"
+        account_update_applied = False
+        if account is not None and credential_snapshot is not None:
+            account_update = (
+                update(GmailAccount)
+                .where(*_credential_conditions(user_id, gmail_account_id, credential_snapshot))
+                .values(
+                    auto_sync_status=(
+                        "paused" if error_type == ConnectorErrorType.PERMANENT else "error"
+                    ),
+                    auto_sync_error=public_error,
+                    last_sync_started_at=sync_run.start_time,
+                )
             )
-            account.auto_sync_error = public_error
-            account.last_sync_started_at = sync_run.start_time
+            with self.db.no_autoflush:
+                account_update_result = await self.db.execute(account_update)
+            account_update_applied = account_update_result.rowcount == 1
+            await self.db.refresh(account)
         sync_run.status = SyncStatus.FAILED
         sync_run.end_time = datetime.now(UTC)
         sync_run.emails_failed = 1
@@ -234,17 +313,18 @@ class IngestionCoordinator:
                 {"error_type": error_type.value},
             )
         )
-        await domain_event_dispatcher.publish(
-            DomainEvent(
-                "ConnectorHealthChanged",
-                user_id,
-                SourceType.GMAIL,
-                {
-                    "status": account.auto_sync_status if account is not None else "error",
-                    "error_type": error_type.value,
-                },
+        if account is not None and account_update_applied:
+            await domain_event_dispatcher.publish(
+                DomainEvent(
+                    "ConnectorHealthChanged",
+                    user_id,
+                    SourceType.GMAIL,
+                    {
+                        "status": account.auto_sync_status,
+                        "error_type": error_type.value,
+                    },
+                )
             )
-        )
         await sync_event_manager.broadcast(
             user_id,
             "sync_failed",
@@ -268,6 +348,29 @@ class IngestionCoordinator:
             )
         )
         await self.db.commit()
+
+
+def _credential_conditions(
+    user_id: str,
+    gmail_account_id: str,
+    credential_snapshot: CredentialSnapshot,
+) -> list[Any]:
+    """Build a compare-and-set predicate for a Gmail account's credentials."""
+    access_token_ref, refresh_token_ref = credential_snapshot
+    return [
+        GmailAccount.id == gmail_account_id,
+        GmailAccount.user_id == user_id,
+        (
+            GmailAccount.access_token_ref.is_(None)
+            if access_token_ref is None
+            else GmailAccount.access_token_ref == access_token_ref
+        ),
+        (
+            GmailAccount.refresh_token_ref.is_(None)
+            if refresh_token_ref is None
+            else GmailAccount.refresh_token_ref == refresh_token_ref
+        ),
+    ]
 
 
 def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:

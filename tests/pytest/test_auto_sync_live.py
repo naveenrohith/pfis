@@ -56,6 +56,46 @@ async def test_auto_sync_status_can_be_read_and_updated(client, test_session_fac
     assert updated["interval_seconds"] == 600
     assert updated["status"] == "paused"
 
+    reenabled_response = await client.patch(
+        f"/api/gmail/auto-sync?user_id={user['id']}",
+        json={"enabled": True},
+    )
+    reenabled_response.raise_for_status()
+    assert reenabled_response.json()["enabled"] is True
+    assert reenabled_response.json()["status"] == "idle"
+
+
+async def test_auto_sync_toggle_preserves_reauthorization_state(client, test_session_factory):
+    user = await create_user(client, "autosync-reauthorization-toggle")
+    async with test_session_factory() as db:
+        db.add(
+            GmailAccount(
+                user_id=user["id"],
+                google_account_id="gmail-reauthorization-toggle",
+                access_token_ref="access",
+                refresh_token_ref="refresh",
+                auto_sync_status="paused",
+                auto_sync_error="Gmail authorization is invalid or revoked",
+            )
+        )
+        await db.commit()
+
+    disabled = await client.patch(
+        f"/api/gmail/auto-sync?user_id={user['id']}",
+        json={"enabled": False},
+    )
+    disabled.raise_for_status()
+    assert disabled.json()["connection_status"] == "reauthorization_required"
+    assert disabled.json()["error"] == "Gmail authorization is invalid or revoked"
+
+    enabled = await client.patch(
+        f"/api/gmail/auto-sync?user_id={user['id']}",
+        json={"enabled": True},
+    )
+    enabled.raise_for_status()
+    assert enabled.json()["connection_status"] == "reauthorization_required"
+    assert enabled.json()["status"] == "paused"
+
 
 async def test_sync_event_manager_broadcasts_only_to_target_user():
     manager = SyncEventManager()
@@ -184,3 +224,50 @@ async def test_auto_sync_failure_persists_and_broadcasts_only_safe_error(
             },
         )
     ]
+
+
+async def test_auto_sync_failure_does_not_overwrite_a_reconnected_account(
+    client, test_session_factory, monkeypatch
+):
+    user = await create_user(client, "autosync-reconnect-race")
+    async with test_session_factory() as db:
+        account = GmailAccount(
+            user_id=user["id"],
+            google_account_id="gmail-autosync-reconnect-race",
+            access_token_ref="old-access-ref",
+            refresh_token_ref="old-refresh-ref",
+        )
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
+        account_id = account.id
+
+    async def fail_after_reconnect(_db, _user_id, _account_id):
+        async with test_session_factory() as competing_db:
+            competing_account = await competing_db.scalar(
+                select(GmailAccount).where(GmailAccount.id == account_id)
+            )
+            assert competing_account is not None
+            competing_account.access_token_ref = "new-access-ref"
+            competing_account.refresh_token_ref = "new-refresh-ref"
+            competing_account.auto_sync_status = "idle"
+            competing_account.auto_sync_error = None
+            await competing_db.commit()
+        raise RuntimeError("invalid_grant provider detail must stay private")
+
+    monkeypatch.setattr(
+        auto_sync_service,
+        "sync_gmail_emails_incremental",
+        fail_after_reconnect,
+    )
+
+    await auto_sync_service._run_account_sync(account_id)
+
+    async with test_session_factory() as db:
+        stored = await db.scalar(select(GmailAccount).where(GmailAccount.id == account_id))
+
+    assert stored is not None
+    assert stored.access_token_ref == "new-access-ref"
+    assert stored.refresh_token_ref == "new-refresh-ref"
+    assert stored.auto_sync_status == "idle"
+    assert stored.auto_sync_error is None

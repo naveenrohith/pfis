@@ -18,10 +18,33 @@ Set:
 - `SESSION_COOKIE_NAME=__Host-pfis_session`
 - `SESSION_COOKIE_SECURE=true`
 - `ALLOW_DEMO_LOGIN=false`
-- Google OAuth settings only for approved redirect URIs
+- Google OAuth settings for the exact HTTPS main-origin redirect URIs
+- `GOOGLE_ALLOWED_EMAILS` empty for any verified Google account, unless an
+  emergency deployment restriction is intentionally active
 - A completed `frontend/dist` production build
 
-Production startup intentionally fails when these values are unsafe.
+Production startup intentionally fails when the application settings above are
+unsafe. Google Cloud OAuth readiness is a separate release gate described below.
+
+## Google Cloud production readiness
+
+Before inviting real users, complete these provider-side controls in the Google
+Cloud project used by the hosted main deployment:
+
+1. Configure the OAuth consent screen as `External` and publish it to
+   `In production`.
+2. Enable the Gmail API and register the exact HTTPS values of
+   `GOOGLE_REDIRECT_URI` and `GMAIL_OAUTH_REDIRECT_URI` for the web client.
+3. Verify the hosted domain and publish current privacy-policy and data-deletion
+   disclosures that describe read-only Gmail access and token handling.
+4. Submit the `gmail.readonly` restricted-scope verification and complete the
+   required security assessment before general Gmail access is considered live.
+5. Test with two separate Google accounts: each must see only its own Gmail
+   connection, emails, sync status, and transactions.
+
+Google's Testing publishing state is suitable only for a deliberately limited
+cohort: non-basic-scope test users are capped and offline refresh tokens expire
+quickly. It is not the target posture for the hosted multi-user rollout.
 
 The live sync channel accepts at most `WS_MAX_CONNECTIONS_PER_USER` sockets per
 user and closes client messages larger than `WS_MAX_MESSAGE_BYTES`. Keep the
@@ -122,6 +145,11 @@ Monitor:
 - Restore from backup if migration rollback cannot safely recover data.
 - Revert phase-scoped commits rather than mixing unrelated fixes.
 - Keep local/demo settings separate from production controls.
+- If the hosted rollout must be restricted immediately, set a reviewed
+  `GOOGLE_ALLOWED_EMAILS` emergency allowlist and restart the application; do
+  not delete Gmail accounts, rotate the token-encryption key, or drop sync
+  history as a rollback step. Remove the temporary restriction only after the
+  provider and application gates are green.
 
 ## Final Release Gate
 

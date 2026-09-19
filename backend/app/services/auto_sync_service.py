@@ -8,7 +8,7 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.database import AsyncSessionLocal
 from app.models.email import GmailAccount
@@ -24,6 +24,7 @@ _scheduler_task: asyncio.Task | None = None
 _running_account_ids: set[str] = set()
 _poll_interval_seconds = 30
 _error_cooldown_seconds = 900
+CredentialSnapshot = tuple[str | None, str | None]
 
 
 def get_running_auto_sync_count() -> int:
@@ -107,6 +108,7 @@ async def _run_account_sync(gmail_account_id: str) -> None:
         return
     _running_account_ids.add(gmail_account_id)
 
+    credential_snapshot: CredentialSnapshot | None = None
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
@@ -116,6 +118,7 @@ async def _run_account_sync(gmail_account_id: str) -> None:
             if account is None or not account.auto_sync_enabled:
                 return
             user_id = account.user_id
+            credential_snapshot = (account.access_token_ref, account.refresh_token_ref)
 
         async with AsyncSessionLocal() as sync_db:
             sync_stats = await sync_gmail_emails_incremental(sync_db, user_id, gmail_account_id)
@@ -155,13 +158,28 @@ async def _run_account_sync(gmail_account_id: str) -> None:
                 select(GmailAccount).where(GmailAccount.id == gmail_account_id)
             )
             account = result.scalar_one_or_none()
-            if account:
-                account.auto_sync_status = (
-                    "paused" if error_type == ConnectorErrorType.PERMANENT else "error"
+            account_update_applied = False
+            if account and credential_snapshot is not None:
+                account_update = (
+                    update(GmailAccount)
+                    .where(
+                        GmailAccount.id == gmail_account_id,
+                        GmailAccount.user_id == account.user_id,
+                        *_credential_conditions(credential_snapshot),
+                    )
+                    .values(
+                        auto_sync_status=(
+                            "paused" if error_type == ConnectorErrorType.PERMANENT else "error"
+                        ),
+                        auto_sync_error=public_error,
+                        last_sync_started_at=datetime.now(UTC),
+                    )
                 )
-                account.auto_sync_error = public_error
-                account.last_sync_started_at = datetime.now(UTC)
+                with db.no_autoflush:
+                    account_update_result = await db.execute(account_update)
+                account_update_applied = account_update_result.rowcount == 1
                 await db.commit()
+            if account and account_update_applied:
                 await sync_event_manager.broadcast(
                     account.user_id,
                     "sync_failed",
@@ -178,3 +196,19 @@ def _public_sync_stats(stats: dict[str, Any]) -> dict[str, Any]:
         if key not in {"errors", "classifications"}
         and isinstance(value, str | int | float | bool | type(None))
     }
+
+
+def _credential_conditions(credential_snapshot: CredentialSnapshot) -> list[Any]:
+    access_token_ref, refresh_token_ref = credential_snapshot
+    return [
+        (
+            GmailAccount.access_token_ref.is_(None)
+            if access_token_ref is None
+            else GmailAccount.access_token_ref == access_token_ref
+        ),
+        (
+            GmailAccount.refresh_token_ref.is_(None)
+            if refresh_token_ref is None
+            else GmailAccount.refresh_token_ref == refresh_token_ref
+        ),
+    ]

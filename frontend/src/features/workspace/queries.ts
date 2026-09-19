@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
 
@@ -102,7 +102,14 @@ export function useAutoSyncStatus() {
   const userId = useUserId();
   return useQuery({
     queryKey: queryKeys.autoSyncStatus(userId),
-    queryFn: () => api.autoSyncStatus(userId),
+    queryFn: async () => {
+      try {
+        return await api.autoSyncStatus(userId);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return null;
+        throw error;
+      }
+    },
     enabled: !!userId,
     retry: false,
     ...operationalQueryPolicy,

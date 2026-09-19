@@ -249,6 +249,8 @@ export const api = {
     }),
 
   // Gmail / inbox
+  gmailConnectUrl: (userId: string) =>
+    `${API_BASE}/auth/gmail/connect?${new URLSearchParams({ user_id: userId }).toString()}`,
   emails: (userId: string, limit = 12) =>
     request<EmailsResponse>('/gmail/emails', { query: { user_id: userId, limit } }),
   syncStatus: (userId: string) =>

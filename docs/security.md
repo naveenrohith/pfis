@@ -19,6 +19,9 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 - Set `ENVIRONMENT=production` for deployed environments so startup validates production-safe settings.
 - Production requires a unique `SECRET_KEY`, `AUTH_REQUIRED=true`, a PostgreSQL
   `DATABASE_URL`, non-local `CORS_ORIGINS`, secure cookies, and demo login disabled.
+- Keep `GOOGLE_ALLOWED_EMAILS` empty for normal multi-user production access.
+  Use a non-empty value only as an emergency deployment-level sign-in restriction;
+  never commit personal addresses in repository configuration.
 
 ## Browser Sessions and Passwords
 
@@ -38,6 +41,15 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 - Use PKCE for both Google flows and verify the OpenID Connect nonce, issuer/audience, stable `sub`, and `email_verified` claim.
 - Link Google identities by provider `sub`, never by email alone. An existing password account requires an explicit account-linking flow.
 - Keep both redirect URIs configured through settings and registered exactly with Google.
+- Gmail callbacks require the granted `gmail.readonly` scope before persisting
+  credentials. They permit same-mailbox reconnects, reject mailbox replacement,
+  and reject a Google subject already owned by another PFIS user without
+  overwriting tokens or sync cursors.
+- The Gmail connection status is derived from the owner-scoped account record;
+  a revoked/invalid authorization is surfaced as reauthorization-required.
+- `gmail.readonly` is a restricted Google scope. Public Gmail rollout requires
+  Google's OAuth verification and any required security assessment before
+  inviting general users.
 
 ## Frontend Safety
 

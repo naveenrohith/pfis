@@ -8,7 +8,8 @@ User-scoped routes accept a `user_id` and resolve the effective user via
 `resolve_user_scope(user_id, current_user)`.
 
 Common error codes: `400` bad state, `401` unauthenticated, `403` forbidden,
-`404` not found, `409` conflict/duplicate, `500` server error.
+`404` not found, `409` conflict/duplicate, `500` server error. Browser OAuth
+callbacks use stable dashboard query codes for recoverable provider errors.
 
 ## Health
 
@@ -43,8 +44,8 @@ Auth router (`/api/auth/gmail`):
 
 | Method | Path | Query | Success | Errors | Returns |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/auth/gmail/connect` | `user_id` | `302` | `500` | Redirect to Google consent |
-| `GET` | `/api/auth/gmail/callback` | `code, state` | `303` | `400,500` | Stores encrypted connector tokens and redirects to dashboard |
+| `GET` | `/api/auth/gmail/connect` | `user_id` | `307` | `500` | Redirect to Google consent; state is bound to the browser and target user |
+| `GET` | `/api/auth/gmail/callback` | `state`, `code?`, `error?` | `303` | `400` | Stores encrypted connector tokens on success and redirects to dashboard; provider denial, missing code, scope failure, and ownership conflicts use `gmail_error` |
 
 Operations router (`/api/gmail`):
 
@@ -59,7 +60,7 @@ Auto-sync additions:
 
 | Method | Path | Query | Success | Errors | Returns |
 | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/gmail/auto-sync` | `user_id` | `200` | `404` | Auto-sync settings, status, last sync, and cursor |
+| `GET` | `/api/gmail/auto-sync` | `user_id` | `200` | `404` | Auto-sync settings, `connection_status` (`connected` or `reauthorization_required`), status, last sync, and cursor; `404` means disconnected |
 | `PATCH` | `/api/gmail/auto-sync` | `user_id` | `200` | `404,422` | Update auto-sync enabled state or interval |
 
 ## WebSocket

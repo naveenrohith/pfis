@@ -27,6 +27,26 @@ failures still fail the sync for retry or reauthorization.
 The legacy Gmail sync functions remain compatibility wrappers over this
 coordinator so existing API routes and jobs keep the same public behavior.
 
+## Multi-user Google and Gmail rollout
+
+Google identity sign-in accepts any Google account with a verified email when
+`GOOGLE_ALLOWED_EMAILS` is empty. That setting remains available as an
+emergency deployment control, but individual user addresses must not be
+committed to configuration examples or source code.
+
+Sign-in and Gmail access are intentionally separate decisions:
+
+1. Google sign-in requests only OpenID Connect identity scopes.
+2. The signed-in user chooses `Connect Gmail` inside their own workspace.
+3. Gmail requests the read-only Gmail scope and offline access for sync.
+4. The callback verifies the granted read-only scope and links the mailbox to
+   the authenticated OAuth transaction's PFIS user.
+
+Each PFIS user can connect one Gmail mailbox. A same-mailbox reconnect refreshes
+credentials without resetting its history cursor. A different mailbox cannot
+silently replace the existing link, and a Google mailbox already owned by
+another PFIS user is rejected without changing either account.
+
 ## Classification
 
 Source classification is connector-neutral. The Gmail `email_filter` module is a

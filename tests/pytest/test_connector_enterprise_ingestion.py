@@ -130,6 +130,221 @@ async def test_ingestion_coordinator_retries_transient_failure_and_audits(
     assert "sync_completed" in event_types
 
 
+async def test_ingestion_completion_does_not_overwrite_a_concurrent_reconnect(
+    client, test_session_factory, monkeypatch
+):
+    user = await create_user(client, "gmail-reconnect-race")
+    async with test_session_factory() as db:
+        account = GmailAccount(
+            user_id=user["id"],
+            google_account_id="gmail-reconnect-race",
+            access_token_ref="old-access-ref",
+            refresh_token_ref="old-refresh-ref",
+            last_history_id="cursor-before-sync",
+        )
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
+        account_id = account.id
+
+    async def fake_fetch(self, user_id, options):
+        async with test_session_factory() as competing_db:
+            competing_account = await competing_db.scalar(
+                select(GmailAccount).where(GmailAccount.id == account_id)
+            )
+            assert competing_account is not None
+            competing_account.access_token_ref = "reconnected-access-ref"
+            competing_account.refresh_token_ref = "reconnected-refresh-ref"
+            competing_account.auto_sync_status = "idle"
+            competing_account.auto_sync_error = None
+            await competing_db.commit()
+        return ConnectorBatch(
+            records=[],
+            cursor=ConnectorCursor(history_id="stale-sync-cursor"),
+            metrics={"fetched": 0, "records": 0, "fallback_used": False},
+        )
+
+    monkeypatch.setattr(GmailConnector, "fetch_backfill", fake_fetch)
+
+    async with test_session_factory() as db:
+        stats = await IngestionCoordinator(db).run_gmail(
+            user["id"], account_id, IngestionMode.BACKFILL, max_results=10
+        )
+
+    assert stats["emails_fetched"] == 0
+    async with test_session_factory() as db:
+        stored = await db.scalar(select(GmailAccount).where(GmailAccount.id == account_id))
+        assert stored is not None
+        assert stored.access_token_ref == "reconnected-access-ref"
+        assert stored.refresh_token_ref == "reconnected-refresh-ref"
+        assert stored.last_history_id == "cursor-before-sync"
+        assert stored.auto_sync_status == "idle"
+        assert stored.auto_sync_error is None
+
+
+async def test_ingestion_persists_refreshed_credentials_before_advancing_cursor(
+    client, test_session_factory, monkeypatch
+):
+    user = await create_user(client, "gmail-refresh-completion")
+    async with test_session_factory() as db:
+        account = GmailAccount(
+            user_id=user["id"],
+            google_account_id="gmail-refresh-completion",
+            access_token_ref="old-access-ref",
+            refresh_token_ref="old-refresh-ref",
+            last_history_id="cursor-before-refresh",
+        )
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
+        account_id = account.id
+
+    async def fake_fetch(self, user_id, options):
+        self.account.access_token_ref = "refreshed-access-ref"
+        self.account.refresh_token_ref = "refreshed-refresh-ref"
+        self.account.token_expires_at = datetime(2026, 9, 17, 18, 0, tzinfo=UTC)
+        return ConnectorBatch(
+            records=[],
+            cursor=ConnectorCursor(history_id="cursor-after-refresh"),
+            metrics={
+                "fetched": 0,
+                "records": 0,
+                "fallback_used": False,
+                "credentials_refreshed": True,
+            },
+        )
+
+    monkeypatch.setattr(GmailConnector, "fetch_backfill", fake_fetch)
+
+    async with test_session_factory() as db:
+        stats = await IngestionCoordinator(db).run_gmail(
+            user["id"], account_id, IngestionMode.BACKFILL, max_results=10
+        )
+
+    assert stats["emails_fetched"] == 0
+    async with test_session_factory() as db:
+        stored = await db.scalar(select(GmailAccount).where(GmailAccount.id == account_id))
+        assert stored is not None
+        assert stored.access_token_ref == "refreshed-access-ref"
+        assert stored.refresh_token_ref == "refreshed-refresh-ref"
+        assert stored.last_history_id == "cursor-after-refresh"
+        assert stored.auto_sync_status == "idle"
+        assert stored.auto_sync_error is None
+
+
+async def test_ingestion_refresh_race_completes_without_overwriting_reconnect(
+    client, test_session_factory, monkeypatch
+):
+    user = await create_user(client, "gmail-refresh-reconnect-race")
+    async with test_session_factory() as db:
+        account = GmailAccount(
+            user_id=user["id"],
+            google_account_id="gmail-refresh-reconnect-race",
+            access_token_ref="old-race-access-ref",
+            refresh_token_ref="old-race-refresh-ref",
+            last_history_id="cursor-before-race-refresh",
+        )
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
+        account_id = account.id
+
+    async def fake_fetch(self, user_id, options):
+        async with test_session_factory() as competing_db:
+            competing_account = await competing_db.scalar(
+                select(GmailAccount).where(GmailAccount.id == account_id)
+            )
+            assert competing_account is not None
+            competing_account.access_token_ref = "reconnected-race-access-ref"
+            competing_account.refresh_token_ref = "reconnected-race-refresh-ref"
+            competing_account.auto_sync_status = "idle"
+            competing_account.auto_sync_error = None
+            await competing_db.commit()
+
+        self.account.access_token_ref = "stale-refreshed-access-ref"
+        self.account.refresh_token_ref = "stale-refreshed-refresh-ref"
+        self.account.token_expires_at = datetime(2026, 9, 17, 18, 0, tzinfo=UTC)
+        return ConnectorBatch(
+            records=[],
+            cursor=ConnectorCursor(history_id="stale-refresh-cursor"),
+            metrics={
+                "fetched": 0,
+                "records": 0,
+                "fallback_used": False,
+                "credentials_refreshed": True,
+            },
+        )
+
+    monkeypatch.setattr(GmailConnector, "fetch_backfill", fake_fetch)
+
+    async with test_session_factory() as db:
+        stats = await IngestionCoordinator(db).run_gmail(
+            user["id"], account_id, IngestionMode.BACKFILL, max_results=10
+        )
+        runs = await db.execute(select(SyncRun).where(SyncRun.user_id == user["id"]))
+        sync_run = runs.scalar_one()
+
+    assert stats["emails_fetched"] == 0
+    assert sync_run.status == SyncStatus.COMPLETED
+    async with test_session_factory() as db:
+        stored = await db.scalar(select(GmailAccount).where(GmailAccount.id == account_id))
+        assert stored is not None
+        assert stored.access_token_ref == "reconnected-race-access-ref"
+        assert stored.refresh_token_ref == "reconnected-race-refresh-ref"
+        assert stored.last_history_id == "cursor-before-race-refresh"
+        assert stored.auto_sync_status == "idle"
+        assert stored.auto_sync_error is None
+
+
+async def test_ingestion_failure_does_not_mark_a_reconnected_account_for_reauth(
+    client, test_session_factory, monkeypatch
+):
+    user = await create_user(client, "gmail-reconnect-failure")
+    async with test_session_factory() as db:
+        account = GmailAccount(
+            user_id=user["id"],
+            google_account_id="gmail-reconnect-failure",
+            access_token_ref="old-failure-access-ref",
+            refresh_token_ref="old-failure-refresh-ref",
+        )
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
+        account_id = account.id
+
+    async def fake_fetch(self, user_id, options):
+        async with test_session_factory() as competing_db:
+            competing_account = await competing_db.scalar(
+                select(GmailAccount).where(GmailAccount.id == account_id)
+            )
+            assert competing_account is not None
+            competing_account.access_token_ref = "reconnected-failure-access-ref"
+            competing_account.refresh_token_ref = "reconnected-failure-refresh-ref"
+            competing_account.auto_sync_status = "idle"
+            competing_account.auto_sync_error = None
+            await competing_db.commit()
+        raise RuntimeError("invalid_grant provider detail must stay private")
+
+    monkeypatch.setattr(GmailConnector, "fetch_backfill", fake_fetch)
+
+    async with test_session_factory() as db:
+        try:
+            await IngestionCoordinator(db).run_gmail(
+                user["id"], account_id, IngestionMode.BACKFILL, max_results=10
+            )
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("The simulated sync failure was not propagated")
+
+    async with test_session_factory() as db:
+        stored = await db.scalar(select(GmailAccount).where(GmailAccount.id == account_id))
+        assert stored is not None
+        assert stored.access_token_ref == "reconnected-failure-access-ref"
+        assert stored.auto_sync_status == "idle"
+        assert stored.auto_sync_error is None
+
+
 def test_connector_error_classifier_marks_permanent_credentials():
     assert (
         classify_connector_exception(Exception("invalid_grant revoked"))

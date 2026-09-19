@@ -174,6 +174,7 @@ export interface SyncStatusResponse {
 
 export interface AutoSyncStatus {
   gmail_account_id: string;
+  connection_status: 'connected' | 'reauthorization_required';
   enabled: boolean;
   interval_seconds: number;
   status: 'idle' | 'running' | 'paused' | 'error';

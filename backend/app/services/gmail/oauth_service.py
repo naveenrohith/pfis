@@ -31,6 +31,8 @@ settings = get_settings()
 _GOOGLE_CLIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$")
 
 # Gmail read-only scope — minimum access needed
+GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+
 IDENTITY_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
@@ -39,10 +41,22 @@ IDENTITY_SCOPES = [
 
 GMAIL_SCOPES = [
     *IDENTITY_SCOPES,
-    "https://www.googleapis.com/auth/gmail.readonly",
+    GMAIL_READONLY_SCOPE,
 ]
 
 SCOPES = GMAIL_SCOPES
+
+
+def has_gmail_readonly_scope(token_data: dict[str, Any]) -> bool:
+    """Return whether the provider granted the exact Gmail read-only scope."""
+    raw_scopes = token_data.get("scopes")
+    if isinstance(raw_scopes, str):
+        granted_scopes = set(raw_scopes.split())
+    elif isinstance(raw_scopes, list | tuple | set):
+        granted_scopes = {str(scope) for scope in raw_scopes}
+    else:
+        granted_scopes = set()
+    return GMAIL_READONLY_SCOPE in granted_scopes and granted_scopes <= set(GMAIL_SCOPES)
 
 
 def create_oauth_flow(
@@ -113,10 +127,9 @@ def get_authorization_url(
 
     auth_url, state = flow.authorization_url(
         access_type="offline" if offline else "online",
-        # Identity sign-in must not inherit an older Gmail grant. Besides
-        # preserving consent separation, this prevents OAuthLib from rejecting
-        # the callback when Google returns a broader, previously granted scope.
-        include_granted_scopes="true" if offline else "false",
+        # Gmail consent is an explicit, least-privilege grant. Do not let a
+        # prior grant for this OAuth client silently aggregate broader scopes.
+        include_granted_scopes="false",
         prompt="consent" if offline else "select_account",
         code_challenge=code_challenge,
         code_challenge_method="S256",
@@ -144,12 +157,22 @@ def exchange_code_for_tokens(
 
     credentials = flow.credentials
 
+    provider_scopes = credentials.granted_scopes
+    if provider_scopes is None:
+        # OAuth permits omitting `scope` when it exactly matches the request.
+        # Only this exact-request case may use the requested list as a fallback.
+        granted_scopes = requested_scopes
+    elif isinstance(provider_scopes, str):
+        granted_scopes = provider_scopes.split()
+    else:
+        granted_scopes = list(provider_scopes)
+
     token_data = {
         "access_token": credentials.token,
         "refresh_token": credentials.refresh_token,
         "id_token": credentials.id_token,
         "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
-        "scopes": list(credentials.scopes) if credentials.scopes else requested_scopes,
+        "scopes": granted_scopes,
     }
 
     logger.info("Successfully exchanged auth code for tokens")

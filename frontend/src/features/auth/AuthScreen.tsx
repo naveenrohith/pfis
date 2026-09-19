@@ -25,7 +25,7 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   google_identity_invalid:
     'Google could not verify this sign-in. Start again and choose your PFIS account.',
   google_account_not_allowed:
-    'This Google account is not approved for PFIS. Choose the configured account instead.',
+    'This Google account is not enabled for this PFIS deployment. Contact the workspace administrator if this is unexpected.',
   account_link_required: 'This email already has a PFIS account. Sign in with your password first.',
 };
 
