@@ -32,6 +32,8 @@ class ParseResult:
     currency: str = "INR"
     transaction_type: TransactionTypeEnum | None = None
     payment_method: str = "other"
+    payment_rail: str = "other"
+    card_event: str = "none"
     transaction_status: str = "completed"
     transaction_timestamp: datetime | None = None
     merchant_raw: str | None = None

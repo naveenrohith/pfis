@@ -15,7 +15,10 @@ export function SectionNav() {
   const { activeWorkspace, openWorkspace, setQuickAddOpen } = useDashboardUi();
 
   return (
-    <aside className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:border-r lg:border-t-0 lg:bg-secondary/55 lg:p-3">
+    <aside
+      data-testid="workspace-rail"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:border-r lg:border-t-0 lg:bg-secondary/55 lg:p-3"
+    >
       <div className="hidden h-14 place-items-center lg:grid">
         <button
           type="button"

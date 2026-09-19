@@ -19,11 +19,17 @@ from sqlalchemy.orm import selectinload
 
 from app.models.email import RawEmail
 from app.models.sync import ParseFailure, PipelineEvent
-from app.schemas.transaction import PaymentMethodEnum, TransactionCreate
+from app.schemas.transaction import (
+    CardEventEnum,
+    PaymentMethodEnum,
+    PaymentRailEnum,
+    TransactionCreate,
+)
 from app.schemas.transaction import TransactionTypeEnum as TransactionSchemaType
 from app.services.connectors.source_record import SourceType
 from app.services.domain_events import DomainEvent, domain_event_dispatcher
 from app.services.gmail.email_filter import EmailType, classify_email
+from app.services.ledger_currency import LedgerCurrencyMismatchError
 from app.services.parser.base_parser import BaseParser, ParseResult
 from app.services.parser.confidence import score_parse_result
 from app.services.parser.identity import build_identity
@@ -31,6 +37,7 @@ from app.services.parser.normalizer import (
     MerchantResolution,
     get_default_category_id,
     infer_merchant_from_text,
+    is_plausible_merchant_descriptor,
     resolve_merchant,
 )
 from app.services.parser.registry import get_parser_registry
@@ -116,6 +123,7 @@ def _record_pipeline_event(
             status=status,
             parser_name=parse_result.parser_name if parse_result else None,
             parser_version=parse_result.parser_version if parse_result else None,
+            source_institution=parse_result.bank if parse_result else None,
             confidence_score=parse_result.confidence_score if parse_result else None,
             duration_ms=duration_ms,
             payload_json=_safe_json(payload),
@@ -184,7 +192,12 @@ async def _infer_missing_merchant(
     email_result: dict[str, Any],
 ) -> str | None:
     """Infer merchant/category when exact parser extraction is missing."""
-    if parse_result.merchant_raw and parse_result.merchant_source == "exact":
+    exact_is_plausible = (
+        parse_result.merchant_raw
+        and parse_result.merchant_source == "exact"
+        and is_plausible_merchant_descriptor(parse_result.merchant_raw)
+    )
+    if exact_is_plausible:
         return None
 
     inferred_merchant, inferred_category_id = await infer_merchant_from_text(
@@ -198,6 +211,16 @@ async def _infer_missing_merchant(
         email_result["merchant_raw"] = inferred_merchant
         email_result["merchant_source"] = "inferred"
         email_result["merchant_inferred"] = True
+        email_result["confidence"] = parse_result.confidence_score
+    elif parse_result.merchant_raw and not is_plausible_merchant_descriptor(
+        parse_result.merchant_raw
+    ):
+        # Keep the raw descriptor as source evidence, but do not award the
+        # confidence of an exact merchant extraction to a sentence fragment.
+        parse_result.merchant_source = "generic"
+        score_parse_result(parse_result)
+        email_result["merchant_source"] = "generic"
+        email_result["merchant_inferred"] = False
         email_result["confidence"] = parse_result.confidence_score
     return inferred_category_id
 
@@ -258,6 +281,8 @@ def _build_transaction_create(
         currency=parse_result.currency,
         transaction_type=TransactionSchemaType(parse_result.transaction_type.value),
         payment_method=PaymentMethodEnum(parse_result.payment_method),
+        payment_rail=PaymentRailEnum(parse_result.payment_rail),
+        card_event=CardEventEnum(parse_result.card_event),
         transaction_status=parse_result.transaction_status,
         transaction_timestamp=parse_result.transaction_timestamp,
         merchant_raw=parse_result.merchant_raw,
@@ -273,6 +298,8 @@ def _build_transaction_create(
         merchant_rule_id=resolution.rule_id,
         merchant_resolver_version=resolution.resolver_version,
         source_email_id=email.id,
+        source_kind="email",
+        source_identifier=email.gmail_message_id,
         financial_account_id=None,
     )
 
@@ -573,6 +600,50 @@ async def _process_email_batch(
                 )
 
             await _resolve_parse_failure(db, email.id)
+            email.processed_flag = True
+            await db.commit()
+
+        except LedgerCurrencyMismatchError as exc:
+            await db.rollback()
+            if email_result.get("status") == "stored":
+                stats["stored"] -= 1
+            stats["parsed_failed"] += 1
+            email_result["status"] = "currency_mismatch"
+            email_result["error"] = "ledger_currency_mismatch"
+            logger.info(
+                "Pipeline record rejected by ledger currency policy: email_id=%s",
+                email_id,
+            )
+
+            recovered_email = await db.get(RawEmail, email_id)
+            if recovered_email is None:
+                logger.error("Raw email %s disappeared while recording currency failure", email_id)
+                stats["results"].append(email_result)
+                continue
+            email = recovered_email
+            await _record_parse_failure(
+                db,
+                email,
+                str(exc),
+                parser_version=parse_result.parser_version,
+                failure_stage="persist",
+                failure_code="ledger_currency_mismatch",
+                parse_result=parse_result,
+                diagnostic={"source_currency": parse_result.currency},
+            )
+            _record_pipeline_event(
+                db,
+                user_id=user_id,
+                email_id=email_id,
+                event_type="ValidationFailed",
+                stage="persist",
+                status="rejected",
+                parse_result=parse_result,
+                payload={
+                    "failure_code": "ledger_currency_mismatch",
+                    "source_currency": parse_result.currency,
+                },
+            )
             email.processed_flag = True
             await db.commit()
 

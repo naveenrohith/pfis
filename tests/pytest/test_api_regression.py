@@ -10,7 +10,7 @@ from app.models.category import Merchant, UserMerchantRule
 from app.models.email import RawEmail
 from app.models.sync import ParseFailure, UserCorrection
 from app.models.transaction import Transaction
-from app.services.parser.normalizer import resolve_merchant
+from app.services.parser.normalizer import invalidate_merchant_cache, resolve_merchant
 from app.services.parser.pipeline import retry_parse_failures
 from sqlalchemy import select
 
@@ -123,7 +123,26 @@ async def test_correction_learning_updates_alias_and_history(client, test_sessio
         other_resolution = await resolve_merchant(db, "LOCAL CAFE BLR", user_id=other_user["id"])
         assert other_resolution.normalized_name == "Local Cafe Blr"
         assert other_resolution.category_id is None
-        assert other_resolution.source == "cleaned_fallback"
+        assert other_resolution.source == "descriptor_rules"
+
+
+async def test_canonical_merchant_name_outranks_a_conflicting_legacy_alias(
+    test_session_factory,
+):
+    async with test_session_factory() as db:
+        db.add(
+            Merchant(
+                normalized_name="Legacy custom label",
+                aliases='["Amazon"]',
+                category_default_id=None,
+            )
+        )
+        await db.commit()
+        invalidate_merchant_cache()
+        resolution = await resolve_merchant(db, "Amazon")
+        assert resolution.normalized_name == "Amazon"
+        assert resolution.source == "canonical_name"
+        assert resolution.confidence == 1.0
 
 
 async def test_pipeline_dedup_remains_user_scoped(client):

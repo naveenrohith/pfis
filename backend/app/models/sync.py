@@ -61,6 +61,10 @@ class SyncRun(Base):
     emails_fetched: Mapped[int] = mapped_column(Integer, default=0)
     emails_processed: Mapped[int] = mapped_column(Integer, default=0)
     emails_failed: Mapped[int] = mapped_column(Integer, default=0)
+    coverage_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    coverage_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    coverage_pages: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    coverage_result_size_estimate: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     errors: Mapped[str] = mapped_column(Text, default="[]")  # JSON array
     status: Mapped[SyncStatus] = mapped_column(
         Enum(
@@ -159,6 +163,9 @@ class PipelineEvent(Base):
     """Non-secret event log for parser and transaction pipeline observability."""
 
     __tablename__ = "pipeline_events"
+    __table_args__ = (
+        Index("ix_pipeline_events_source_created", "source_institution", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
@@ -175,6 +182,7 @@ class PipelineEvent(Base):
     status: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     parser_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     parser_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_institution: Mapped[str | None] = mapped_column(String(32), nullable=True)
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     payload_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -302,3 +310,130 @@ class ConnectorAuditEvent(Base):
 
     def __repr__(self) -> str:
         return f"<ConnectorAuditEvent {self.connector_type}:{self.event_type}>"
+
+
+class BalanceProviderConnection(Base):
+    """Non-secret lifecycle state for a bank/card balance provider.
+
+    Consent artifacts and credentials never live in this table.  The optional
+    reference is a one-way provider identifier hash so refresh/revocation
+    workflows can correlate a grant without making the artifact portable or
+    usable as a credential.
+    """
+
+    __tablename__ = "balance_provider_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "provider_type",
+            name="uq_balance_provider_connections_user_provider",
+        ),
+        Index(
+            "ix_balance_provider_connections_user_status",
+            "user_id",
+            "status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
+    )
+    provider_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    consent_reference_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    consent_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    consent_granted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    consent_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_refresh_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_refresh_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_refresh_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    user = relationship("User", back_populates="balance_provider_connections")
+
+    def __repr__(self) -> str:
+        return f"<BalanceProviderConnection {self.provider_type}:{self.status}>"
+
+
+class BalanceProviderAccountMapping(Base):
+    """Map one owned PFIS account to one provider account identity.
+
+    Provider account identities are deliberately separate from the legacy
+    connector fields on ``FinancialAccount``.  A user may have more than one
+    provider connection, and a Gmail account identity must never be mistaken
+    for a bank or issuer account identity.
+    """
+
+    __tablename__ = "balance_provider_account_mappings"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "provider_type",
+            "financial_account_id",
+            name="uq_balance_provider_mappings_user_provider_account",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "provider_type",
+            "provider_account_id",
+            name="uq_balance_provider_mappings_user_provider_identity",
+        ),
+        Index(
+            "ix_balance_provider_mappings_user_provider",
+            "user_id",
+            "provider_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
+    )
+    financial_account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("financial_accounts.id"), nullable=False, index=True
+    )
+    provider_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    provider_account_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="provider_discovery",
+        server_default="provider_discovery",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    user = relationship("User", back_populates="balance_provider_account_mappings")
+    financial_account = relationship("FinancialAccount", back_populates="balance_provider_mappings")
+
+    def __repr__(self) -> str:
+        return f"<BalanceProviderAccountMapping {self.provider_type}:{self.provider_account_id}>"

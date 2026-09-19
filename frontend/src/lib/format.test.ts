@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  calendarDayDifference,
+  dateInputValueInTimezone,
   formatChartCurrency,
   formatCurrency,
   formatCompact,
@@ -45,5 +47,15 @@ describe('format helpers', () => {
       now.getDate(),
     ).padStart(2, '0')}`;
     expect(relativeDateGroup(today)).toBe('Today');
+  });
+
+  it('derives date input values from the financial timezone', () => {
+    const instant = new Date('2026-07-30T20:00:00Z');
+    expect(dateInputValueInTimezone('Asia/Kolkata', instant)).toBe('2026-07-31');
+    expect(dateInputValueInTimezone('America/Los_Angeles', instant)).toBe('2026-07-30');
+  });
+
+  it('compares calendar dates without daylight-saving drift', () => {
+    expect(calendarDayDifference('2026-03-10', '2026-03-01')).toBe(9);
   });
 });

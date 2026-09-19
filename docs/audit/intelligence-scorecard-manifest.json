@@ -1,0 +1,246 @@
+{
+  "schema_version": "pfis-intelligence-scorecard-manifest-1",
+  "scorecard_version": "2026-08-09",
+  "as_of": "2026-08-09T00:00:00Z",
+  "measures": {
+    "product_breadth": {
+      "label": "Implemented product breadth",
+      "baseline_score": 72,
+      "score": 72,
+      "target_score": null,
+      "evidence_status": "audited_baseline",
+      "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+      "promotion_evidence": [],
+      "blockers": []
+    },
+    "product_stage_readiness": {
+      "label": "Product-stage readiness",
+      "baseline_score": 58,
+      "score": 58,
+      "target_score": 85,
+      "evidence_status": "audited_baseline",
+      "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+      "promotion_evidence": [],
+      "blockers": [
+        "Hosted operations, restore proof, provider incident recovery, performance, and representative product-task evidence remain incomplete."
+      ]
+    },
+    "workspace_evidence_readiness": {
+      "label": "Per-workspace evidence readiness",
+      "score": null,
+      "evidence_status": "runtime_only",
+      "source": "GET /api/analytics/intelligence-readiness",
+      "blockers": [
+        "This score is user-specific and must be sampled from a running workspace; it is not the product intelligence score."
+      ]
+    }
+  },
+  "intelligence": {
+    "minimum_promotion_score": 85,
+    "dimensions": [
+      {
+        "key": "representative_source_coverage",
+        "label": "Representative source coverage",
+        "weight": 12,
+        "baseline_score": 40,
+        "score": 40,
+        "target_score": 85,
+        "evidence_status": "deferred",
+        "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+        "promotion_evidence": [],
+        "blockers": [
+          "Gmail is the only live connector.",
+          "No manifest-attested live balance-provider cohort is available."
+        ]
+      },
+      {
+        "key": "ledger_correctness",
+        "label": "Ledger correctness and lifecycle truth",
+        "weight": 18,
+        "baseline_score": 48,
+        "score": 48,
+        "target_score": 90,
+        "evidence_status": "collecting",
+        "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+        "promotion_evidence": [],
+        "blockers": [
+          "Broad representative lifecycle, cross-account matching, and interval reconciliation evidence is incomplete."
+        ]
+      },
+      {
+        "key": "account_position_reconciliation",
+        "label": "Account position and reconciliation",
+        "weight": 15,
+        "baseline_score": 32,
+        "score": 32,
+        "target_score": 90,
+        "evidence_status": "deferred",
+        "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+        "promotion_evidence": [],
+        "blockers": [
+          "The >=10 user, >=100 interval, >=6 institution representative cohort has not passed.",
+          "No production balance provider or issuer adapter is connected."
+        ]
+      },
+      {
+        "key": "temporal_knowledge",
+        "label": "Temporal knowledge",
+        "weight": 10,
+        "baseline_score": 55,
+        "score": 55,
+        "target_score": 85,
+        "evidence_status": "collecting",
+        "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+        "promotion_evidence": [],
+        "blockers": [
+          "Broader connector lineage and historical reconstruction evidence remain incomplete."
+        ]
+      },
+      {
+        "key": "forecasting_uncertainty",
+        "label": "Forecasting and uncertainty",
+        "weight": 12,
+        "baseline_score": 38,
+        "score": 38,
+        "target_score": 80,
+        "evidence_status": "deferred",
+        "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+        "promotion_evidence": [],
+        "blockers": [
+          "The >=5 representative user, >=3 matured period calibration cohort has not passed."
+        ]
+      },
+      {
+        "key": "decision_quality",
+        "label": "Decision quality",
+        "weight": 10,
+        "baseline_score": 45,
+        "score": 45,
+        "target_score": 80,
+        "evidence_status": "collecting",
+        "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+        "promotion_evidence": [],
+        "blockers": [
+          "Representative usefulness, conflict optimization, and safe-refusal outcomes remain incomplete."
+        ]
+      },
+      {
+        "key": "learning_personalization",
+        "label": "Learning and personalization",
+        "weight": 8,
+        "baseline_score": 25,
+        "score": 25,
+        "target_score": 80,
+        "evidence_status": "deferred",
+        "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+        "promotion_evidence": [],
+        "blockers": [
+          "Versioned per-user baselines, minimum samples, drift controls, and rollback proof are incomplete."
+        ]
+      },
+      {
+        "key": "query_reasoning",
+        "label": "Query and conversational reasoning",
+        "weight": 5,
+        "baseline_score": 20,
+        "score": 20,
+        "target_score": 80,
+        "evidence_status": "deferred",
+        "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+        "promotion_evidence": [],
+        "blockers": [
+          "No reviewed grounded-query evaluation set or product-task success cohort has passed."
+        ]
+      },
+      {
+        "key": "explainability_safety",
+        "label": "Explainability and safety",
+        "weight": 5,
+        "baseline_score": 70,
+        "score": 70,
+        "target_score": 90,
+        "evidence_status": "collecting",
+        "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+        "promotion_evidence": [],
+        "blockers": [
+          "Critical surfaces do not yet have complete source, cutoff, coverage, assumption, and recovery-path evaluation."
+        ]
+      },
+      {
+        "key": "evaluation_operations",
+        "label": "Evaluation and operations",
+        "weight": 5,
+        "baseline_score": 55,
+        "score": 55,
+        "target_score": 85,
+        "evidence_status": "deferred",
+        "baseline_source": "docs/audit/14-85-intelligence-product-reassessment.md",
+        "promotion_evidence": [],
+        "blockers": [
+          "Strict representative evidence, hosted alerting, restore, incident, and performance gates have not all passed."
+        ]
+      }
+    ]
+  },
+  "delivery_flow": {
+    "minimum_promotion_score": 85,
+    "components": [
+      {
+        "key": "integration_hygiene",
+        "label": "Integration hygiene",
+        "weight": 25,
+        "score": null,
+        "target_score": 85,
+        "evidence_status": "unmeasured",
+        "promotion_evidence": [],
+        "blockers": ["No two-sprint integration and migration-parity telemetry exists."]
+      },
+      {
+        "key": "first_pass_verification",
+        "label": "First-pass verification",
+        "weight": 20,
+        "score": null,
+        "target_score": 85,
+        "evidence_status": "unmeasured",
+        "promotion_evidence": [],
+        "blockers": ["First-pass CI success is not currently retained as sprint telemetry."]
+      },
+      {
+        "key": "lead_time_wip_age",
+        "label": "Lead time and WIP age",
+        "weight": 20,
+        "score": null,
+        "target_score": 85,
+        "evidence_status": "unmeasured",
+        "promotion_evidence": [],
+        "blockers": [
+          "Selected-to-integrated lead time and active WIP age are not currently measured."
+        ]
+      },
+      {
+        "key": "evidence_conversion",
+        "label": "Evidence conversion",
+        "weight": 20,
+        "score": null,
+        "target_score": 85,
+        "evidence_status": "unmeasured",
+        "promotion_evidence": [],
+        "blockers": [
+          "Completed score-bearing items are not yet joined to same-sprint evidence artifacts."
+        ]
+      },
+      {
+        "key": "operational_completeness",
+        "label": "Operational completeness",
+        "weight": 15,
+        "score": null,
+        "target_score": 85,
+        "evidence_status": "unmeasured",
+        "promotion_evidence": [],
+        "blockers": [
+          "Release-level migration, rollback, observability, performance, privacy, and owner evidence is not measured as one component."
+        ]
+      }
+    ]
+  }
+}

@@ -1,16 +1,33 @@
 import { useEffect, useState } from 'react';
-import { AlertCircle, ArrowRight, CheckCircle2, Mail, RefreshCw, ShieldCheck } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  Link2,
+  Mail,
+  RefreshCw,
+  ShieldCheck,
+} from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
+import { Button, ButtonLink } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { Skeleton, EmptyState } from '@/components/ui/Skeleton';
+import { useToast } from '@/components/ui/Toast';
 import { SectionTitle } from '@/components/SectionTitle';
-import { useAutoSyncStatus, useEmails, useSyncStatus } from '@/features/workspace/queries';
-import { useSync } from '@/features/workspace/SyncContext';
 import { useAuth } from '@/features/auth/AuthContext';
+import {
+  queryKeys,
+  useAutoSyncStatus,
+  useEmails,
+  useSyncStatus,
+} from '@/features/workspace/queries';
+import { useSync } from '@/features/workspace/SyncContext';
 import { useDashboardUi } from '@/app/DashboardUiContext';
+import { api, ApiError } from '@/lib/api';
 import { formatTime } from '@/lib/format';
-import { api } from '@/lib/api';
 
 const GMAIL_ERROR_MESSAGES: Record<string, string> = {
   access_denied: 'Gmail access was not connected. Your PFIS workspace is still available.',
@@ -33,12 +50,15 @@ type GmailNotice = { kind: 'success' | 'error'; message: string };
 
 export function InboxSection({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const { notify } = useToast();
   const emails = useEmails();
   const syncStatus = useSyncStatus();
   const autoSync = useAutoSyncStatus();
-  const { running, liveConnected, retrySync } = useSync();
+  const { running, liveConnected, runSync, gmailConnectUrl } = useSync();
   const { scrollTo } = useDashboardUi();
   const [notice, setNotice] = useState<GmailNotice | null>(null);
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -66,8 +86,12 @@ export function InboxSection({ embedded = false }: { embedded?: boolean } = {}) 
     }
   }, []);
 
-  const disconnected = !autoSync.isLoading && !autoSync.isError && autoSync.data === null;
-  const needsReauthorization = autoSync.data?.connection_status === 'reauthorization_required';
+  const latest = syncStatus.data?.latest_status;
+  const disconnected =
+    autoSync.data === null || (autoSync.error instanceof ApiError && autoSync.error.status === 404);
+  const needsReauthorization =
+    autoSync.data?.connection_status === 'reauthorization_required' ||
+    (autoSync.data?.status === 'paused' && Boolean(autoSync.data.error));
   const connectionDescription = autoSync.isLoading
     ? 'Checking the connection for this workspace…'
     : autoSync.isError
@@ -88,8 +112,6 @@ export function InboxSection({ embedded = false }: { embedded?: boolean } = {}) 
           : 'Connected';
   const connectionActionLabel =
     needsReauthorization || autoSync.data ? 'Reconnect Gmail' : 'Connect Gmail';
-
-  const latest = syncStatus.data?.latest_status;
   const statusVariant =
     latest === 'completed'
       ? 'success'
@@ -98,6 +120,23 @@ export function InboxSection({ embedded = false }: { embedded?: boolean } = {}) 
         : latest === 'running'
           ? 'info'
           : 'default';
+
+  const disconnect = useMutation({
+    mutationFn: () => api.disconnectGmail(user!.id),
+    onSuccess: async (result) => {
+      setDisconnectOpen(false);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.autoSyncStatus(user!.id) });
+      if (result.provider_revocation === 'revoked') {
+        notify('Gmail disconnected and provider access revoked', 'success');
+      } else {
+        notify(
+          'Gmail disconnected locally. Review Google Account permissions because provider revocation could not be confirmed.',
+          'error',
+        );
+      }
+    },
+    onError: (error) => notify((error as Error).message, 'error'),
+  });
 
   return (
     <div>
@@ -110,15 +149,27 @@ export function InboxSection({ embedded = false }: { embedded?: boolean } = {}) 
             <div className="flex items-center gap-2">
               <Badge variant={statusVariant}>{latest ? `Latest: ${latest}` : 'No sync yet'}</Badge>
               <Badge variant={liveConnected ? 'success' : 'default'}>
-                {liveConnected ? 'Live' : 'Fallback'}
+                {liveConnected ? 'Live updates' : 'Polling updates'}
               </Badge>
-              <Button variant="outline" size="sm" onClick={retrySync} disabled={running}>
-                <RefreshCw
-                  aria-hidden="true"
-                  className={`mr-1 h-3.5 w-3.5 ${running ? 'animate-spin' : ''}`}
-                />
-                Retry
-              </Button>
+              {(needsReauthorization || disconnected) && gmailConnectUrl ? (
+                <ButtonLink variant="outline" size="sm" href={gmailConnectUrl}>
+                  <Link2 aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
+                  {needsReauthorization ? 'Reconnect Gmail' : 'Connect Gmail'}
+                </ButtonLink>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={runSync}
+                  disabled={running || autoSync.isLoading}
+                >
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={`mr-1 h-3.5 w-3.5 ${running ? 'animate-spin' : ''}`}
+                  />
+                  {running ? 'Syncing' : 'Sync now'}
+                </Button>
+              )}
             </div>
           }
         />
@@ -267,20 +318,87 @@ export function InboxSection({ embedded = false }: { embedded?: boolean } = {}) 
               <Tile label="Waiting" value={emails.data?.unprocessed_total ?? 0} />
               <Tile label="Runs" value={syncStatus.data?.runs.length ?? 0} />
             </div>
-            <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-              {needsReauthorization
-                ? 'Gmail needs to be reconnected before automatic sync can resume.'
-                : disconnected
-                  ? 'Connect Gmail to enable inbox sync and automatic processing.'
-                  : autoSync.data?.enabled
-                    ? `Auto-sync is ${autoSync.data.status} every ${Math.round(autoSync.data.interval_seconds / 60)} minute(s).`
-                    : emails.data?.unprocessed_total
-                      ? `${emails.data.unprocessed_total} email(s) are waiting to be processed into transactions.`
-                      : 'All synced emails have been processed.'}
+            <div
+              className={`rounded-lg border p-3 text-sm ${
+                needsReauthorization
+                  ? 'border-warning/30 bg-warning/10 text-foreground'
+                  : 'border-border bg-muted/40 text-muted-foreground'
+              }`}
+              role={needsReauthorization ? 'alert' : undefined}
+            >
+              {needsReauthorization ? (
+                <span className="flex items-start gap-2">
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-warning"
+                  />
+                  <span>
+                    Gmail access needs to be renewed once. After reconnecting, PFIS resumes
+                    automatic sync every {Math.round((autoSync.data?.interval_seconds ?? 300) / 60)}{' '}
+                    minutes.
+                  </span>
+                </span>
+              ) : disconnected ? (
+                'Connect Gmail to enable inbox sync and automatic processing.'
+              ) : autoSync.data?.enabled ? (
+                `Auto-sync is ${autoSync.data.status} every ${Math.round(autoSync.data.interval_seconds / 60)} minute(s).`
+              ) : emails.data?.unprocessed_total ? (
+                `${emails.data.unprocessed_total} email(s) are waiting to be processed into transactions.`
+              ) : (
+                'All synced emails have been processed.'
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {autoSync.data ? (
+                <Button variant="danger" size="sm" onClick={() => setDisconnectOpen(true)}>
+                  Disconnect Gmail
+                </Button>
+              ) : disconnected && gmailConnectUrl ? (
+                <ButtonLink variant="outline" size="sm" href={gmailConnectUrl}>
+                  <Link2 aria-hidden="true" className="h-3.5 w-3.5" />
+                  Connect Gmail
+                </ButtonLink>
+              ) : null}
             </div>
           </CardContent>
         </Card>
       </div>
+
+      <Dialog
+        open={disconnectOpen}
+        onClose={() => {
+          if (!disconnect.isPending) setDisconnectOpen(false);
+        }}
+        title="Disconnect Gmail?"
+        description="PFIS will stop future inbox access and ask Google to revoke the grant."
+      >
+        <p className="text-sm leading-6 text-muted-foreground">
+          Already synced emails, transactions, and their evidence stay in PFIS. You can manage those
+          records separately from this connection.
+        </p>
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            data-dialog-initial-focus
+            variant="ghost"
+            onClick={() => setDisconnectOpen(false)}
+            disabled={disconnect.isPending}
+          >
+            Keep connected
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => disconnect.mutate()}
+            disabled={disconnect.isPending}
+          >
+            {disconnect.isPending ? 'Disconnecting…' : 'Disconnect Gmail'}
+          </Button>
+        </div>
+        {disconnect.error ? (
+          <p role="alert" className="mt-3 text-sm font-bold text-danger">
+            {disconnect.error.message}
+          </p>
+        ) : null}
+      </Dialog>
     </div>
   );
 }

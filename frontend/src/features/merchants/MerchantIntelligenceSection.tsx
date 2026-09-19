@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Brain, CalendarClock, ShieldCheck, Store, Trash2, TrendingUp } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -14,6 +15,7 @@ import { useDashboardUi } from '@/app/DashboardUiContext';
 import { useToast } from '@/components/ui/Toast';
 import { formatCurrency } from '@/lib/format';
 import type { MerchantSummary } from '@/lib/types';
+import { Dialog } from '@/components/ui/Dialog';
 
 const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 
@@ -26,11 +28,17 @@ export function MerchantIntelligenceSection({ embedded = false }: { embedded?: b
   const { setExplorerSearch, scrollTo } = useDashboardUi();
   const currency = user?.currency ?? 'INR';
   const top = merchants.data ?? [];
+  const [pendingRule, setPendingRule] = useState<{ id: string; descriptor: string } | null>(null);
 
-  const forgetRule = async (ruleId: string, descriptor: string) => {
-    if (!window.confirm(`Forget the learned mapping for “${descriptor}”?`)) return;
+  const forgetRule = (ruleId: string, descriptor: string) => {
+    setPendingRule({ id: ruleId, descriptor });
+  };
+
+  const confirmForget = async () => {
+    if (!pendingRule) return;
     try {
-      await deleteRule.mutateAsync(ruleId);
+      await deleteRule.mutateAsync(pendingRule.id);
+      setPendingRule(null);
       notify('Learned merchant mapping removed', 'success');
     } catch (error) {
       notify((error as Error).message, 'error');
@@ -64,7 +72,7 @@ export function MerchantIntelligenceSection({ embedded = false }: { embedded?: b
             purchases alone are not treated as subscriptions.
           </p>
         </div>
-        <Badge variant="outline">Ruleset pfis-recurring-2</Badge>
+        <Badge variant="outline">Ruleset pfis-recurring-4</Badge>
       </section>
 
       {merchants.isLoading ? (
@@ -212,6 +220,38 @@ export function MerchantIntelligenceSection({ embedded = false }: { embedded?: b
           </p>
         )}
       </section>
+
+      <Dialog
+        open={Boolean(pendingRule)}
+        onClose={() => {
+          if (!deleteRule.isPending) setPendingRule(null);
+        }}
+        title="Forget this learned mapping?"
+        description="Future imports will stop using this exact correction. Existing transactions keep their current values."
+      >
+        <div className="rounded-xl border border-warning/25 bg-warning/5 p-4 text-sm">
+          <p className="font-bold">{pendingRule?.descriptor}</p>
+          <p className="mt-1 text-muted-foreground">
+            This only removes the private rule; it does not delete ledger evidence.
+          </p>
+        </div>
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            variant="outline"
+            onClick={() => setPendingRule(null)}
+            disabled={deleteRule.isPending}
+          >
+            Keep mapping
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => void confirmForget()}
+            disabled={deleteRule.isPending}
+          >
+            {deleteRule.isPending ? 'Forgetting…' : 'Forget mapping'}
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }

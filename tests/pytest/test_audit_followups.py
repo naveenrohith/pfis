@@ -149,15 +149,14 @@ async def test_init_db_leaves_local_schema_to_alembic(monkeypatch):
 
 
 async def test_pipeline_tracks_fallback_parser_usage(client, test_session_factory):
-    # AXIS is a known sender mapped to the generic fallback parser; the bank
-    # label is AXIS but the fallback flag must still be recorded.
+    # An unknown institution must still be observable as generic-parser usage.
     user = await create_user(client, "fallback")
     async with test_session_factory() as db:
         db.add(
             RawEmail(
                 user_id=user["id"],
-                gmail_message_id=f"{user['id']}:axis-fallback",
-                sender="AXIS Bank <alerts@axisbank.com>",
+                gmail_message_id=f"{user['id']}:unknown-bank-fallback",
+                sender="Unknown Bank <alerts@unknownbank.example>",
                 subject="Debit alert",
                 body=(
                     "Dear Customer, Rs. 750.00 has been debited from your account "

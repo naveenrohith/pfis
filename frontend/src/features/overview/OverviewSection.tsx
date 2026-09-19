@@ -17,7 +17,11 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { SectionTitle } from '@/components/SectionTitle';
 import { StatCard, type CardTone } from '@/components/cards/StatCard';
 import { RecommendationCard } from '@/components/cards/RecommendationCard';
-import { queryKeys, useDashboardPreferences, useWorkspaceSnapshot } from '@/features/workspace/queries';
+import {
+  queryKeys,
+  useDashboardPreferences,
+  useWorkspaceSnapshot,
+} from '@/features/workspace/queries';
 import { useSync } from '@/features/workspace/SyncContext';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -58,8 +62,20 @@ export function OverviewSection() {
     icon: typeof TrendingDown;
     tone: CardTone;
   }[] = [
-    { id: 'income', label: 'Income', value: formatCurrency(income, currency), icon: TrendingUp, tone: 'success' },
-    { id: 'spent', label: 'Spent', value: formatCurrency(spend, currency), icon: TrendingDown, tone: 'danger' },
+    {
+      id: 'income',
+      label: 'Income',
+      value: formatCurrency(income, currency),
+      icon: TrendingUp,
+      tone: 'success',
+    },
+    {
+      id: 'spent',
+      label: 'Spent',
+      value: formatCurrency(spend, currency),
+      icon: TrendingDown,
+      tone: 'danger',
+    },
     {
       id: 'savings',
       label: 'Saved',
@@ -75,10 +91,15 @@ export function OverviewSection() {
       tone: netCashFlow >= 0 ? 'success' : 'danger',
     },
   ];
-  const preferenceMap = new Map((preferences.data?.widgets ?? []).map((widget, index) => [widget.id, { ...widget, index }]));
+  const preferenceMap = new Map(
+    (preferences.data?.widgets ?? []).map((widget, index) => [widget.id, { ...widget, index }]),
+  );
   const visibleMetrics = metrics
     .filter((metric) => preferenceMap.get(metric.id)?.visible !== false)
-    .sort((left, right) => (preferenceMap.get(left.id)?.index ?? 99) - (preferenceMap.get(right.id)?.index ?? 99));
+    .sort(
+      (left, right) =>
+        (preferenceMap.get(left.id)?.index ?? 99) - (preferenceMap.get(right.id)?.index ?? 99),
+    );
   const attentionVisible = preferenceMap.get('attention')?.visible !== false;
   const nextActionVisible = preferenceMap.get('next-action')?.visible !== false;
 
@@ -147,7 +168,9 @@ export function OverviewSection() {
             <Badge variant={liveConnected ? 'success' : 'default'}>
               {liveConnected ? 'Live data' : 'Saved snapshot'}
             </Badge>
-            <Badge variant={statusTone}>{running ? 'Syncing' : status === 'idle' ? 'Current' : status}</Badge>
+            <Badge variant={statusTone}>
+              {running ? 'Syncing' : status === 'idle' ? 'Current' : status}
+            </Badge>
           </>
         }
       />
@@ -156,9 +179,13 @@ export function OverviewSection() {
         <Card className="mb-4 border-primary/20 bg-gradient-to-r from-primary/10 via-card to-card">
           <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Personalize PFIS</p>
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">
+                Personalize PFIS
+              </p>
               <p className="mt-1 font-bold">What matters most right now?</p>
-              <p className="mt-1 text-sm text-muted-foreground">Your choice sets the starting emphasis without hiding any financial data.</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Your choice sets the starting emphasis without hiding any financial data.
+              </p>
             </div>
             <div className="flex flex-wrap gap-2">
               {[
@@ -167,7 +194,16 @@ export function OverviewSection() {
                 ['recurring_reduction', 'Reduce subscriptions'],
                 ['cleanup', 'Clean up data'],
               ].map(([value, label]) => (
-                <Button key={value} variant="outline" size="sm" onClick={() => chooseGoal.mutate(value as 'budgeting' | 'saving' | 'recurring_reduction' | 'cleanup')}>
+                <Button
+                  key={value}
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    chooseGoal.mutate(
+                      value as 'budgeting' | 'saving' | 'recurring_reduction' | 'cleanup',
+                    )
+                  }
+                >
                   {label}
                 </Button>
               ))}
@@ -176,7 +212,51 @@ export function OverviewSection() {
         </Card>
       )}
 
-      <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${visibleMetrics.length > 3 ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
+      {workspace.data && snap?.transaction_count === 0 && unprocessedCount === 0 ? (
+        <Card className="mb-4 overflow-hidden border-intelligence/25 bg-intelligence/5">
+          <CardContent className="p-5 sm:p-6">
+            <div className="max-w-2xl">
+              <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-intelligence">
+                First success
+              </p>
+              <h2 className="mt-2 text-2xl font-extrabold tracking-[-0.04em]">
+                Build one trustworthy month in three small steps.
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                PFIS becomes useful when it has one source, one confirmed record, and one clear
+                priority. Start with the path that fits how you manage money.
+              </p>
+            </div>
+            <div className="mt-5 grid gap-2 md:grid-cols-3">
+              <FirstSuccessStep
+                number="01"
+                title="Connect an inbox"
+                description="Import financial evidence from Gmail."
+                action="Open Inbox"
+                onClick={() => scrollTo('inbox')}
+              />
+              <FirstSuccessStep
+                number="02"
+                title="Add one record"
+                description="Start with a transaction you recognize."
+                action="Open Activity"
+                onClick={() => scrollTo('transactions')}
+              />
+              <FirstSuccessStep
+                number="03"
+                title="Confirm the evidence"
+                description="Resolve one review item before acting."
+                action="Open Review"
+                onClick={() => scrollTo('review')}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div
+        className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${visibleMetrics.length > 3 ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}
+      >
         {workspace.isLoading
           ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28" />)
           : visibleMetrics.map((metric) => (
@@ -186,90 +266,135 @@ export function OverviewSection() {
                 value={metric.value}
                 icon={metric.icon}
                 tone={metric.tone}
-                className={preferenceMap.get(metric.id)?.size === 'large' ? 'sm:col-span-2' : undefined}
+                className={
+                  preferenceMap.get(metric.id)?.size === 'large' ? 'sm:col-span-2' : undefined
+                }
               />
             ))}
       </div>
 
-      {(attentionVisible || nextActionVisible) && <div className="mt-4 grid gap-4 lg:grid-cols-5">
-        {attentionVisible && <Card className={nextActionVisible ? 'lg:col-span-3' : 'lg:col-span-5'}>
-          <CardContent className="p-4 sm:p-5">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Attention queue</p>
-                <h3 className="mt-1 font-bold">Protect the accuracy of this month</h3>
-              </div>
-              <Badge variant={attentionItems.length > 0 ? 'warning' : 'success'}>
-                {attentionItems.length > 0 ? `${attentionItems.length} open` : 'All clear'}
-              </Badge>
-            </div>
-
-            {attentionItems.length === 0 ? (
-              <div className="flex items-start gap-3 rounded-lg border border-success/25 bg-success/10 p-4">
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
-                <div>
-                  <p className="text-sm font-bold">Your financial data is ready for decisions</p>
-                  <p className="mt-1 text-xs text-muted-foreground">No pending reviews, budget risks, or inbox backlog.</p>
+      {(attentionVisible || nextActionVisible) && (
+        <div className="mt-4 grid gap-4 lg:grid-cols-5">
+          {attentionVisible && (
+            <Card className={nextActionVisible ? 'lg:col-span-3' : 'lg:col-span-5'}>
+              <CardContent className="p-4 sm:p-5">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                      Attention queue
+                    </p>
+                    <h3 className="mt-1 font-bold">Protect the accuracy of this month</h3>
+                  </div>
+                  <Badge variant={attentionItems.length > 0 ? 'warning' : 'success'}>
+                    {attentionItems.length > 0 ? `${attentionItems.length} open` : 'All clear'}
+                  </Badge>
                 </div>
-              </div>
-            ) : (
-              <div className="grid gap-2">
-                {attentionItems.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      type="button"
-                      key={item.target}
-                      onClick={() => scrollTo(item.target)}
-                      className="dashboard-row flex w-full items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-bold">{item.label}</span>
-                        <span className="block text-xs text-muted-foreground">{item.description}</span>
-                      </span>
-                      <Badge variant={item.variant}>{item.count}</Badge>
-                      <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>}
 
-        {nextActionVisible && <div className={attentionVisible ? 'lg:col-span-2' : 'lg:col-span-5'}>
-          {workspace.isLoading ? (
-            <Skeleton className="h-full min-h-48" />
-          ) : nextRecommendation ? (
-            <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Next best action</p>
-              <RecommendationCard
-                title={nextRecommendation.title}
-                description={nextRecommendation.description}
-                severity={nextRecommendation.severity}
-                actionLabel={nextRecommendation.action_label}
-                onAction={() => scrollTo(nextRecommendation.target)}
-                className="h-[calc(100%-1.5rem)]"
-              />
-            </div>
-          ) : (
-            <Card className="h-full">
-              <CardContent className="flex h-full min-h-48 flex-col items-start justify-center p-5">
-                <CheckCircle2 className="h-6 w-6 text-success" />
-                <p className="mt-3 font-bold">No urgent recommendation</p>
-                <p className="mt-1 text-sm text-muted-foreground">Explore your trends or keep the inbox current.</p>
-                <Button variant="link" className="mt-3" onClick={() => scrollTo('insights')}>
-                  Explore insights <ArrowRight className="h-4 w-4" />
-                </Button>
+                {attentionItems.length === 0 ? (
+                  <div className="flex items-start gap-3 rounded-lg border border-success/25 bg-success/10 p-4">
+                    <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
+                    <div>
+                      <p className="text-sm font-bold">
+                        Your financial data is ready for decisions
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        No pending reviews, budget risks, or inbox backlog.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-2">
+                    {attentionItems.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <button
+                          type="button"
+                          key={item.target}
+                          onClick={() => scrollTo(item.target)}
+                          className="dashboard-row flex w-full items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                            <Icon className="h-4 w-4" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-bold">{item.label}</span>
+                            <span className="block text-xs text-muted-foreground">
+                              {item.description}
+                            </span>
+                          </span>
+                          <Badge variant={item.variant}>{item.count}</Badge>
+                          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
-        </div>}
-      </div>}
+
+          {nextActionVisible && (
+            <div className={attentionVisible ? 'lg:col-span-2' : 'lg:col-span-5'}>
+              {workspace.isLoading ? (
+                <Skeleton className="h-full min-h-48" />
+              ) : nextRecommendation ? (
+                <div>
+                  <p className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    Next best action
+                  </p>
+                  <RecommendationCard
+                    title={nextRecommendation.title}
+                    description={nextRecommendation.description}
+                    severity={nextRecommendation.severity}
+                    actionLabel={nextRecommendation.action_label}
+                    onAction={() => scrollTo(nextRecommendation.target)}
+                    className="h-[calc(100%-1.5rem)]"
+                  />
+                </div>
+              ) : (
+                <Card className="h-full">
+                  <CardContent className="flex h-full min-h-48 flex-col items-start justify-center p-5">
+                    <CheckCircle2 className="h-6 w-6 text-success" />
+                    <p className="mt-3 font-bold">No urgent recommendation</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Explore your trends or keep the inbox current.
+                    </p>
+                    <Button variant="link" className="mt-3" onClick={() => scrollTo('insights')}>
+                      Explore insights <ArrowRight className="h-4 w-4" />
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <PaymentMethodVisuals transactions={transactions.data ?? []} currency={currency} />
+    </div>
+  );
+}
+
+function FirstSuccessStep({
+  number,
+  title,
+  description,
+  action,
+  onClick,
+}: {
+  number: string;
+  title: string;
+  description: string;
+  action: string;
+  onClick: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-card/80 p-4">
+      <p className="text-xs font-extrabold tracking-[0.12em] text-intelligence">{number}</p>
+      <p className="mt-2 text-sm font-extrabold">{title}</p>
+      <p className="mt-1 min-h-10 text-xs leading-5 text-muted-foreground">{description}</p>
+      <Button variant="link" size="sm" className="mt-2 px-0" onClick={onClick}>
+        {action} <ArrowRight className="h-3.5 w-3.5" />
+      </Button>
     </div>
   );
 }

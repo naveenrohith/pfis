@@ -34,7 +34,7 @@ export function Tabs({ options, value, onValueChange, ariaLabel, className }: Ta
             value={option.value}
             disabled={option.disabled}
             className={cn(
-              'focus-ring relative z-10 min-h-9 shrink-0 rounded-md px-3 text-sm font-bold text-muted-foreground transition-colors',
+              'focus-ring relative z-10 min-h-11 shrink-0 rounded-md px-3 text-sm font-bold text-muted-foreground transition-colors',
               'disabled:cursor-not-allowed disabled:opacity-45 data-[active]:text-foreground',
             )}
           >

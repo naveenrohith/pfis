@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     ]
     DEMO_USER_PASSWORD: str = "demo12345"
 
+    # Statement OCR is an optional runtime capability.  The PDF bytes and
+    # rendered pages remain in memory; strict statement extractors still own
+    # every write decision after OCR.
+    STATEMENT_OCR_ENABLED: bool = True
+    STATEMENT_OCR_MAX_PAGES: int = Field(default=8, ge=1, le=20)
+    STATEMENT_OCR_DPI: int = Field(default=160, ge=96, le=300)
+    STATEMENT_OCR_PAGE_TIMEOUT_SECONDS: int = Field(default=8, ge=1, le=30)
+
     # Gmail OAuth (Phase 1)
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""

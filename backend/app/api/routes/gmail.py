@@ -34,14 +34,17 @@ from app.security import (
     hash_session_token,
     resolve_user_scope,
 )
+from app.services.auto_sync_service import stop_auto_sync_for_account
 from app.services.gmail.oauth_service import (
     GMAIL_SCOPES,
     exchange_code_for_tokens,
     get_authorization_url,
     has_gmail_readonly_scope,
+    revoke_google_token,
     verify_google_identity,
 )
 from app.services.gmail.sync_service import demo_sync_gmail_emails, sync_gmail_emails
+from app.services.ingestion.activity import stop_user_ingestions
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -274,13 +277,31 @@ async def gmail_callback(
             raise HTTPException(status_code=409, detail=_GMAIL_ACCOUNT_MISMATCH_DETAIL)
 
         if existing:
+            if existing.auto_sync_status == "disconnecting":
+                raise HTTPException(
+                    status_code=409,
+                    detail="Gmail disconnect is already in progress.",
+                )
+            new_refresh_token = token_data.get("refresh_token")
+            needs_reauthorization = existing.auto_sync_status == "paused" and bool(
+                existing.auto_sync_error
+            )
+            if needs_reauthorization and not new_refresh_token:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Google did not provide a new Gmail authorization. "
+                        "Reconnect Gmail and approve read-only inbox access."
+                    ),
+                )
             # Update tokens
             existing.access_token_ref = encrypt_secret(token_data["access_token"])
-            refresh_token = encrypt_secret(token_data.get("refresh_token"))
+            refresh_token = encrypt_secret(new_refresh_token)
             if refresh_token:
                 existing.refresh_token_ref = refresh_token
             existing.token_expires_at = token_expires_at
-            existing.auto_sync_status = "idle"
+            existing.google_account_id = profile["google_account_id"]
+            existing.auto_sync_status = "idle" if existing.auto_sync_enabled else "paused"
             existing.auto_sync_error = None
             gmail_account_id = existing.id
             logger.info(f"Updated Gmail tokens for user {user_id[:8]}...")
@@ -355,6 +376,8 @@ async def trigger_sync(
         raise HTTPException(
             status_code=404, detail="No Gmail account connected. Use /api/auth/gmail/connect first."
         )
+    if gmail_account.auto_sync_status == "disconnecting":
+        raise HTTPException(status_code=409, detail="Gmail disconnect is already in progress.")
 
     try:
         stats = await sync_gmail_emails(
@@ -402,6 +425,10 @@ async def get_sync_status(
                 "emails_fetched": r.emails_fetched,
                 "emails_processed": r.emails_processed,
                 "emails_failed": r.emails_failed,
+                "coverage_complete": r.coverage_complete,
+                "coverage_truncated": r.coverage_truncated,
+                "coverage_pages": r.coverage_pages,
+                "coverage_result_size_estimate": r.coverage_result_size_estimate,
             }
             for r in runs
         ],
@@ -440,6 +467,8 @@ async def update_auto_sync_status(
         raise HTTPException(
             status_code=404, detail="No Gmail account connected. Use /api/auth/gmail/connect first."
         )
+    if gmail_account.auto_sync_status == "disconnecting":
+        raise HTTPException(status_code=409, detail="Gmail disconnect is already in progress.")
 
     if payload.enabled is not None:
         gmail_account.auto_sync_enabled = payload.enabled
@@ -456,6 +485,79 @@ async def update_auto_sync_status(
     await db.commit()
     await db.refresh(gmail_account)
     return _serialize_auto_sync(gmail_account)
+
+
+@gmail_router.delete("/connection")
+async def disconnect_gmail(
+    user_id: str = Query(...),
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stop future Gmail access while retaining already imported financial records."""
+    user_id = resolve_user_scope(user_id, current_user)
+    result = await db.execute(select(GmailAccount).where(GmailAccount.user_id == user_id))
+    gmail_account = result.scalar_one_or_none()
+    if not gmail_account:
+        raise HTTPException(status_code=404, detail="No Gmail account is connected.")
+
+    gmail_account.auto_sync_enabled = False
+    gmail_account.auto_sync_status = "disconnecting"
+    gmail_account.auto_sync_error = None
+    await db.commit()
+
+    # Establish the local fence before revocation/deletion. This prevents an
+    # already scheduled worker or in-flight ingestion from writing after the
+    # connector grant is removed.
+    await stop_auto_sync_for_account(gmail_account.id)
+    await stop_user_ingestions(user_id)
+
+    revocation_status = "unconfirmed"
+    encrypted_token = gmail_account.refresh_token_ref or gmail_account.access_token_ref
+    try:
+        token = decrypt_secret(encrypted_token)
+    except Exception as exc:
+        token = None
+        logger.warning(
+            "Gmail credential could not be read during disconnect exception=%s",
+            type(exc).__name__,
+        )
+    if not token:
+        revocation_status = "token_unavailable"
+    else:
+        try:
+            revocation_status = (
+                "revoked" if await revoke_google_token(token) else "provider_rejected"
+            )
+        except Exception as exc:
+            logger.warning(
+                "Gmail provider revocation could not be confirmed exception=%s",
+                type(exc).__name__,
+            )
+
+    raw_email_count = int(
+        await db.scalar(select(func.count(RawEmail.id)).where(RawEmail.user_id == user_id)) or 0
+    )
+    gmail_account_id = gmail_account.id
+    await db.delete(gmail_account)
+    await _record_connector_audit(
+        db,
+        user_id,
+        gmail_account_id,
+        "disconnect",
+        {
+            "provider_revocation": revocation_status,
+            "retained_raw_email_count": raw_email_count,
+            "derived_records_retained": True,
+        },
+        commit=False,
+    )
+    await db.commit()
+    return {
+        "status": "disconnected",
+        "provider_revocation": revocation_status,
+        "retained_raw_email_count": raw_email_count,
+        "derived_records_retained": True,
+    }
 
 
 @gmail_router.get("/emails")
@@ -564,6 +666,8 @@ async def _record_connector_audit(
     gmail_account_id: str | None,
     event_type: str,
     payload: dict,
+    *,
+    commit: bool = True,
 ) -> None:
     import json
 
@@ -576,4 +680,5 @@ async def _record_connector_audit(
             payload_json=json.dumps(payload),
         )
     )
-    await db.commit()
+    if commit:
+        await db.commit()

@@ -9,12 +9,19 @@ export type DashboardSectionId =
   | 'analytics'
   | 'budgets'
   | 'networth'
+  | 'cash-plan'
+  | 'liabilities'
+  | 'cards'
+  | 'obligations'
+  | 'household'
   | 'categories'
   | 'merchants'
   | 'review'
   | 'transactions'
   | 'inbox'
-  | 'pipeline';
+  | 'statements'
+  | 'pipeline'
+  | 'settings';
 
 export interface WorkspaceSection {
   id: DashboardSectionId;
@@ -60,11 +67,16 @@ export const WORKSPACES: WorkspaceDefinition[] = [
     id: 'plan',
     label: 'Plan',
     shortLabel: 'Plan',
-    description: 'Shape budgets, goals, accounts, and the month ahead.',
+    description: 'Decide what is safely available after verified obligations.',
     sections: [
-      { id: 'analytics', label: 'Outlook' },
+      { id: 'cash-plan', label: 'Safe to spend' },
       { id: 'networth', label: 'Position' },
+      { id: 'cards', label: 'Cards' },
+      { id: 'obligations', label: 'Commitments' },
+      { id: 'analytics', label: 'Outlook' },
       { id: 'budgets', label: 'Budgets' },
+      { id: 'liabilities', label: 'All liabilities' },
+      { id: 'household', label: 'Household' },
     ],
   },
   {
@@ -85,7 +97,9 @@ export const WORKSPACES: WorkspaceDefinition[] = [
     description: 'Connections, processing health, recovery, and preferences.',
     sections: [
       { id: 'inbox', label: 'Connections' },
+      { id: 'statements', label: 'Statements' },
       { id: 'pipeline', label: 'Diagnostics' },
+      { id: 'settings', label: 'Preferences & privacy' },
     ],
   },
 ];

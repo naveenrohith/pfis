@@ -80,6 +80,18 @@ def test_classification_engine_supports_enterprise_categories():
         assert result.matched_signals
 
 
+def test_unsubscribe_footer_does_not_hide_known_bank_money_movement():
+    result = classify_source_record(
+        "HDFC Bank InstaAlerts <alerts@hdfcbank.net>",
+        "View: Account update for your HDFC Bank A/c",
+        (
+            "Your salary of INR 43270 has been credited to your account. "
+            "Manage preferences or unsubscribe."
+        ),
+    )
+    assert result.classification == ClassificationType.SALARY
+
+
 async def test_ingestion_coordinator_retries_transient_failure_and_audits(
     client, test_session_factory, monkeypatch
 ):

@@ -69,6 +69,7 @@ DEBIT_KEYWORDS = [
     r"\btransferred\b",
     r"\bpayment\s+of\b",
     r"\bpayment\s+successful\b",
+    r"\b(?:credit|debit)?\s*card\b.*\bhas\s+been\s+used\s+for\b",
     r"\bis\s+debited\s+from\b",
     r"\bhas\s+been\s+debited\b",
 ]
@@ -128,6 +129,70 @@ def detect_payment_method(text: str) -> str:
     if any(token in text_upper for token in ("NEFT", "IMPS", "RTGS")):
         return "bank_transfer"
     return "other"
+
+
+def detect_payment_rail(text: str) -> str:
+    """Return only the initiation rail; never infer debit-card from "debited"."""
+    text_upper = text.upper()
+    if re.search(r"\bATM\b", text_upper) or "CASH WITHDRAWAL" in text_upper:
+        return "atm"
+    if "UPI" in text_upper or "VPA" in text_upper:
+        return "upi"
+    if "DEBIT CARD" in text_upper:
+        return "debit_card"
+    if any(token in text_upper for token in ("NEFT", "IMPS", "RTGS")):
+        return "transfer"
+    if re.search(
+        r"\b(?:bank|funds?|account)\s+transfer\b|\btransferred\b",
+        text_upper,
+    ):
+        return "transfer"
+    if "WALLET" in text_upper:
+        return "wallet"
+    return "other"
+
+
+def detect_card_event(text: str) -> str:
+    text_lower = text.lower()
+    if "atm withdrawal" in text_lower or "cash withdrawal" in text_lower:
+        return "none"
+    if any(
+        token in text_lower
+        for token in (
+            "credit card payment",
+            "card payment",
+            "cc billpay",
+            "cc bill pay",
+            "credit card bill payment",
+        )
+    ):
+        return "payment"
+    if "cashback" in text_lower:
+        return "cashback"
+    if "refund" in text_lower:
+        return "refund"
+    if "reversal" in text_lower:
+        return "reversal"
+    if "finance charge" in text_lower or "interest" in text_lower:
+        return "interest"
+    if re.search(r"\b(?:tax|gst)\b", text_lower):
+        return "tax"
+    if any(
+        token in text_lower
+        for token in (
+            "annual fee",
+            "processing fee",
+            "late payment fee",
+            "cash withdrawal fee",
+            "fee charged",
+            "fee of rs",
+            "fee of inr",
+        )
+    ):
+        return "fee"
+    if "credit card" in text_lower or "card" in text_lower:
+        return "purchase"
+    return "none"
 
 
 def detect_transaction_status(text: str) -> str:
@@ -300,12 +365,27 @@ MERCHANT_PATTERNS = [
     # HDFC UPI: "to VPA payzomato@hdfcbank ZOMATO on ..."
     re.compile(r"\bto\s+VPA\s+\S+\s+([A-Z][A-Z0-9\s.&-]+?)\s+on\s+\d", re.IGNORECASE),
     re.compile(r"\btowards\s+VPA\s+\S+\s+\(([^)]+)\)\s+on\s+\d", re.IGNORECASE),
+    # HDFC UPI credit: "by VPA amazon.refunds@rapl Amazon India on ..."
+    re.compile(r"\bby\s+VPA\s+\S+\s+([A-Z][A-Z0-9\s.&-]+?)\s+on\s+\d", re.IGNORECASE),
+    # HDFC card gateway/acquirer descriptors: "towards RAZ*Swiggy on ..."
+    re.compile(
+        r"\btowards\s+(?:[A-Z0-9]{2,6}\*)?([A-Z][A-Z0-9\s.&_-]+?)\s+on\s+\d",
+        re.IGNORECASE,
+    ),
+    # HDFC debit-card descriptors: "at PNB*Make My Trip on ..."
+    re.compile(
+        r"\bat\s+(?:[A-Z0-9]{2,6}\*)?([A-Z][A-Z0-9\s.&_-]+?)\s+on\s+\d",
+        re.IGNORECASE,
+    ),
     # "at SWIGGY" / "at AMAZON PAY INDIA PV"
     re.compile(
         r"\bat\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:via|on|for|UPI|Ref|If|Available|Avl))", re.IGNORECASE
     ),
     # "to BIGBASKET" / "to SPOTIFY INDIA"
-    re.compile(r"\bto\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:via|on|was|UPI|Ref|If))", re.IGNORECASE),
+    re.compile(
+        r"\bto\s+([A-Z][A-Z0-9\s.]+?)(?:\s+(?:via|using|on|was|UPI|Ref|If))",
+        re.IGNORECASE,
+    ),
     # "towards NETFLIX.COM" / "towards UPI-SWIGGY"
     re.compile(
         r"towards\s+(?:UPI-)?([A-Z][A-Z0-9\s./-]+?)(?:\s*(?:on|UPI|-\w+@|\.|If))", re.IGNORECASE
@@ -352,6 +432,7 @@ MERCHANT_NOISE = {
     "DETAILS",
     "SERVICE CHARGES",
     "FEES",
+    "ATM",
 }
 
 
@@ -363,6 +444,8 @@ def _sanitize_merchant(merchant: str) -> str | None:
     if not merchant:
         return None
     if merchant in MERCHANT_NOISE:
+        return None
+    if re.match(r"^(?:YOUR\s+)?(?:ACCOUNT|ACCT|A/?C|CARD|WALLET)\b", merchant):
         return None
     if merchant.isdigit() or len(merchant) < 3:
         return None
@@ -389,6 +472,16 @@ def extract_merchant(text: str) -> str | None:
 def infer_generic_merchant(text: str, txn_type: str | None) -> str | None:
     """Infer a best-effort generic counterparty when the email omits merchant details."""
     text_upper = text.upper()
+
+    if re.search(r"\bATM\b", text_upper) or "CASH WITHDRAWAL" in text_upper:
+        return "ATM cash withdrawal"
+
+    if "WALLET" in text_upper:
+        if txn_type == "refund":
+            return "WALLET REFUND"
+        if txn_type == "credit":
+            return "WALLET CREDIT"
+        return "WALLET TRANSFER"
 
     if "UPI" in text_upper:
         if txn_type == "refund":

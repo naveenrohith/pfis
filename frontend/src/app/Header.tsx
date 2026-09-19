@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import {
   Calendar,
   ChevronLeft,
@@ -16,10 +16,13 @@ import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
 import { useSync } from '@/features/workspace/SyncContext';
 import { formatCountdown, initials, monthLabel } from '@/lib/format';
+import { lazyWithRetry } from '@/lib/lazyWithRetry';
 import { useDashboardUi } from './DashboardUiContext';
 
-const GlobalSearch = lazy(() =>
-  import('@/features/search/GlobalSearch').then((module) => ({ default: module.GlobalSearch })),
+const GlobalSearch = lazyWithRetry(
+  () =>
+    import('@/features/search/GlobalSearch').then((module) => ({ default: module.GlobalSearch })),
+  'global-search',
 );
 
 export function Header() {
@@ -40,7 +43,7 @@ export function Header() {
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/90 backdrop-blur-xl">
       <div className="flex h-16 items-center justify-between gap-2 px-3 sm:px-6 lg:h-[72px] lg:px-8">
-        <div className="flex min-w-0 items-center gap-1">
+        <div className="flex min-w-0 items-center gap-2 lg:gap-5">
           <Button variant="ghost" size="icon" onClick={goPrev} aria-label="Previous month">
             <ChevronLeft className="h-4 w-4" />
           </Button>

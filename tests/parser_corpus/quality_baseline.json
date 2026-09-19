@@ -1,0 +1,26 @@
+{
+  "report_version": 2,
+  "corpus_fingerprint": "22dfded21139cb4f837ed0341046fde53c6b792d7071284082c7b6d1d1a426be",
+  "transaction_extraction": {
+    "exact_accuracy": 1.0,
+    "field_accuracy": {
+      "account_last4": {"accuracy": 1.0},
+      "amount": {"accuracy": 1.0},
+      "bank": {"accuracy": 1.0},
+      "card_event": {"accuracy": 1.0},
+      "date": {"accuracy": 1.0},
+      "merchant_raw": {"accuracy": 1.0},
+      "payment_method": {"accuracy": 1.0},
+      "payment_rail": {"accuracy": 1.0},
+      "reference_id": {"accuracy": 1.0},
+      "transaction_status": {"accuracy": 1.0},
+      "transaction_timestamp": {"accuracy": 1.0},
+      "transaction_type": {"accuracy": 1.0},
+      "used_fallback": {"accuracy": 1.0}
+    }
+  },
+  "source_classification": {
+    "exact_accuracy": 1.0,
+    "macro_recall": 1.0
+  }
+}

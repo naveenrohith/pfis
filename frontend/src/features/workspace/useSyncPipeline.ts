@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import type { Job, JobStatus, SyncEvent } from '@/lib/types';
@@ -24,6 +24,8 @@ export function useSyncPipeline() {
   const [log, setLog] = useState<ActivityEntry[]>([]);
   const pollRef = useRef<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const wsRetryRef = useRef<number | null>(null);
+  const gmailConnectUrl = user ? api.gmailConnectUrl(user.id) : null;
 
   const append = useCallback((message: string) => {
     const time = new Date().toLocaleTimeString();
@@ -31,6 +33,11 @@ export function useSyncPipeline() {
   }, []);
 
   const clearLog = useCallback(() => setLog([]), []);
+
+  const reconnectGmail = useCallback(() => {
+    if (!gmailConnectUrl) return;
+    window.location.assign(gmailConnectUrl);
+  }, [gmailConnectUrl]);
 
   const invalidateAll = useCallback(() => {
     queryClient.invalidateQueries();
@@ -65,6 +72,12 @@ export function useSyncPipeline() {
           setStatus('failed');
           invalidateAll();
           return `Sync failed: ${String(data.error ?? 'unknown error')}`;
+        case 'balance_refresh_completed':
+          invalidateAll();
+          return `Balance evidence refreshed: ${Number(data.observations_ingested ?? 0)} bank observation(s), ${Number(data.card_observations_ingested ?? 0)} card observation(s)`;
+        case 'balance_refresh_failed':
+          invalidateAll();
+          return `Balance refresh failed: ${String(data.error ?? 'unknown error')}`;
         default:
           return null;
       }
@@ -74,32 +87,70 @@ export function useSyncPipeline() {
 
   useEffect(() => {
     if (!user) return;
+    let disposed = false;
+    let attempt = 0;
+    let heartbeat: number | null = null;
+    const connect = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const params = new URLSearchParams({ user_id: user.id });
+      const wsUrl = `${protocol}//${window.location.host}/api/ws/sync?${params.toString()}`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const params = new URLSearchParams({ user_id: user.id });
-    const wsUrl = `${protocol}//${window.location.host}/api/ws/sync?${params.toString()}`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => setLiveConnected(true);
-    ws.onclose = () => setLiveConnected(false);
-    ws.onerror = () => setLiveConnected(false);
-    ws.onmessage = (message) => {
-      try {
-        const event = JSON.parse(message.data) as SyncEvent;
-        const line = formatSyncEvent(event);
-        if (line) append(line);
-      } catch {
-        append('Live sync event could not be read');
-      }
+      ws.onopen = () => {
+        attempt = 0;
+        setLiveConnected(true);
+        heartbeat = window.setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+        }, 25_000);
+      };
+      ws.onclose = () => {
+        setLiveConnected(false);
+        if (heartbeat) window.clearInterval(heartbeat);
+        heartbeat = null;
+        if (disposed) return;
+        attempt += 1;
+        wsRetryRef.current = window.setTimeout(
+          connect,
+          Math.min(30_000, 1_000 * 2 ** Math.min(attempt, 5)),
+        );
+      };
+      ws.onerror = () => setLiveConnected(false);
+      ws.onmessage = (message) => {
+        try {
+          const event = JSON.parse(message.data) as SyncEvent;
+          const line = formatSyncEvent(event);
+          if (line) append(line);
+        } catch {
+          append('Live sync event could not be read');
+        }
+      };
     };
+    connect();
 
     return () => {
-      ws.close();
-      if (wsRef.current === ws) wsRef.current = null;
+      disposed = true;
+      if (wsRetryRef.current) window.clearTimeout(wsRetryRef.current);
+      if (heartbeat) window.clearInterval(heartbeat);
+      wsRef.current?.close();
+      wsRef.current = null;
       setLiveConnected(false);
     };
   }, [user, session, append, formatSyncEvent]);
+
+  useEffect(() => {
+    const refreshVisibleData = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        invalidateAll();
+      }
+    };
+    window.addEventListener('online', refreshVisibleData);
+    document.addEventListener('visibilitychange', refreshVisibleData);
+    return () => {
+      window.removeEventListener('online', refreshVisibleData);
+      document.removeEventListener('visibilitychange', refreshVisibleData);
+    };
+  }, [invalidateAll]);
 
   const pollJob = useCallback(
     (jobId: string) => {
@@ -147,6 +198,23 @@ export function useSyncPipeline() {
     setStatus('queued');
     append('⏳ Starting sync…');
     try {
+      if (session?.mode !== 'demo') {
+        try {
+          const autoSync = await api.autoSyncStatus(user.id);
+          if (autoSync.status === 'paused' && autoSync.error) {
+            setRunning(false);
+            reconnectGmail();
+            return;
+          }
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 404) {
+            setRunning(false);
+            reconnectGmail();
+            return;
+          }
+          throw error;
+        }
+      }
       const job =
         session?.mode === 'demo'
           ? await api.demoSyncPipeline(user.id, 80)
@@ -158,7 +226,7 @@ export function useSyncPipeline() {
       notify((err as Error).message, 'error');
       setRunning(false);
     }
-  }, [user, running, session, append, notify, pollJob]);
+  }, [user, running, session, append, notify, pollJob, reconnectGmail]);
 
   const retrySync = useCallback(async () => {
     if (!user || running) return;
@@ -175,5 +243,15 @@ export function useSyncPipeline() {
     }
   }, [user, running, append, notify, pollJob]);
 
-  return { running, status, liveConnected, log, runSync, retrySync, clearLog };
+  return {
+    running,
+    status,
+    liveConnected,
+    log,
+    runSync,
+    retrySync,
+    reconnectGmail,
+    gmailConnectUrl,
+    clearLog,
+  };
 }

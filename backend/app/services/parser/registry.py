@@ -9,9 +9,12 @@ import logging
 from app.services.gmail.email_filter import is_known_sender
 from app.services.parser import patterns
 from app.services.parser.bank_parsers import (
+    AxisParser,
+    DigitalPaymentParser,
     GenericParser,
     HDFCParser,
     ICICIParser,
+    KotakParser,
     SBIParser,
 )
 from app.services.parser.base_parser import BaseParser, ParseResult
@@ -35,6 +38,9 @@ class ParserRegistry:
         hdfc = HDFCParser()
         sbi = SBIParser()
         icici = ICICIParser()
+        axis = AxisParser()
+        kotak = KotakParser()
+        digital_payment = DigitalPaymentParser()
 
         # Map bank names to parsers
         self._parsers["HDFC"] = hdfc
@@ -42,22 +48,26 @@ class ParserRegistry:
         self._parsers["SBI"] = sbi
         self._parsers["ICICI"] = icici
         self._parsers["ICICI_CC"] = icici
+        self._parsers["AXIS"] = axis
+        self._parsers["AXIS_CC"] = axis
+        self._parsers["KOTAK"] = kotak
 
         # All others use generic
         for bank in [
-            "AXIS",
-            "KOTAK",
             "YES",
             "PNB",
             "RBL",
             "INDUSIND",
             "FEDERAL",
-            "PAYTM",
-            "PHONEPE",
-            "GPAY",
-            "AMAZONPAY",
         ]:
             self._parsers[bank] = self._fallback
+
+        # Payment-network receipts have stable counterparty/amount language
+        # even when no owned bank account suffix is present. Keep them
+        # separate from the generic fallback so telemetry can distinguish
+        # understood formats from best-effort extraction.
+        for bank in ["PAYTM", "PHONEPE", "GPAY", "AMAZONPAY", "RAZORPAY", "LAZYPAY"]:
+            self._parsers[bank] = digital_payment
 
         logger.info(f"Parser registry initialized: {len(self._parsers)} bank mappings")
 
@@ -79,6 +89,8 @@ class ParserRegistry:
         result = parser.parse(subject, body)
         combined = f"{subject} {body}"
         result.payment_method = patterns.detect_payment_method(combined)
+        result.payment_rail = patterns.detect_payment_rail(combined)
+        result.card_event = patterns.detect_card_event(combined)
         result.transaction_status = patterns.detect_transaction_status(combined)
         result.transaction_timestamp = patterns.extract_transaction_timestamp(combined)
         result.used_fallback = parser is self._fallback

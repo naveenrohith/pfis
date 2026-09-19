@@ -8,14 +8,21 @@ from app.security import create_access_token
 from httpx import AsyncClient
 
 
-async def create_user(client: AsyncClient, prefix: str = "user") -> dict:
+async def create_user(
+    client: AsyncClient,
+    prefix: str = "user",
+    *,
+    currency: str = "INR",
+    timezone: str = "Asia/Kolkata",
+) -> dict:
     suffix = uuid.uuid4().hex[:8]
     response = await client.post(
         "/api/users/",
         json={
             "email": f"{prefix}-{suffix}@pfis.local",
             "name": f"{prefix.title()} {suffix}",
-            "currency": "INR",
+            "currency": currency,
+            "timezone": timezone,
         },
     )
     response.raise_for_status()

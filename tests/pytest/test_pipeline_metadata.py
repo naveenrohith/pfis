@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from app.models.email import RawEmail
-from app.models.sync import ParseFailure
+from app.models.sync import ParseFailure, PipelineEvent
 from app.models.transaction import Transaction
 from app.services.domain_events import domain_event_dispatcher
 from app.services.parser.pipeline import process_raw_emails
@@ -36,6 +36,9 @@ async def test_pipeline_result_includes_parser_metadata_for_generic_fallback(
         await db.commit()
 
         stats = await process_raw_emails(db, user["id"])
+        parsed_event = await db.scalar(
+            select(PipelineEvent).where(PipelineEvent.event_type == "Parsed")
+        )
 
     assert stats["stored"] == 1
     assert stats["parsed_success"] == 1
@@ -43,6 +46,45 @@ async def test_pipeline_result_includes_parser_metadata_for_generic_fallback(
     assert stats["results"][0]["bank"] == "GENERIC"
     assert stats["results"][0]["parser_version"] == 1
     assert stats["results"][0]["parser_fallback"] is True
+    assert parsed_event is not None
+    assert parsed_event.source_institution == "GENERIC"
+
+
+async def test_pipeline_does_not_store_money_outside_the_user_ledger_currency(
+    client,
+    test_session_factory,
+):
+    user = await create_user(client, "pipeline-usd-ledger", currency="USD")
+
+    async with test_session_factory() as db:
+        email = RawEmail(
+            user_id=user["id"],
+            gmail_message_id=f"{user['id']}:inr-alert",
+            sender="alerts@icicibank.com",
+            subject="ICICI Bank Alert",
+            body=(
+                "INR 499.00 has been debited from your ICICI Bank Account XX5678 "
+                "on 05-May-2026 towards NETFLIX.COM on UPI"
+            ),
+        )
+        db.add(email)
+        await db.commit()
+
+        stats = await process_raw_emails(db, user["id"])
+        transactions = list(
+            (await db.scalars(select(Transaction).where(Transaction.user_id == user["id"]))).all()
+        )
+        failure = await db.scalar(select(ParseFailure).where(ParseFailure.email_id == email.id))
+
+    assert stats["stored"] == 0
+    assert stats["parsed_failed"] == 1
+    assert stats["results"][0]["status"] == "currency_mismatch"
+    assert stats["results"][0]["error"] == "ledger_currency_mismatch"
+    assert transactions == []
+    assert failure is not None
+    assert failure.error_message == ("Transaction currency INR does not match ledger currency USD")
+    assert failure.failure_stage == "persist"
+    assert failure.failure_code == "ledger_currency_mismatch"
 
 
 async def test_pipeline_result_includes_parser_metadata_for_invalid_parse(
@@ -73,9 +115,9 @@ async def test_pipeline_result_includes_parser_metadata_for_invalid_parse(
     assert stats["stored"] == 0
     assert result["status"] == "parse_failed"
     assert result["bank"] == "HDFC"
-    assert result["parser_version"] == 2
+    assert result["parser_version"] == 4
     assert result["parser_fallback"] is False
-    assert failure.parser_version == 2
+    assert failure.parser_version == 4
     assert failure.resolved is False
     assert failure.error_message == "Invalid parse: amount=123.0, type=None"
 

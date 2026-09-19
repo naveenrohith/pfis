@@ -144,6 +144,7 @@ async def register(
         email=email,
         name=data.name.strip(),
         currency=data.currency.upper(),
+        timezone=data.timezone,
         password_hash=hash_password(data.password),
         is_active=True,
     )
@@ -175,6 +176,8 @@ async def login(
         )
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User account is inactive")
+    if user.deletion_started_at is not None:
+        raise HTTPException(status_code=403, detail="Account deletion is in progress")
     if replacement_hash:
         user.password_hash = replacement_hash
         await db.flush()
@@ -194,7 +197,7 @@ async def demo_login(
         raise HTTPException(status_code=404, detail="Demo workspace is not available")
     result = await db.execute(select(User).where(User.email == "demo@pfis.app"))
     user = result.scalar_one_or_none()
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.deletion_started_at is not None:
         raise HTTPException(status_code=404, detail="Demo workspace is not available")
     return await _commit_browser_session(response, db, user, mode="demo")
 
@@ -382,7 +385,7 @@ async def _resolve_google_user(db: AsyncSession, profile: dict) -> User:
     identity = identity_result.scalar_one_or_none()
     if identity:
         user = await db.get(User, identity.user_id)
-        if user is None or not user.is_active:
+        if user is None or not user.is_active or user.deletion_started_at is not None:
             raise HTTPException(status_code=403, detail="User account is inactive")
         return user
 
@@ -399,7 +402,7 @@ async def _resolve_google_user(db: AsyncSession, profile: dict) -> User:
         safe_legacy_identity = gmail_result.scalar_one_or_none() is not None
         if user.password_hash is not None or not safe_legacy_identity:
             raise HTTPException(status_code=409, detail="Existing account must link Google first")
-        if not user.is_active:
+        if not user.is_active or user.deletion_started_at is not None:
             raise HTTPException(status_code=403, detail="User account is inactive")
         user.name = profile["name"] or user.name
     else:

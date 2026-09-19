@@ -50,14 +50,17 @@ from app.api.routes import (
     budgets,
     categories,
     dashboard,
+    financial_position,
     guidance,
     health,
     insights,
     jobs,
+    knowledge,
     merchants,
     pipeline,
     preferences,
     reports,
+    roadmap,
     transactions,
     users,
     ws,
@@ -66,7 +69,7 @@ from app.api.routes.gmail import auth_router as gmail_auth_router
 from app.api.routes.gmail import gmail_router
 from app.config import get_settings
 from app.database import AsyncSessionLocal, close_db, init_db
-from app.observability import install_request_id_logging, request_id_ctx
+from app.observability import install_request_id_logging, request_id_ctx, request_metrics
 from app.rate_limit import limiter
 from app.security import validate_session_csrf
 from app.services.auto_sync_service import start_auto_sync_scheduler, stop_auto_sync_scheduler
@@ -75,6 +78,7 @@ from app.services.job_service import (
     start_job_worker,
     stop_job_worker,
 )
+from app.services.retention_scheduler import start_retention_scheduler, stop_retention_scheduler
 from app.services.seed_service import run_seeds
 
 # Configure logging
@@ -116,12 +120,14 @@ async def lifespan(app: FastAPI):
     base_url = _startup_base_url()
     start_job_worker()
     start_auto_sync_scheduler()
+    start_retention_scheduler()
     logger.info(f"✅ PFIS v{settings.APP_VERSION} ready at {base_url}")
     logger.info(f"📖 API docs at {base_url}/docs")
 
     yield
 
     # Shutdown
+    await stop_retention_scheduler()
     await stop_auto_sync_scheduler()
     await stop_job_worker()
     await close_db()
@@ -273,8 +279,11 @@ async def request_id_middleware(request, call_next):
     rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
     token = request_id_ctx.set(rid)
     started_at = perf_counter()
+    response = None
+    status_code = 500
     try:
         response = await call_next(request)
+        status_code = response.status_code
         duration_ms = (perf_counter() - started_at) * 1000
         response.headers["X-Request-ID"] = rid
         response.headers["Server-Timing"] = f"app;dur={duration_ms:.1f}"
@@ -288,6 +297,15 @@ async def request_id_middleware(request, call_next):
             )
         return response
     finally:
+        duration_ms = (perf_counter() - started_at) * 1000
+        route = request.scope.get("route")
+        route_template = getattr(route, "path", None) or "unmatched"
+        request_metrics.record(
+            method=request.method,
+            route=route_template,
+            status_code=status_code,
+            duration_ms=duration_ms,
+        )
         request_id_ctx.reset(token)
 
 
@@ -341,8 +359,11 @@ app.include_router(analytics.router, prefix="/api")
 app.include_router(analytics.goals_router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
 app.include_router(guidance.router, prefix="/api")
+app.include_router(knowledge.router, prefix="/api")
 app.include_router(preferences.router, prefix="/api")
 app.include_router(accounts.router, prefix="/api")
+app.include_router(financial_position.router, prefix="/api")
+app.include_router(roadmap.router, prefix="/api")
 
 # Phase 6: Budget + Reports routes
 app.include_router(budgets.router, prefix="/api")

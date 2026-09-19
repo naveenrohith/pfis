@@ -30,7 +30,7 @@ describe('responsive workspace navigation', () => {
     expect(within(navigation).getAllByRole('button')).toHaveLength(5);
     fireEvent.click(within(navigation).getByRole('button', { name: /Plan/ }));
     expect(screen.getByTestId('workspace')).toHaveTextContent('plan');
-    expect(window.location.hash).toBe('#analytics');
+    expect(window.location.hash).toBe('#cash-plan');
   });
 
   it('opens quick add from the mobile floating action', () => {

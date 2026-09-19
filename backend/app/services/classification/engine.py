@@ -108,7 +108,7 @@ MONEY_MOVEMENT_KEYWORDS = [
     r"paid\s+to",
     r"\breceived\b",
     r"received\s+from",
-    r"purchase",
+    r"\bpurchase\s+(?:made|of|at|successful)\b",
     r"refund",
     r"reversal",
     r"transaction\s+successful",
@@ -158,6 +158,8 @@ PROMO_KEYWORDS = [
 NEWSLETTER_SENDER_PATTERNS = [
     r"@(?:[a-z0-9-]+\.)?substack\.com\b",
     r"\binformation@mailers\.hdfcbank\.bank\.in\b",
+    r"\bgroww\s+digest\s*<",
+    r"@digest\.groww\.in\b",
 ]
 
 NEWSLETTER_KEYWORDS = [
@@ -198,6 +200,12 @@ NON_TRANSACTION_KEYWORDS = [
     r"card\s+usage\s+settings",
     r"real[-\s]?time\s+balance\s+updates?",
     r"thank\s+you\s+for\s+banking\s+with\s+us",
+]
+
+STRONG_NON_TRANSACTION_KEYWORDS = [
+    r"planned\s+system\s+maintenance",
+    r"service\s+impact\s+details",
+    r"scheduled\s+maintenance.*(?:services?|transactions?).*unavailable",
 ]
 
 SPECIAL_PATTERNS: list[tuple[ClassificationType, list[str], str]] = [
@@ -270,7 +278,7 @@ def classify_source_record(sender: str, subject: str, body: str) -> Classificati
         logger.debug("Source classified as OTP: %s", subject[:50])
         return ClassificationResult(
             ClassificationType.OTP,
-            institution,
+            institution or "UNKNOWN",
             0.95,
             otp_matches,
             "otp/security signal",
@@ -280,23 +288,51 @@ def classify_source_record(sender: str, subject: str, body: str) -> Classificati
     txn_matches = _matches(TRANSACTION_KEYWORDS, combined_text)
     money_movement_matches = _matches(MONEY_MOVEMENT_KEYWORDS, combined_text)
     non_transaction_matches = _matches(NON_TRANSACTION_KEYWORDS, combined_text)
+    strong_non_transaction_matches = _matches(STRONG_NON_TRANSACTION_KEYWORDS, combined_text)
+    travel_document_matches = (
+        (r"\bitinerary\b", r"\bPNR/Booking\s+Ref\b")
+        if re.search(r"\bitinerary\b", subject, re.IGNORECASE)
+        and re.search(r"\bPNR/Booking\s+Ref\b", body, re.IGNORECASE)
+        else ()
+    )
     has_amount = bool(AMOUNT_PATTERN.search(combined_text))
     newsletter_sender_matches = _matches(NEWSLETTER_SENDER_PATTERNS, sender)
+    newsletter_subject_matches = _matches(
+        [r"\bdigest\b", r"\bnewsletter\b"],
+        subject,
+    )
     newsletter_matches = _matches(NEWSLETTER_KEYWORDS, combined_text)
+    # "Unsubscribe" is common in legitimate bank and travel receipts. It is
+    # only supporting evidence, never sufficient by itself to discard money
+    # movement from a known financial sender.
+    strong_newsletter_evidence = (
+        newsletter_sender_matches
+        or newsletter_subject_matches
+        or (not is_known and len(newsletter_matches) >= 2)
+    )
 
-    if newsletter_sender_matches or newsletter_matches:
+    if strong_newsletter_evidence:
         return ClassificationResult(
             ClassificationType.IGNORE,
-            institution,
+            institution or "UNKNOWN",
             0.95,
-            newsletter_sender_matches or newsletter_matches,
+            newsletter_sender_matches or newsletter_subject_matches or newsletter_matches,
             "newsletter sender or content signal",
+        )
+
+    if strong_non_transaction_matches or travel_document_matches:
+        return ClassificationResult(
+            ClassificationType.IGNORE,
+            institution or "UNKNOWN",
+            0.98,
+            tuple(strong_non_transaction_matches or travel_document_matches),
+            "strong non-transaction document/service signal",
         )
 
     if len(promo_matches) >= 2 and not txn_matches:
         return ClassificationResult(
             ClassificationType.PROMOTION,
-            institution,
+            institution or "UNKNOWN",
             0.85,
             promo_matches,
             "multiple promotion signals",
@@ -305,7 +341,7 @@ def classify_source_record(sender: str, subject: str, body: str) -> Classificati
     if not is_known and promo_matches:
         return ClassificationResult(
             ClassificationType.PROMOTION,
-            institution,
+            institution or "UNKNOWN",
             0.80,
             promo_matches,
             "unknown sender marketing signal",
@@ -314,7 +350,7 @@ def classify_source_record(sender: str, subject: str, body: str) -> Classificati
     if non_transaction_matches and (not txn_matches or not has_amount):
         return ClassificationResult(
             ClassificationType.IGNORE,
-            institution,
+            institution or "UNKNOWN",
             0.90,
             non_transaction_matches,
             "non-transaction account/service signal",
@@ -360,4 +396,10 @@ def classify_source_record(sender: str, subject: str, body: str) -> Classificati
             "known financial sender without transaction amount signal",
         )
 
-    return ClassificationResult(ClassificationType.IGNORE, "", 0.0, (), "no financial signal")
+    return ClassificationResult(
+        ClassificationType.IGNORE,
+        "UNKNOWN",
+        0.0,
+        (),
+        "no financial signal",
+    )

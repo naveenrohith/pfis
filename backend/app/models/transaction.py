@@ -5,6 +5,7 @@ Includes confidence scoring, parser versioning, and dedup fingerprint.
 """
 
 import enum
+import json
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -21,6 +22,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,6 +44,59 @@ class PaymentMethod(str, enum.Enum):
     WALLET = "wallet"
     BANK_TRANSFER = "bank_transfer"
     OTHER = "other"
+
+
+class PaymentRail(str, enum.Enum):
+    """How a payment was initiated, independent from the funding product."""
+
+    UPI = "upi"
+    DEBIT_CARD = "debit_card"
+    ATM = "atm"
+    TRANSFER = "transfer"
+    WALLET = "wallet"
+    OTHER = "other"
+
+
+class CardEvent(str, enum.Enum):
+    """A credit-card ledger event, when the transaction belongs to a card."""
+
+    NONE = "none"
+    PURCHASE = "purchase"
+    PAYMENT = "payment"
+    REFUND = "refund"
+    CASHBACK = "cashback"
+    FEE = "fee"
+    TAX = "tax"
+    INTEREST = "interest"
+    REVERSAL = "reversal"
+
+
+class TransactionSplit(Base):
+    """A user-owned allocation of one ledger transaction; never a second ledger event."""
+
+    __tablename__ = "transaction_splits"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_transaction_splits_amount_positive"),
+        Index("ix_transaction_splits_user_transaction", "user_id", "transaction_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
+    )
+    transaction_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    category_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("categories.id"), nullable=True
+    )
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+
+    transaction = relationship("Transaction", back_populates="splits")
 
 
 class Transaction(Base):
@@ -76,6 +131,29 @@ class Transaction(Base):
         nullable=False,
         default=PaymentMethod.OTHER,
     )
+    # ``payment_method`` remains the compatibility field. New consumers must use
+    # rail + linked financial account + card event rather than inferring product
+    # semantics from a label such as "EMI".
+    payment_rail: Mapped[PaymentRail] = mapped_column(
+        Enum(
+            PaymentRail,
+            values_callable=lambda enum_type: [member.value for member in enum_type],
+            native_enum=False,
+            length=20,
+        ),
+        nullable=False,
+        default=PaymentRail.OTHER,
+    )
+    card_event: Mapped[CardEvent] = mapped_column(
+        Enum(
+            CardEvent,
+            values_callable=lambda enum_type: [member.value for member in enum_type],
+            native_enum=False,
+            length=20,
+        ),
+        nullable=False,
+        default=CardEvent.NONE,
+    )
     transaction_status: Mapped[str] = mapped_column(String(24), nullable=False, default="completed")
     transaction_timestamp: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -99,14 +177,27 @@ class Transaction(Base):
     merchant_rule_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     merchant_resolver_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     fingerprint: Mapped[str] = mapped_column(String(64), unique=True, nullable=True, index=True)
-    source_email_id: Mapped[str] = mapped_column(
+    source_email_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("raw_emails.id"), nullable=True
     )
+    source_kind: Mapped[str] = mapped_column(String(24), nullable=False, default="manual")
+    source_identifier: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    review_outcome: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="newly_imported", index=True
+    )
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     financial_account_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("financial_accounts.id"), nullable=True, index=True
     )
     transfer_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     is_transfer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    # Issuer bookkeeping such as an EMI conversion debit/credit is visible
+    # evidence, but it is not new spending, income, or a money transfer.
+    is_accounting_adjustment: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, index=True
+    )
+    ledger_subtype: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
@@ -118,6 +209,20 @@ class Transaction(Base):
     source_email = relationship("RawEmail", back_populates="transaction")
     financial_account = relationship("FinancialAccount", back_populates="transactions")
     corrections = relationship("UserCorrection", back_populates="transaction", lazy="selectin")
+    splits = relationship(
+        "TransactionSplit",
+        back_populates="transaction",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    @property
+    def tags(self) -> list[str]:
+        try:
+            value = json.loads(self.tags_json or "[]")
+        except (TypeError, json.JSONDecodeError):
+            return []
+        return [str(item) for item in value] if isinstance(value, list) else []
 
     @property
     def source_received_at(self) -> datetime | None:

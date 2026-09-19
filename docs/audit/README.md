@@ -1,10 +1,18 @@
 # PFIS Enterprise Modernization Audit
 
+> Historical baseline: reports 1–12 record the earlier modernization program
+> and contain status statements that predate the current financial-position
+> feature wave.
+> [PFIS Intelligence and Productivity Recovery Roadmap](15-intelligence-productivity-recovery-roadmap.md)
+> is the canonical execution roadmap verified on 2026-08-09. Report 14 remains
+> the detailed 85% domain reassessment and balance-position contract; report 13
+> remains the implementation history for the earlier 70% target.
+
 This audit is a repository-grounded modernization blueprint for PFIS. It is based on the current FastAPI backend, async SQLAlchemy persistence layer, Gmail ingestion services, parser pipeline, static dashboard, Svelte migration folder, docs, tests, and CI configuration in this repository.
 
 PFIS is currently best described as a structured MVP: the product has clear module boundaries and a useful test base, but production hardening, deeper domain boundaries, and operational maturity are still incomplete.
 
-## Verification & Progress (verified 2026-06-30)
+## Verification & Progress (verified 2026-08-02)
 
 This audit has been re-verified against the current code. Most of the roadmap is
 already implemented; the table below is the live status. Items not listed remain
@@ -27,7 +35,21 @@ as described in the individual reports.
 | Durable job queue / worker | Out of scope | local/single-user profile |
 | Frontend cutover (retire static dashboard) | Out of scope (now) | needs Node + Svelte parity work |
 
-Current test status: full `pytest` suite green.
+The last consolidated verification baseline (before the deferred latest
+issuer-history/recommendation/anomaly-evidence batch) was full `pytest` green
+(**419 passed, 2 skipped**), frontend lint/build/**71 tests across 29 files**,
+and the six-project responsive/light/dark workspace smoke suite. The current
+85% continuation checkpoint has now passed focused backend provider/card,
+financial-position, job, readiness, release-gate, export, and deletion suites
+(**88 passed, 1 skipped** across the selected runs), plus frontend lint/build
+and **71 tests across 29 files**, plus non-visual browser E2E (**26 passed,
+10 intentionally skipped across six viewport/color projects**). Full
+repository pytest and live provider-backed E2E remain release gates because
+representative provider transport/evidence and a configured Postgres
+environment are still not present.
+The evidence-collection slice also adds manifest-backed parser cohorts and
+protected forecast/recommendation/anomaly export commands; those artifacts still
+remain deferred until real reviewed cohorts are supplied.
 
 ## Reports
 
@@ -43,6 +65,9 @@ Current test status: full `pytest` suite green.
 10. [Enterprise Modernization Roadmap](10-enterprise-modernization-roadmap.md)
 11. [Engineering Standards](11-engineering-standards.md)
 12. [Production Readiness Scorecard](12-production-readiness-scorecard.md)
+13. [Product and Intelligence Maturity Roadmap](13-product-intelligence-maturity-roadmap.md)
+14. [85% Intelligence and Product-Stage Reassessment](14-85-intelligence-product-reassessment.md)
+15. [Intelligence and Productivity Recovery Roadmap](15-intelligence-productivity-recovery-roadmap.md)
 
 ## Audit Evidence Base
 

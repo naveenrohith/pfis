@@ -14,7 +14,16 @@ from app.database import Base
 
 class RawEmail(Base):
     __tablename__ = "raw_emails"
-    __table_args__ = (Index("ix_raw_emails_user_received", "user_id", "received_at"),)
+    __table_args__ = (
+        Index("ix_raw_emails_user_received", "user_id", "received_at"),
+        Index(
+            "ix_raw_emails_retention",
+            "user_id",
+            "content_redacted_at",
+            "processed_flag",
+            "received_at",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
@@ -28,6 +37,9 @@ class RawEmail(Base):
     sender: Mapped[str] = mapped_column(String(255), nullable=True, index=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     processed_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    content_redacted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)

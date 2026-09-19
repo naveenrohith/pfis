@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import uuid
 from collections.abc import Iterator
@@ -93,6 +94,35 @@ def test_migrations_use_portable_boolean_server_defaults():
     assert 'server_default=sa.text("0")' not in source
 
 
+def test_credit_account_normalization_fails_closed_on_identity_collisions():
+    migration_path = (
+        ROOT / "backend" / "alembic" / "versions" / "018_financial_position_foundation.py"
+    )
+    spec = importlib.util.spec_from_file_location("financial_position_018", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    class Result:
+        def __init__(self, row):
+            self.row = row
+
+        def first(self):
+            return self.row
+
+    class Bind:
+        def __init__(self, row):
+            self.row = row
+
+        def execute(self, statement):
+            assert "LOWER(account_type)" in str(statement)
+            return Result(self.row)
+
+    migration._assert_credit_account_normalization_safe(Bind(None))
+    with pytest.raises(RuntimeError, match="account identities collide"):
+        migration._assert_credit_account_normalization_safe(Bind((1,)))
+
+
 def test_alembic_head_matches_orm_and_database_constraints():
     """A clean PostgreSQL migration must match the complete ORM contract."""
     with temporary_postgres_database() as database_url:
@@ -132,7 +162,7 @@ def test_alembic_head_matches_orm_and_database_constraints():
                             },
                             "operational_indexes": {
                                 item["name"]
-                                for table in ("raw_emails", "sync_runs")
+                                for table in ("raw_emails", "sync_runs", "pipeline_events")
                                 for item in inspector.get_indexes(table)
                             },
                         }
@@ -152,7 +182,7 @@ def test_alembic_head_matches_orm_and_database_constraints():
         for table in Base.metadata.sorted_tables
     }
     assert schema["columns"] == orm_columns
-    assert schema["revision"] == "017_gmail_token_expiry"
+    assert schema["revision"] == "055_deposit_line_review"
     assert "uq_user_merchant_rule_descriptor" in schema["merchant_unique"]
     assert {
         "ix_user_merchant_rules_user_id",
@@ -166,6 +196,7 @@ def test_alembic_head_matches_orm_and_database_constraints():
     assert {
         "ix_raw_emails_user_received",
         "ix_sync_runs_user_started",
+        "ix_pipeline_events_source_created",
     } <= schema["operational_indexes"]
 
 
@@ -192,7 +223,11 @@ def test_money_columns_use_fixed_scale_numeric_storage():
         ("transactions", "amount"),
         ("budgets", "monthly_limit"),
         ("account_balance_snapshots", "amount"),
+        ("cash_flow_forecast_snapshots", "projected_spend"),
+        ("cash_flow_forecast_outcomes", "actual_spend"),
+        ("recommendation_outcomes", "actual_impact_value"),
         ("goals", "target_amount"),
+        ("transaction_splits", "amount"),
     }
 
     for table_name, column_name in expected:

@@ -39,7 +39,7 @@ export function Segmented<T extends string>({
             type="button"
             onClick={() => onChange(opt.value)}
             className={cn(
-              'min-h-9 rounded-md px-3 py-1.5 text-xs font-bold transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+              'min-h-11 rounded-md px-3 py-1.5 text-xs font-bold transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
               active
                 ? 'bg-card text-foreground shadow-lift'
                 : 'text-muted-foreground hover:text-foreground',

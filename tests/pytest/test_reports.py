@@ -157,6 +157,7 @@ def test_build_transactions_csv_formats_rows():
         merchant_normalized = "Bookmyshow"
         merchant_raw = "BOOKMYSHOW"
         amount = 750.0
+        currency = "USD"
         transaction_type = TxnType()
         account_last4 = "1234"
         confidence_score = 0.91
@@ -165,8 +166,8 @@ def test_build_transactions_csv_formats_rows():
     output = build_transactions_csv([(Txn(), "Entertainment")])
 
     csv_text = output.getvalue()
-    assert "Date,Merchant,Amount (INR),Type,Category,Account,Confidence,Reference ID" in csv_text
-    assert "2026-05-09,Bookmyshow,750.00,debit,Entertainment,**1234,91%,REF123" in csv_text
+    assert "Date,Merchant,Amount,Currency,Type,Category,Account,Confidence,Reference ID" in csv_text
+    assert "2026-05-09,Bookmyshow,750.00,USD,debit,Entertainment,**1234,91%,REF123" in csv_text
 
 
 @pytest.mark.asyncio

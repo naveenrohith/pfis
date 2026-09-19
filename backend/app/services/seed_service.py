@@ -3,15 +3,20 @@ Seed Service
 Seeds the database with default categories and sample merchants.
 """
 
+import json
 import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models.category import Category, Merchant
+from app.models.category import Category, Merchant, parse_merchant_aliases
 from app.models.user import User
 from app.security import hash_password, verify_password
+from app.services.parser.normalizer import (
+    invalidate_merchant_cache,
+    normalize_descriptor_key,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -48,7 +53,7 @@ DEFAULT_MERCHANTS = [
     },
     {
         "name": "Amazon",
-        "aliases": '["AMAZON", "AMAZON.IN", "AMAZON PAY", "AMZN"]',
+        "aliases": '["AMAZON", "AMAZON.IN", "AMAZON PAY", "AMZN", "AMAZ", "AMAZONIN", "ASSPL"]',
         "category": "Shopping",
     },
     {"name": "Flipkart", "aliases": '["FLIPKART", "FLIPKART INDIA"]', "category": "Shopping"},
@@ -62,6 +67,107 @@ DEFAULT_MERCHANTS = [
     {"name": "Jio", "aliases": '["JIO", "RELIANCE JIO"]', "category": "Bills"},
     {"name": "Airtel", "aliases": '["AIRTEL", "BHARTI AIRTEL"]', "category": "Bills"},
     {"name": "IRCTC", "aliases": '["IRCTC", "IRCTC RAIL"]', "category": "Travel"},
+    {
+        "name": "Blinkit",
+        "aliases": '["BLINKIT", "BLINK COMMERCE"]',
+        "category": "Groceries",
+    },
+    {
+        "name": "Zepto",
+        "aliases": '["ZEPTO", "ZEPTO MARKETPLACE"]',
+        "category": "Groceries",
+    },
+    {"name": "EatClub", "aliases": '["EATCLUB", "EAT CLUB"]', "category": "Food"},
+    {"name": "Cafe Durga", "aliases": '["CAFE DURGA"]', "category": "Food"},
+    {
+        "name": "Nawab Restaurant",
+        "aliases": '["NAWAB RESTAURANT"]',
+        "category": "Food",
+    },
+    {
+        "name": "MakeMyTrip",
+        "aliases": '["MAKEMYTRIP", "MAKE MY TRIP", "MAKE MY TRIP INDIA PVT"]',
+        "category": "Travel",
+    },
+    {"name": "AbhiBus", "aliases": '["ABHIBUS", "ABHI BUS"]', "category": "Travel"},
+    {
+        "name": "District",
+        "aliases": '["DISTRICT", "DISTRICT MOVIE TICKET"]',
+        "category": "Entertainment",
+    },
+    {"name": "SmartQ", "aliases": '["SMARTQ", "SMART Q"]', "category": "Food"},
+    {
+        "name": "DrinkPrime",
+        "aliases": '["DRINKPRIME", "DRINK PRIME"]',
+        "category": "Bills",
+    },
+    {
+        "name": "Reliance Retail",
+        "aliases": '["RELIANCE RETAIL", "RELIANCE RETAIL LIMITED"]',
+        "category": "Shopping",
+    },
+    {
+        "name": "Petrol surcharge waiver",
+        "aliases": '["PETRO SURCHARGE WAIVER", "PETROL SURCHARGE WAIVER"]',
+        "category": "Fuel",
+    },
+    {
+        "name": "HDFC SmartBuy cashback",
+        "aliases": '["SMARTBUY BONUS", "SMARTBUY_BONUS_5PER_CB0000"]',
+        "category": "Shopping",
+    },
+    {
+        "name": "Indian Railways",
+        "aliases": '["INDIAN RAILWAYS", "INDIAN RAILWAY"]',
+        "category": "Travel",
+    },
+    {
+        "name": "Croma",
+        "aliases": '["CROMA", "INFINITI RETAIL", "INFINITI RETAIL LIMITED"]',
+        "category": "Shopping",
+    },
+    {"name": "Gyftr", "aliases": '["GYFTR", "GYFTR VIA SMARTBUY"]', "category": "Shopping"},
+    {
+        "name": "Suguna Chicken",
+        "aliases": '["SUGUNA CHICKEN", "SUGUNA CHIKEN"]',
+        "category": "Groceries",
+    },
+    {"name": "Smytten", "aliases": '["SMYTTEN"]', "category": "Shopping"},
+    {
+        "name": "G Pulla Reddy Sweets",
+        "aliases": '["G PULLA REDDY SWEETS"]',
+        "category": "Food",
+    },
+    {
+        "name": "Bhagavan Pootharekulu",
+        "aliases": '["BHAGAVAN POOTHAREKULU"]',
+        "category": "Food",
+    },
+    {
+        "name": "Kritunga Restaurant",
+        "aliases": '["KRITUNGA RESTAURENT", "KRITUNGA RESTAURANT"]',
+        "category": "Food",
+    },
+    {
+        "name": "Baba Ramdev Rasoi",
+        "aliases": '["BABA RAM DEV RASOI", "BABA RAMDEV RASOI"]',
+        "category": "Food",
+    },
+    {
+        "name": "Southern Spices",
+        "aliases": '["SOUTHERN SPICES"]',
+        "category": "Food",
+    },
+    {
+        "name": "Kanifnath Raswanti",
+        "aliases": '["KANIFNATH RASWANTI"]',
+        "category": "Food",
+    },
+    {
+        "name": "Electricity bill",
+        "aliases": '["HDFCBPELEC"]',
+        "category": "Bills",
+    },
 ]
 
 
@@ -83,19 +189,28 @@ async def seed_categories(db: AsyncSession) -> dict[str, str]:
             logger.info(f"Seeded category: {cat_data['name']}")
 
     await db.commit()
+    invalidate_merchant_cache()
     return category_map
 
 
 async def seed_merchants(db: AsyncSession, category_map: dict[str, str]):
     """Seed default merchants with category mappings."""
+    reserved_alias_owners = {
+        normalize_descriptor_key(alias): merch_data["name"]
+        for merch_data in DEFAULT_MERCHANTS
+        for alias in [
+            merch_data["name"],
+            *json.loads(merch_data["aliases"]),
+        ]
+    }
     for merch_data in DEFAULT_MERCHANTS:
         result = await db.execute(
             select(Merchant).where(Merchant.normalized_name == merch_data["name"])
         )
         existing = result.scalar_one_or_none()
+        cat_id = category_map.get(merch_data["category"])
 
         if not existing:
-            cat_id = category_map.get(merch_data["category"])
             merch = Merchant(
                 normalized_name=merch_data["name"],
                 aliases=merch_data["aliases"],
@@ -103,8 +218,38 @@ async def seed_merchants(db: AsyncSession, category_map: dict[str, str]):
             )
             db.add(merch)
             logger.info(f"Seeded merchant: {merch_data['name']} → {merch_data['category']}")
+        else:
+            aliases = list(
+                dict.fromkeys(
+                    [
+                        *parse_merchant_aliases(existing.aliases),
+                        *json.loads(merch_data["aliases"]),
+                    ]
+                )
+            )
+            encoded_aliases = json.dumps(aliases)
+            if existing.aliases != encoded_aliases:
+                existing.aliases = encoded_aliases
+            if cat_id is not None and existing.category_default_id != cat_id:
+                existing.category_default_id = cat_id
+
+    # Legacy merchant editing once polluted the shared catalog with user-owned
+    # aliases. Default identities are reserved for their canonical merchant;
+    # user-specific names now live only in user_merchant_rules.
+    merchants = list((await db.scalars(select(Merchant))).all())
+    for merchant in merchants:
+        aliases = parse_merchant_aliases(merchant.aliases)
+        filtered = [
+            alias
+            for alias in aliases
+            if reserved_alias_owners.get(normalize_descriptor_key(alias), merchant.normalized_name)
+            == merchant.normalized_name
+        ]
+        if filtered != aliases:
+            merchant.aliases = json.dumps(filtered)
 
     await db.commit()
+    invalidate_merchant_cache()
 
 
 async def seed_demo_user(db: AsyncSession) -> str:

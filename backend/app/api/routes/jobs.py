@@ -2,14 +2,16 @@
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import User
 from app.rate_limit import limiter
+from app.schemas.account import BalanceProviderRefreshRequest
 from app.schemas.job import JobResponse
 from app.security import get_current_user_optional, resolve_user_scope
+from app.services.balance_provider_connection_service import BalanceProviderConnectionService
 from app.services.job_service import create_job, get_job, schedule_job, serialize_job
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
@@ -84,6 +86,43 @@ async def enqueue_retry_parse_failures(
         authorized_user_id,
         {"limit": limit},
         idempotency_key=idempotency_key,
+    )
+    schedule_job(job.id)
+    return serialize_job(job)
+
+
+@router.post("/balance-refresh", response_model=JobResponse, status_code=202)
+@limiter.limit("5/minute")
+async def enqueue_balance_refresh(
+    request: Request,
+    data: BalanceProviderRefreshRequest,
+    user_id: str = Query(...),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key", max_length=200),
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    authorized_user_id = resolve_user_scope(user_id, current_user)
+    try:
+        plan = await BalanceProviderConnectionService(db).prepare_refresh(
+            authorized_user_id,
+            data.provider_type,
+            data.account_ids,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    scoped_idempotency_key = f"{plan.provider_type}:{idempotency_key}" if idempotency_key else None
+    job = await create_job(
+        db,
+        "balance_refresh",
+        authorized_user_id,
+        {
+            "provider_type": plan.provider_type,
+            "account_ids": plan.account_ids,
+        },
+        idempotency_key=scoped_idempotency_key,
     )
     schedule_job(job.id)
     return serialize_job(job)

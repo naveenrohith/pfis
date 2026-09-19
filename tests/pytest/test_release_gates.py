@@ -3,12 +3,16 @@
 import json
 from argparse import Namespace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import httpx
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from scripts import postgres_restore_drill
+from scripts import check_worktree_inventory, postgres_restore_drill
+from scripts.check_migration_parity import database_url_for
+from scripts.check_worktree_inventory import build_report, classify_path
+from scripts.intelligence_release_gate import validate_balance_reconciliation_report
 from scripts.postgres_restore_drill import (
     connection_identity,
     parse_postgres_url,
@@ -44,6 +48,59 @@ def test_release_gate_requires_named_operational_owners():
         }
     )
     assert owners["DATA_RECOVERY_OWNER"] == "recovery@example.com"
+
+
+def test_worktree_inventory_uses_ordered_packet_ownership():
+    assert classify_path("docs/audit/16-working-tree-integration-inventory.md") == "IR-0"
+    assert classify_path("backend/app/services/parser/pipeline.py") == "IR-1"
+    assert classify_path("backend/alembic/versions/029_account_deletion.py") == "IR-2"
+    assert classify_path("backend/app/services/forecast_accountability_service.py") == "IR-3"
+    assert classify_path("backend/alembic/versions/052_balance_provider_account_mappings.py") == (
+        "IR-4"
+    )
+    assert classify_path("frontend/src/app/App.tsx") == "IR-5"
+    assert classify_path("docs/security.md") == "IR-6"
+    assert classify_path("README.md") == "IR-6"
+    assert classify_path("UNASSIGNED_ROOT_FILE.txt") is None
+
+
+def test_migration_parity_retargets_only_the_database_name():
+    result = database_url_for(
+        "postgresql+asyncpg://pfis:secret@localhost:5432/postgres?ssl=require",
+        "pfis_e2e",
+    )
+
+    assert result == ("postgresql+asyncpg://pfis:secret@localhost:5432/pfis_e2e?ssl=require")
+
+
+def test_current_worktree_inventory_has_no_unassigned_files():
+    root = Path(__file__).resolve().parents[2]
+    report = build_report(root)
+
+    assert sum(report["packet_counts"].values()) == report["total"]
+    assert report["unassigned"] == []
+
+
+def test_worktree_inventory_compares_committed_changes_from_base(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_git_paths(_workspace: Path, *arguments: str) -> list[str]:
+        calls.append(arguments)
+        if arguments == ("diff", "--name-only", "base-sha...HEAD"):
+            return ["frontend/src/app/App.tsx"]
+        return []
+
+    monkeypatch.setattr(check_worktree_inventory, "_git_paths", fake_git_paths)
+
+    report = check_worktree_inventory.build_report(Path("."), base_ref="base-sha")
+
+    assert report["total"] == 1
+    assert report["packet_counts"] == {"IR-5": 1}
+    assert calls == [
+        ("diff", "--name-only", "base-sha...HEAD"),
+        ("diff", "--name-only", "HEAD"),
+        ("ls-files", "--others", "--exclude-standard"),
+    ]
 
 
 def test_release_gate_requires_provider_control_identifiers():
@@ -285,3 +342,71 @@ def test_restore_drill_sanitizes_database_inspection_failures(monkeypatch):
             "source",
         )
     assert "password" not in str(error.value)
+
+
+def test_intelligence_gate_requires_attested_balance_cohort_and_quality():
+    assert validate_balance_reconciliation_report(None).status == "deferred"
+
+    report = {
+        "evaluation_version": "pfis-balance-reconciliation-1",
+        "manifest": {"status": "verified"},
+        "aggregate": {
+            "representative_interval_count": 100,
+            "representative_institution_count": 6,
+            "median_of_user_median_absolute_residual_pct": 0.5,
+            "p95_of_user_p95_absolute_residual_pct": 2.0,
+        },
+        "reports": [
+            {
+                "evaluation_version": "pfis-balance-reconciliation-1",
+                "cohort": "production_safe",
+                "user_id_hash": f"hash-{index}",
+                "interval_count": 10,
+            }
+            for index in range(10)
+        ],
+    }
+
+    result = validate_balance_reconciliation_report(report)
+    assert result.status == "passed"
+    assert result.evidence["representative_institutions"] == 6
+
+    duplicate_users = {
+        **report,
+        "reports": [
+            {
+                "evaluation_version": "pfis-balance-reconciliation-1",
+                "cohort": "production_safe",
+                "user_id_hash": "same-user",
+                "interval_count": 10,
+            }
+            for _ in range(10)
+        ],
+    }
+    assert validate_balance_reconciliation_report(duplicate_users).status == "deferred"
+
+
+def test_intelligence_gate_rejects_raw_balance_cohort_user_ids():
+    report = {
+        "evaluation_version": "pfis-balance-reconciliation-1",
+        "manifest": {"status": "verified"},
+        "aggregate": {
+            "representative_interval_count": 100,
+            "representative_institution_count": 6,
+            "median_of_user_median_absolute_residual_pct": 0.5,
+            "p95_of_user_p95_absolute_residual_pct": 2.0,
+        },
+        "reports": [
+            {
+                "evaluation_version": "pfis-balance-reconciliation-1",
+                "cohort": "production_safe",
+                "user_id": "raw-user-id",
+                "user_id_hash": "hash-1",
+                "interval_count": 100,
+            }
+        ],
+    }
+
+    result = validate_balance_reconciliation_report(report, minimum_users=1)
+    assert result.status == "failed"
+    assert result.name == "balance_reconciliation_privacy"

@@ -1,4 +1,6 @@
 import { createContext, useContext, useMemo, useState } from 'react';
+import { useAuth } from '@/features/auth/AuthContext';
+import { dateInputValueInTimezone } from '@/lib/format';
 
 interface WorkspaceContextValue {
   month: number;
@@ -13,14 +15,15 @@ interface WorkspaceContextValue {
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
-  const now = new Date();
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [year, setYear] = useState(now.getFullYear());
+  const { user } = useAuth();
+  const financialDate = dateInputValueInTimezone(user?.timezone ?? 'Asia/Kolkata');
+  const [financialYear, financialMonth] = financialDate.split('-').map(Number);
+  const [month, setMonth] = useState(financialMonth);
+  const [year, setYear] = useState(financialYear);
 
   const value = useMemo<WorkspaceContextValue>(() => {
-    const today = new Date();
-    const curMonth = today.getMonth() + 1;
-    const curYear = today.getFullYear();
+    const curMonth = financialMonth;
+    const curYear = financialYear;
     const isCurrentMonth = month === curMonth && year === curYear;
 
     return {
@@ -53,7 +56,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         setYear(y);
       },
     };
-  }, [month, year]);
+  }, [financialMonth, financialYear, month, year]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Search,
   Download,
@@ -28,11 +28,21 @@ import { useTransactions } from '@/features/workspace/queries';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useDashboardUi } from '@/app/DashboardUiContext';
+import { useSync } from '@/features/workspace/SyncContext';
 import { api } from '@/lib/api';
 import { formatSignedAmount, initials, relativeDateGroup } from '@/lib/format';
 import type { Transaction } from '@/lib/types';
 
 type TypeFilter = 'all' | 'review' | 'debit' | 'credit' | 'refund';
+
+const TYPE_FILTERS = new Set<TypeFilter>(['all', 'review', 'debit', 'credit', 'refund']);
+const DEFAULT_SORT_FIELD = 'transaction_date';
+const SORT_FIELDS = new Set([
+  'merchant_normalized',
+  'transaction_date',
+  'payment_method',
+  'amount',
+]);
 
 const GROUP_ORDER = ['Today', 'Yesterday', 'This week', 'Earlier'] as const;
 
@@ -42,16 +52,88 @@ const TONE_CLASS: Record<string, string> = {
   neutral: 'text-warning',
 };
 
+const LEDGER_SUBTYPE_LABELS: Record<string, string> = {
+  emi_conversion_purchase: 'EMI conversion debit',
+  emi_conversion_credit: 'EMI conversion credit',
+  emi_principal: 'EMI principal',
+  emi_interest: 'EMI interest',
+  emi_tax: 'EMI tax',
+  emi_processing_fee: 'EMI processing fee',
+  emi_fee_reversal: 'EMI fee reversal',
+  emi_preclosure_principal: 'EMI preclosure principal',
+  emi_preclosure_interest: 'EMI preclosure interest',
+};
+
+function transactionContext(transaction: Transaction) {
+  if (transaction.card_event === 'payment') {
+    return 'Card payment · excluded from spend';
+  }
+  if (transaction.ledger_subtype) {
+    const label =
+      LEDGER_SUBTYPE_LABELS[transaction.ledger_subtype] ??
+      transaction.ledger_subtype.replaceAll('_', ' ');
+    return transaction.is_accounting_adjustment
+      ? `${label} · excluded from spend`
+      : `${label} · ${transaction.category_name || 'Uncategorized'}`;
+  }
+  return transaction.category_name || 'Uncategorized';
+}
+
 export function TransactionsSection({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
   const { month, year } = useWorkspace();
   const transactions = useTransactions();
-  const { categoryDrill, setCategoryDrill, explorerSearch, setExplorerSearch, focusReview } =
-    useDashboardUi();
+  const {
+    categoryDrill,
+    setCategoryDrill,
+    explorerSearch,
+    setExplorerSearch,
+    focusReview,
+    setQuickAddOpen,
+  } = useDashboardUi();
+  const { running, runSync } = useSync();
   const currency = user?.currency ?? 'INR';
 
-  const [type, setType] = useState<TypeFilter>('all');
-  const [sorting, setSorting] = useState<SortingState>([{ id: 'transaction_date', desc: true }]);
+  const [type, setType] = useState<TypeFilter>(() => {
+    const value = new URLSearchParams(window.location.search).get('type') as TypeFilter | null;
+    return value && TYPE_FILTERS.has(value) ? value : 'all';
+  });
+  const [sorting, setSorting] = useState<SortingState>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedField = params.get('sort') || DEFAULT_SORT_FIELD;
+    const field = SORT_FIELDS.has(requestedField) ? requestedField : DEFAULT_SORT_FIELD;
+    const direction = params.get('direction');
+    return [{ id: field, desc: direction !== 'asc' }];
+  });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (type === 'all') params.delete('type');
+    else params.set('type', type);
+
+    const query = explorerSearch.trim();
+    if (query) params.set('q', query);
+    else params.delete('q');
+
+    if (categoryDrill?.categoryId) params.set('category', categoryDrill.categoryId);
+    else params.delete('category');
+
+    const sort = sorting[0];
+    if (!sort || (sort.id === DEFAULT_SORT_FIELD && sort.desc)) {
+      params.delete('sort');
+      params.delete('direction');
+    } else if (sort) {
+      params.set('sort', sort.id);
+      params.set('direction', sort.desc ? 'desc' : 'asc');
+    }
+
+    const queryString = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${queryString ? `?${queryString}` : ''}${window.location.hash}`,
+    );
+  }, [categoryDrill, explorerSearch, sorting, type]);
 
   const filtered = useMemo(() => {
     let list = transactions.data ?? [];
@@ -100,7 +182,7 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
                 {row.original.merchant_normalized || row.original.merchant_raw || 'Unknown'}
               </p>
               <p className="truncate text-xs text-muted-foreground">
-                {row.original.category_name || 'Uncategorized'}
+                {transactionContext(row.original)}
               </p>
             </div>
           </div>
@@ -134,6 +216,10 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
         cell: ({ row }) =>
           row.original.is_transfer ? (
             <Badge variant="info">Transfer</Badge>
+          ) : row.original.is_accounting_adjustment ? (
+            <Badge variant="outline">Adjustment</Badge>
+          ) : row.original.card_event === 'payment' ? (
+            <Badge variant="info">Payment</Badge>
           ) : row.original.reviewed_flag ? (
             <Badge variant="success">Ready</Badge>
           ) : (
@@ -215,7 +301,7 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-9"
-                placeholder="Search transactions..."
+                placeholder="Search transactions…"
                 value={explorerSearch}
                 onChange={(e) => setExplorerSearch(e.target.value)}
               />
@@ -250,9 +336,34 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
             </div>
           ) : filtered.length === 0 ? (
             <EmptyState
-              icon="🔎"
-              title="No transactions match"
-              description="Try clearing filters or syncing your inbox."
+              icon={<FileText className="h-5 w-5" aria-hidden="true" />}
+              title={hasFilters ? 'No transactions match these filters' : 'Your ledger is ready'}
+              description={
+                hasFilters
+                  ? 'Clear a filter, or return to the full ledger.'
+                  : 'Add a verified activity or sync your inbox to build the evidence trail.'
+              }
+              action={
+                hasFilters ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setCategoryDrill(null);
+                      setType('all');
+                      setExplorerSearch('');
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                ) : (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button onClick={() => setQuickAddOpen(true)}>Add activity</Button>
+                    <Button variant="outline" onClick={runSync} disabled={running}>
+                      Sync inbox
+                    </Button>
+                  </div>
+                )
+              }
             />
           ) : (
             <>
@@ -279,7 +390,7 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
                                 {t.merchant_normalized || t.merchant_raw || 'Unknown'}
                               </p>
                               <p className="truncate text-xs text-muted-foreground">
-                                {t.category_name || 'Uncategorized'} / {t.transaction_date}
+                                {transactionContext(t)} / {t.transaction_date}
                               </p>
                             </div>
                             <span className={`text-sm font-bold ${TONE_CLASS[amount.tone]}`}>

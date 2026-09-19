@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   DEFAULT_WORKSPACE,
   dashboardSection,
@@ -37,13 +45,17 @@ const DashboardUiContext = createContext<DashboardUiContextValue | null>(null);
 
 export function DashboardUiProvider({ children }: { children: React.ReactNode }) {
   const initialSection = sectionFromHash(window.location.hash) ?? 'overview';
+  const initialParams = new URLSearchParams(window.location.search);
+  const initialCategory = initialParams.get('category');
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(
     workspaceForSection(initialSection) ?? DEFAULT_WORKSPACE,
   );
   const [activeSection, setActiveSection] = useState(initialSection);
   const [pendingSection, setPendingSection] = useState<DashboardSectionId | null>(initialSection);
-  const [categoryDrill, setCategoryDrill] = useState<CategoryDrill | null>(null);
-  const [explorerSearch, setExplorerSearch] = useState('');
+  const [categoryDrill, setCategoryDrill] = useState<CategoryDrill | null>(
+    initialCategory ? { categoryId: initialCategory, label: initialCategory } : null,
+  );
+  const [explorerSearch, setExplorerSearch] = useState(initialParams.get('q') ?? '');
   const [focusedReviewId, setFocusedReviewId] = useState<string | null>(null);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [commandOpen, setCommandOpenState] = useState(false);
@@ -84,7 +96,9 @@ export function DashboardUiProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     if (!pendingSection) return;
     const frame = window.requestAnimationFrame(() => {
-      document.getElementById(pendingSection)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document
+        .getElementById(pendingSection)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       setPendingSection(null);
     });
     return () => window.cancelAnimationFrame(frame);

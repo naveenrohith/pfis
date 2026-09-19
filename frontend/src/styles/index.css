@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    color-scheme: light;
     --background: 45 31% 95%;
     --foreground: 168 22% 11%;
 
@@ -54,6 +55,7 @@
   }
 
   .dark {
+    color-scheme: dark;
     --background: 164 18% 8%;
     --foreground: 45 19% 92%;
 
@@ -169,7 +171,15 @@
   }
 
   .dashboard-surface {
-    @apply rounded-[var(--radius-lg)] bg-card text-card-foreground;
+    @apply rounded-[var(--radius-lg)] bg-card text-card-foreground ring-1 ring-border/60;
+  }
+
+  .workspace-context-strip {
+    box-shadow: 0 8px 24px hsl(var(--shadow-color) / 0.05);
+  }
+
+  .decision-strip {
+    box-shadow: 0 4px 16px hsl(var(--shadow-color) / 0.04);
   }
 
   .dashboard-row {

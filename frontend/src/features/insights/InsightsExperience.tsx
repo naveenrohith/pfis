@@ -1,26 +1,32 @@
-import { lazy, Suspense } from 'react';
-import { ArrowUpRight, Sparkles } from 'lucide-react';
+import { Suspense } from 'react';
+import { ArrowUpRight } from 'lucide-react';
 import { useDashboardUi } from '@/app/DashboardUiContext';
-import { PageIntro } from '@/components/system';
-import { Badge } from '@/components/ui/Badge';
+import { PageIntro, WorkspaceContextBar } from '@/components/system';
 import { Button } from '@/components/ui/Button';
 import { Tabs } from '@/components/ui/Tabs';
 import { useSummary } from '@/features/workspace/queries';
+import { lazyWithRetry } from '@/lib/lazyWithRetry';
 
-const InsightsSection = lazy(() =>
-  import('@/features/insights/InsightsSection').then((module) => ({
-    default: module.InsightsSection,
-  })),
+const InsightsSection = lazyWithRetry(
+  () =>
+    import('@/features/insights/InsightsSection').then((module) => ({
+      default: module.InsightsSection,
+    })),
+  'insights-overview',
 );
-const CategoryIntelligenceSection = lazy(() =>
-  import('@/features/categories/CategoryIntelligenceSection').then((module) => ({
-    default: module.CategoryIntelligenceSection,
-  })),
+const CategoryIntelligenceSection = lazyWithRetry(
+  () =>
+    import('@/features/categories/CategoryIntelligenceSection').then((module) => ({
+      default: module.CategoryIntelligenceSection,
+    })),
+  'insights-categories',
 );
-const MerchantIntelligenceSection = lazy(() =>
-  import('@/features/merchants/MerchantIntelligenceSection').then((module) => ({
-    default: module.MerchantIntelligenceSection,
-  })),
+const MerchantIntelligenceSection = lazyWithRetry(
+  () =>
+    import('@/features/merchants/MerchantIntelligenceSection').then((module) => ({
+      default: module.MerchantIntelligenceSection,
+    })),
+  'insights-merchants',
 );
 
 type InsightsView = 'insights' | 'categories' | 'merchants';
@@ -33,38 +39,33 @@ export function InsightsExperience() {
   const leadingCategory = summary.data?.category_breakdown?.[0];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <PageIntro
         eyebrow="Insights"
-        title="See what is really driving the month."
-        description="Move from totals to causes: the categories, merchants, days, and recurring patterns behind your position."
+        title={leadingCategory ? `Start with ${leadingCategory.name}.` : 'See what is driving the month.'}
+        description="Follow the largest measured driver to its ledger evidence, then review recurring and unusual patterns."
         action={
-          <div className="flex flex-wrap items-center gap-2">
-            {leadingCategory ? (
-              <Badge variant="info">
-                <Sparkles className="h-3.5 w-3.5" /> Leading: {leadingCategory.name}
-              </Badge>
-            ) : null}
-            <Button variant="outline" onClick={() => scrollTo('transactions')}>
-              Open ledger <ArrowUpRight className="h-4 w-4" />
-            </Button>
-          </div>
+          <Button variant="outline" onClick={() => scrollTo('transactions')}>
+            Open ledger <ArrowUpRight className="h-4 w-4" />
+          </Button>
         }
       />
 
-      <Tabs
-        ariaLabel="Insight views"
-        value={view}
-        onValueChange={(value) => scrollTo(value)}
-        options={[
-          { value: 'insights', label: 'Drivers' },
-          { value: 'categories', label: 'Categories' },
-          { value: 'merchants', label: 'Merchants' },
-        ]}
-        className="max-w-max"
-      />
+      <WorkspaceContextBar label="Insight views">
+        <Tabs
+          ariaLabel="Insight views"
+          value={view}
+          onValueChange={(value) => scrollTo(value)}
+          options={[
+            { value: 'insights', label: 'Drivers' },
+            { value: 'categories', label: 'Categories' },
+            { value: 'merchants', label: 'Merchants' },
+          ]}
+          className="w-full max-w-full sm:w-auto sm:max-w-max"
+        />
+      </WorkspaceContextBar>
 
-      <div id={view} className="animate-fade-in scroll-mt-28">
+      <div id={view} className="animate-fade-in scroll-mt-[10.5rem] lg:scroll-mt-[11.5rem]">
         <Suspense fallback={<InsightsSkeleton label={view} />}>
           {view === 'insights' ? <InsightsSection embedded /> : null}
           {view === 'categories' ? <CategoryIntelligenceSection embedded /> : null}

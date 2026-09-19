@@ -1,31 +1,40 @@
-import { lazy, Suspense } from 'react';
-import { ListChecks, Plus } from 'lucide-react';
-import { PageIntro } from '@/components/system';
+import { Suspense } from 'react';
+import { ListChecks } from 'lucide-react';
+import { PageIntro, WorkspaceContextBar } from '@/components/system';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Tabs } from '@/components/ui/Tabs';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { useTransactions } from '@/features/workspace/queries';
+import { lazyWithRetry } from '@/lib/lazyWithRetry';
 
-const ReviewSection = lazy(() =>
-  import('@/features/review/ReviewSection').then((module) => ({ default: module.ReviewSection })),
+const ReviewSection = lazyWithRetry(
+  () =>
+    import('@/features/review/ReviewSection').then((module) => ({
+      default: module.ReviewSection,
+    })),
+  'activity-review',
 );
-const TimelineSection = lazy(() =>
-  import('@/features/timeline/TimelineSection').then((module) => ({
-    default: module.TimelineSection,
-  })),
+const TimelineSection = lazyWithRetry(
+  () =>
+    import('@/features/timeline/TimelineSection').then((module) => ({
+      default: module.TimelineSection,
+    })),
+  'activity-timeline',
 );
-const TransactionsSection = lazy(() =>
-  import('@/features/transactions/TransactionsSection').then((module) => ({
-    default: module.TransactionsSection,
-  })),
+const TransactionsSection = lazyWithRetry(
+  () =>
+    import('@/features/transactions/TransactionsSection').then((module) => ({
+      default: module.TransactionsSection,
+    })),
+  'activity-transactions',
 );
 
 type ActivityView = 'transactions' | 'review' | 'timeline';
 
 export function ActivityExperience() {
   const transactions = useTransactions();
-  const { activeSection, scrollTo, setQuickAddOpen } = useDashboardUi();
+  const { activeSection, scrollTo } = useDashboardUi();
   const pendingCount = (transactions.data ?? []).filter(
     (transaction) => !transaction.reviewed_flag,
   ).length;
@@ -33,7 +42,7 @@ export function ActivityExperience() {
     activeSection === 'review' || activeSection === 'timeline' ? activeSection : 'transactions';
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <PageIntro
         eyebrow="Activity"
         title="Follow every movement of money."
@@ -47,26 +56,25 @@ export function ActivityExperience() {
             ) : (
               <Badge variant="success">Queue clear</Badge>
             )}
-            <Button onClick={() => setQuickAddOpen(true)}>
-              <Plus className="h-4 w-4" /> Add activity
-            </Button>
           </div>
         }
       />
 
-      <Tabs
-        ariaLabel="Activity views"
-        value={view}
-        onValueChange={(value) => scrollTo(value)}
-        options={[
-          { value: 'transactions', label: 'Transactions' },
-          { value: 'review', label: pendingCount ? `Review · ${pendingCount}` : 'Review' },
-          { value: 'timeline', label: 'Timeline' },
-        ]}
-        className="max-w-max"
-      />
+      <WorkspaceContextBar label="Activity views">
+        <Tabs
+          ariaLabel="Activity views"
+          value={view}
+          onValueChange={(value) => scrollTo(value)}
+          options={[
+            { value: 'transactions', label: 'Transactions' },
+            { value: 'review', label: pendingCount ? `Review (${pendingCount})` : 'Review' },
+            { value: 'timeline', label: 'Timeline' },
+          ]}
+          className="w-full max-w-full sm:w-auto sm:max-w-max"
+        />
+      </WorkspaceContextBar>
 
-      <div id={view} className="animate-fade-in scroll-mt-28">
+      <div id={view} className="animate-fade-in scroll-mt-[10.5rem] lg:scroll-mt-[11.5rem]">
         <Suspense
           fallback={
             <div

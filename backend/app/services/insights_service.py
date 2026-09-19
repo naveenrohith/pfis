@@ -7,7 +7,7 @@ Insight Types:
 2. Top merchant identification
 3. Month-over-month spending trend comparison
 4. Recurring payment detection (same merchant + similar amount + regular interval)
-5. Spending anomaly detection (unusual spikes vs average)
+5. Spending anomaly detection (daily spikes plus category/merchant baselines)
 6. Daily spending trend data (for line chart)
 7. Savings rate computation
 """
@@ -16,15 +16,40 @@ import logging
 import statistics
 from calendar import monthrange
 from datetime import date
+from typing import Literal, cast
 
-from sqlalchemy import case, extract, func, select
+from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import Transaction
+from app.schemas.intelligence import DataSufficiency, EvidenceItem, SpendingAnomaly
+from app.services.anomaly_adjudication_service import AnomalyAdjudicationService
+from app.services.financial_clock import user_financial_today
 from app.services.knowledge.recurring_knowledge import RecurringPattern, RecurringPatternService
+from app.services.transaction_aggregates import (
+    financial_activity_predicate,
+    income_effect_expression,
+    spend_effect_expression,
+    spend_event_predicate,
+)
 
 logger = logging.getLogger(__name__)
+
+ANOMALY_RULESET_VERSION = "pfis-anomaly-2"
+ANOMALY_HISTORY_MONTHS = 24
+ANOMALY_MIN_HISTORY_PERIODS = 3
+ANOMALY_MIN_CURRENT_AMOUNT = 50.0
+ANOMALY_MIN_DELTA = 100.0
+ANOMALY_MIN_RELATIVE_DELTA = 0.25
+ANOMALY_ROBUST_SCORE = 3.5
+
+
+def _shift_month(month: int, year: int, offset: int) -> tuple[int, int]:
+    """Shift a calendar month without relying on server-local dates."""
+    absolute = year * 12 + month - 1 + offset
+    shifted_year, shifted_month = divmod(absolute, 12)
+    return shifted_month + 1, shifted_year
 
 
 class InsightsService:
@@ -32,6 +57,30 @@ class InsightsService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def anomalies_for_period(
+        self, user_id: str, month: int, year: int
+    ) -> list[SpendingAnomaly]:
+        """Return the server-derived anomaly set used for adjudication."""
+
+        return await self._anomaly_candidates(user_id, month, year)
+
+    async def anomaly_samples_for_period(
+        self, user_id: str, month: int, year: int, *, limit: int = 4
+    ) -> list[SpendingAnomaly]:
+        """Return bounded non-alert samples for balanced anomaly evaluation."""
+
+        candidates = await self._anomaly_candidates(user_id, month, year, include_non_alert=True)
+        samples = [candidate for candidate in candidates if not candidate.predicted_alert]
+        adjudications = await AnomalyAdjudicationService(self.db).latest_for(
+            user_id, [sample.id for sample in samples]
+        )
+        for sample in samples:
+            adjudication = adjudications.get(sample.id)
+            if adjudication:
+                sample.adjudication = adjudication.decision
+                sample.adjudication_note = adjudication.note
+        return samples[:limit]
 
     async def generate_insights(
         self,
@@ -58,11 +107,21 @@ class InsightsService:
         top_merchants = await self._top_merchants(user_id, month, year)
         daily_trend = await self._daily_spending_trend(user_id, month, year)
         period_end = date(year, month, monthrange(year, month)[1])
+        today = await user_financial_today(self.db, user_id)
         recurring = (
             self._recurring_payload(recurring_patterns)
             if recurring_patterns is not None
-            else await self._detect_recurring(user_id, min(period_end, date.today()))
+            else await self._detect_recurring(user_id, min(period_end, today))
         )
+        anomalies = await self._spending_anomalies(user_id, month, year)
+        adjudications = await AnomalyAdjudicationService(self.db).latest_for(
+            user_id, [anomaly.id for anomaly in anomalies]
+        )
+        for anomaly in anomalies:
+            adjudication = adjudications.get(anomaly.id)
+            if adjudication:
+                anomaly.adjudication = adjudication.decision
+                anomaly.adjudication_note = adjudication.note
         prev = await self._monthly_aggregates(user_id, prev_month, prev_year)
         prev_spend = prev["spend"]
         prev_income = prev["income"]
@@ -220,7 +279,22 @@ class InsightsService:
                         }
                     )
 
-        # 7. Average parse confidence
+        # 7. Category and merchant baseline departures
+        for anomaly in anomalies[:4]:
+            insights.append(
+                {
+                    "type": "baseline_anomaly",
+                    "icon": "📈",
+                    "title": f"{anomaly.label} is above its usual range",
+                    "description": (
+                        f"{anomaly.current_amount:,.0f} this month vs "
+                        f"{anomaly.baseline_amount:,.0f} typical ({anomaly.delta_pct:.0f}% higher)."
+                    ),
+                    "severity": anomaly.severity,
+                }
+            )
+
+        # 8. Average parse confidence
         if avg_confidence is not None and avg_confidence < 0.8:
             insights.append(
                 {
@@ -232,7 +306,7 @@ class InsightsService:
                 }
             )
 
-        # 8. Category diversity
+        # 9. Category diversity
         if len(categories) >= 4:
             # Check if top category is > 50% — low diversification
             top_pct = categories[0]["total"] / current_spend * 100 if current_spend > 0 else 0
@@ -257,8 +331,10 @@ class InsightsService:
                 "total_income": current_income,
                 "prev_spend": prev_spend,
                 "prev_income": prev_income,
+                "anomaly_count": len(anomalies),
                 "insight_count": len(insights),
             },
+            "anomalies": [anomaly.model_dump() for anomaly in anomalies],
         }
 
     # ──────────────────────────────────────────
@@ -275,33 +351,17 @@ class InsightsService:
         result = await self.db.execute(
             select(
                 func.coalesce(
-                    func.sum(
-                        case(
-                            (
-                                Transaction.transaction_type == TransactionType.DEBIT,
-                                Transaction.amount,
-                            ),
-                            else_=0,
-                        )
-                    ),
+                    func.sum(spend_effect_expression()),
                     0,
                 ).label("spend"),
                 func.coalesce(
-                    func.sum(
-                        case(
-                            (
-                                Transaction.transaction_type == TransactionType.CREDIT,
-                                Transaction.amount,
-                            ),
-                            else_=0,
-                        )
-                    ),
+                    func.sum(income_effect_expression()),
                     0,
                 ).label("income"),
                 func.avg(Transaction.confidence_score).label("avg_confidence"),
             ).where(
                 Transaction.user_id == user_id,
-                Transaction.is_transfer.is_(False),
+                financial_activity_predicate(),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -320,19 +380,19 @@ class InsightsService:
             select(
                 Category.name,
                 Category.icon,
-                func.sum(Transaction.amount).label("total"),
+                func.sum(spend_effect_expression()).label("total"),
                 func.count(Transaction.id).label("count"),
             )
             .join(Category, Transaction.category_id == Category.id, isouter=True)
             .where(
                 Transaction.user_id == user_id,
-                Transaction.transaction_type == TransactionType.DEBIT,
-                Transaction.is_transfer.is_(False),
+                spend_event_predicate(),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
             .group_by(Category.name, Category.icon)
-            .order_by(func.sum(Transaction.amount).desc())
+            .having(func.sum(spend_effect_expression()) > 0)
+            .order_by(func.sum(spend_effect_expression()).desc())
         )
         return [
             {
@@ -348,18 +408,18 @@ class InsightsService:
         result = await self.db.execute(
             select(
                 Transaction.merchant_normalized,
-                func.sum(Transaction.amount).label("total"),
+                func.sum(spend_effect_expression()).label("total"),
                 func.count(Transaction.id).label("count"),
             )
             .where(
                 Transaction.user_id == user_id,
-                Transaction.transaction_type == TransactionType.DEBIT,
-                Transaction.is_transfer.is_(False),
+                spend_event_predicate(),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
             .group_by(Transaction.merchant_normalized)
-            .order_by(func.sum(Transaction.amount).desc())
+            .having(func.sum(spend_effect_expression()) > 0)
+            .order_by(func.sum(spend_effect_expression()).desc())
             .limit(5)
         )
         return [
@@ -376,13 +436,12 @@ class InsightsService:
         result = await self.db.execute(
             select(
                 Transaction.transaction_date,
-                func.sum(Transaction.amount).label("total"),
+                func.sum(spend_effect_expression()).label("total"),
                 func.count(Transaction.id).label("count"),
             )
             .where(
                 Transaction.user_id == user_id,
-                Transaction.transaction_type == TransactionType.DEBIT,
-                Transaction.is_transfer.is_(False),
+                spend_event_predicate(),
                 extract("month", Transaction.transaction_date) == month,
                 extract("year", Transaction.transaction_date) == year,
             )
@@ -400,9 +459,10 @@ class InsightsService:
             daily_map[d.day] = {"total": float(row.total), "count": row.count}
 
         trend = []
+        today = await user_financial_today(self.db, user_id)
         for day in range(1, days_in_month + 1):
             d = date(year, month, day)
-            if d > date.today():
+            if d > today:
                 break  # Don't include future dates
             entry = daily_map.get(day, {"total": 0, "count": 0})
             trend.append(
@@ -415,6 +475,177 @@ class InsightsService:
             )
 
         return trend
+
+    async def _anomaly_candidates(
+        self,
+        user_id: str,
+        month: int,
+        year: int,
+        *,
+        include_non_alert: bool = False,
+    ) -> list[SpendingAnomaly]:
+        """Build alert and reviewable non-alert candidates from the same baseline."""
+
+        history_months = [
+            _shift_month(month, year, offset) for offset in range(-ANOMALY_HISTORY_MONTHS, 0)
+        ]
+        history_start = date(history_months[0][1], history_months[0][0], 1)
+        current_end = date(year, month, monthrange(year, month)[1])
+        result = await self.db.execute(
+            select(
+                Transaction.transaction_date,
+                spend_effect_expression().label("spend_amount"),
+                Transaction.merchant_normalized,
+                Transaction.merchant_raw,
+                Category.name.label("category_name"),
+            )
+            .join(Category, Transaction.category_id == Category.id, isouter=True)
+            .where(
+                Transaction.user_id == user_id,
+                spend_event_predicate(),
+                Transaction.transaction_date >= history_start,
+                Transaction.transaction_date <= current_end,
+            )
+        )
+
+        # (kind, label) -> month -> (amount, count)
+        monthly: dict[tuple[str, str], dict[tuple[int, int], list[float]]] = {}
+        for row in result.all():
+            label_category = (row.category_name or "Uncategorized").strip() or "Uncategorized"
+            label_merchant = (
+                row.merchant_normalized or row.merchant_raw or "Unknown"
+            ).strip() or "Unknown"
+            key_month = (row.transaction_date.year, row.transaction_date.month)
+            amount = float(row.spend_amount or 0)
+            for key in (("category", label_category), ("merchant", label_merchant)):
+                bucket = monthly.setdefault(key, {}).setdefault(key_month, [0.0, 0.0])
+                bucket[0] += amount
+                bucket[1] += 1
+
+        current_key = (year, month)
+        candidates: list[SpendingAnomaly] = []
+        for (kind, label), values in monthly.items():
+            current_amount, current_count = values.get(current_key, [0.0, 0.0])
+            if current_amount < ANOMALY_MIN_CURRENT_AMOUNT:
+                continue
+            history_values = [values.get(period, [0.0, 0.0])[0] for period in history_months]
+            observed_history = [value for value in history_values if value > 0]
+            if len(observed_history) < ANOMALY_MIN_HISTORY_PERIODS:
+                continue
+            same_calendar_month_history = [
+                values.get(period, [0.0, 0.0])[0]
+                for period in history_months
+                if period[0] == month and values.get(period, [0.0, 0.0])[0] > 0
+            ]
+            baseline_values = (
+                same_calendar_month_history
+                if len(same_calendar_month_history) >= 2
+                else observed_history
+            )
+            baseline_method = (
+                "same_calendar_month"
+                if len(same_calendar_month_history) >= 2
+                else "rolling_non_zero"
+            )
+            baseline = statistics.median(baseline_values)
+            delta = current_amount - baseline
+            mad = statistics.median(abs(value - baseline) for value in baseline_values)
+            robust_score = (
+                0.6745 * delta / mad
+                if mad > 0
+                else delta / max(baseline, ANOMALY_MIN_CURRENT_AMOUNT)
+            )
+            delta_pct = delta / baseline * 100 if baseline else 0.0
+            is_alert = (
+                delta > 0
+                and delta >= max(ANOMALY_MIN_DELTA, baseline * ANOMALY_MIN_RELATIVE_DELTA)
+                and (robust_score >= ANOMALY_ROBUST_SCORE or delta_pct >= 50)
+            )
+            if not is_alert and not include_non_alert:
+                continue
+            confidence = min(
+                0.95 if is_alert else 0.9,
+                0.45
+                + min(len(baseline_values), ANOMALY_HISTORY_MONTHS) * 0.06
+                + min(max(robust_score, 0.0), 5.0) * 0.04,
+            )
+            data_sufficiency = cast(
+                DataSufficiency, "high" if len(baseline_values) >= 5 else "medium"
+            )
+            anomaly_kind = cast(Literal["category", "merchant"], kind)
+            anomaly_id = (
+                f"{kind}:{label.casefold()}:{year:04d}-{month:02d}"
+                if is_alert
+                else f"sample:{kind}:{label.casefold()}:{year:04d}-{month:02d}"
+            )
+            positive_delta = max(delta, 0.0)
+            positive_delta_pct = max(delta_pct, 0.0)
+            candidates.append(
+                SpendingAnomaly(
+                    id=anomaly_id,
+                    kind=anomaly_kind,
+                    predicted_alert=is_alert,
+                    label=label,
+                    current_amount=round(current_amount, 2),
+                    baseline_amount=round(baseline, 2),
+                    delta_amount=round(positive_delta, 2),
+                    delta_pct=round(positive_delta_pct, 1),
+                    robust_score=round(max(robust_score, 0.0), 2),
+                    history_periods=len(observed_history),
+                    transaction_count=int(current_count),
+                    confidence=round(confidence, 3),
+                    data_sufficiency=data_sufficiency,
+                    evidence=[
+                        EvidenceItem(label="Current month", value=f"{current_amount:,.2f}"),
+                        EvidenceItem(
+                            label="Baseline",
+                            value=f"{baseline:,.2f} ({baseline_method.replace('_', ' ')})",
+                        ),
+                        EvidenceItem(
+                            label="Observed history", value=f"{len(observed_history)} months"
+                        ),
+                        EvidenceItem(
+                            label="Baseline sample", value=f"{len(baseline_values)} months"
+                        ),
+                    ],
+                    assumptions=[
+                        (
+                            "Baseline uses the median of repeated same-calendar-month observations."
+                            if baseline_method == "same_calendar_month"
+                            else "Baseline uses the median of non-zero observed months because repeated same-calendar-month history is insufficient."
+                        ),
+                        "Refunds reduce spend and transfers/bookkeeping are excluded.",
+                        (
+                            "A departure is a review signal, not proof of fraud or an error."
+                            if is_alert
+                            else "PFIS did not raise an alert under the current materiality thresholds."
+                        ),
+                    ],
+                    severity="warning" if is_alert else "info",
+                    ruleset_version=ANOMALY_RULESET_VERSION,
+                )
+            )
+
+        candidates.sort(
+            key=lambda item: (
+                -int(item.predicted_alert),
+                -item.delta_amount if item.predicted_alert else -item.current_amount,
+                item.kind,
+                item.label.casefold(),
+            )
+        )
+        if not include_non_alert:
+            return candidates[:8]
+        alerts = [candidate for candidate in candidates if candidate.predicted_alert]
+        non_alerts = [candidate for candidate in candidates if not candidate.predicted_alert]
+        return [*alerts[:8], *non_alerts[:8]]
+
+    async def _spending_anomalies(
+        self, user_id: str, month: int, year: int
+    ) -> list[SpendingAnomaly]:
+        """Find material category/merchant departures from six months of history."""
+
+        return await self._anomaly_candidates(user_id, month, year)
 
     async def _detect_recurring(self, user_id: str, as_of: date | None = None) -> list[dict]:
         """Return the shared recurring-stream read model for all PFIS surfaces."""

@@ -26,7 +26,8 @@ Gmail/demo raw email
   -> transaction deduplication
   -> transaction storage
   -> knowledge rules (evidence, cadence, confidence, provenance)
-  -> financial intelligence (stability, forecast, recommendations)
+  -> temporal expected/observed events -> financial intelligence (stability, forecast, recommendations)
+  -> immutable forecast snapshot -> closed-period outcome evaluation
   -> premium workspace, reports
 ```
 
@@ -45,6 +46,42 @@ Connector
 
 - Route modules validate HTTP inputs and call services.
 - `TransactionService` owns transaction create/update/delete, dedup, correction learning, and summaries.
+- `FinancialPositionService` owns statement ingestion/reconciliation, verified
+  account positions, Cash Plan inputs, reserves, liabilities, schedules, and the
+  statement-backed card read model.
+- `RoadmapService` owns bills, safety checks, card disputes, privacy-separated
+  household annotations/settlements, and deterministic payoff comparison.
+- `TemporalEventService` recomputes one versioned expected-versus-observed
+  timeline from owned bills, commitments, schedules, reserves, card dates,
+  planned income, and recurring ledger evidence. It preserves typed source
+  references and never infers a ledger match from merchant/amount similarity.
+- `AccountService` owns explicit product identity, append-only balance
+  observations, and atomic two-leg transfers. Email ingestion and statement
+  review use the same account/transfer invariants.
+- `services/ledger_currency.py` owns the single-ledger-currency write policy,
+  shared-household compatibility checks, and aggregate integrity telemetry.
+  Every spend/income predicate correlates a transaction to its user's ledger
+  currency, while mismatches remain visible in Activity for explicit repair.
+- `services/financial_clock.py` and `utils/financial_time.py` own the user's
+  validated IANA timezone and financial calendar boundary. Financial services
+  must not use the server-local day for user decisions.
+- `PortableExportService` owns the versioned personal-data archive contract. It
+  uses an explicit include/exclude decision for every persisted table, applies
+  ownership filters before serialization, aliases shared-household actors, and
+  emits deterministic JSONL payloads with manifest checksums. Routes only
+  authorize, rate-limit, and stream the resulting no-store archive.
+- `retention_service.py` owns versioned, lineage-preserving source redaction.
+  User policy changes and the system retention scheduler feed the same durable
+  `raw_email_retention` job handler. Eligibility is resolved before an atomic
+  conditional update, and audit events are created only for rows actually
+  redacted, making retries and concurrent workers idempotent.
+- `account_deletion_service.py` owns the irreversible lifecycle boundary. It
+  commits a user write fence, cancels tracked jobs and ingestion, stops/revokes
+  connectors, applies a table-complete private-data inventory in reverse
+  dependency order, closes or transfers household participation, strips the
+  user to a non-login shared-evidence tombstone, and writes one non-secret
+  terminal audit event. The route owns recent-auth, typed-confirmation,
+  rate-limit, CSRF, and cookie-clearing concerns.
 - The global `Merchant` catalog is curated shared reference data. Explicit user corrections are
   stored as `UserMerchantRule` rows and take precedence during resolution without mutating other
   users' merchant behavior.
@@ -66,11 +103,26 @@ Connector
 - Parser modules extract transaction data only; they do not write database rows directly.
 - Parser persistence is atomic per source email: the ledger row, processed flag,
   summary invalidation, failure state, and pipeline events commit together.
+- A parsed source whose currency differs from the user ledger is retained as a
+  `ledger_currency_mismatch` failure at the persist stage; it never creates a
+  transaction and is not misreported as an unknown parser exception.
 - Background work is claimed from the database with an atomic lease. Every API
   replica may run a worker poller without executing the same queued job twice;
   queued jobs survive process restarts and unexpected failures retry within a
   bounded attempt budget.
 - Gmail sync stores raw email and sync metadata; processing happens through parser pipeline.
+- Gmail and statement arrival order is deliberately symmetric. A statement line
+  can match an earlier email transaction; a later email can also attach its
+  source evidence to a statement-created transaction. Both paths converge on
+  one ledger event and one statement match.
+- Fuel reconciliation is a controlled exception to exact amount matching:
+  explicit fuel merchant evidence may reconcile a lower real-time alert with a
+  bounded higher posted statement charge. The official posted amount replaces
+  the alert amount while a separate surcharge-waiver credit remains visible.
+  User merchant/category corrections are not overwritten.
+- Issuer-labelled EMI rows feed an evidence-only liability materializer. It
+  exposes the latest instalment anatomy and cumulative evidence but does not
+  infer rate, tenure, remaining instalments, outstanding balance, or progress.
 - Connector implementations fetch source records only; the ingestion coordinator owns sync orchestration, audit records, retry handling, and domain events.
 - Security helpers own JWT decoding, optional auth, user-scope resolution, and resource ownership checks.
 
@@ -81,6 +133,48 @@ Connector
 - New dashboard feature: add backend contract first, then frontend rendering.
 - New data source: produce raw records compatible with the parser pipeline.
 
+## Financial position read path
+
+```text
+Email alert ─┐
+             ├─> instrument resolver ─> canonical ledger event ─┐
+HDFC PDF ────┘                                                  ├─> account/card position
+verified balance snapshot ──────────────────────────────────────┤
+confirmed commitments + complete liability schedules ──────────┤
+approved reserve allocations ───────────────────────────────────┘
+                                                                └─> Cash Plan / Today horizon
+```
+
+## Temporal knowledge read path
+
+```text
+planned income ───────────────┐
+bills + commitments ─────────┤
+issuer liability schedules ──┤
+card milestones + reserves ──┼─> TemporalEventService
+recurring debit/credit rows ──┘       │
+                                      ├─> exact events (user/issuer evidence)
+                                      └─> estimated windows (pattern evidence)
+```
+
+The temporal model is a recomputable read model, not a second ledger and not a
+generic graph. Exact observations and pattern-derived expectations share one
+typed contract, but their confirmation modes, source IDs, confidence, and
+assumptions remain distinct. A paid source status without a matched transaction
+is represented as an explicit observation with a null transaction ID.
+
+Official statement values remain immutable statement-date observations. Any
+post-statement card value is labelled estimated and is produced only when all
+contributing activity is visible. Bank positions use the most recent verified
+snapshot, never a partial alert-derived “live” balance.
+
 ## Frontend Direction
+
+The React shell reconnects the user-scoped sync WebSocket with bounded
+exponential backoff and a heartbeat. Financial queries invalidate after sync,
+when connectivity returns, and when a tab becomes visible. Code-split route
+and nested feature failures caused by a newly deployed hashed bundle trigger
+one guarded shell reload per chunk; a workspace error boundary prevents an
+unexplained blank page or reload loop.
 
 The React/Vite app under `frontend/` is the canonical UI. FastAPI serves its production build at `/dashboard` and never falls back to the retired static dashboard. Production startup fails when the React build artifact is missing. Financial read models use event-driven cache invalidation with bounded staleness; only operational status views retain low-frequency foreground polling. See `docs/frontend.md`.

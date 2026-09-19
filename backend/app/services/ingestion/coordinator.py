@@ -22,6 +22,7 @@ from app.services.connectors.errors import (
 from app.services.connectors.gmail_connector import GmailConnector
 from app.services.connectors.source_record import SourceType
 from app.services.domain_events import DomainEvent, domain_event_dispatcher
+from app.services.ingestion.activity import require_ingestion_user, tracked_user_ingestion
 from app.services.ingestion.persistence import persist_source_records
 from app.services.sync_events import sync_event_manager
 
@@ -46,6 +47,16 @@ class IngestionCoordinator:
         gmail_account_id: str,
         mode: IngestionMode,
         max_results: int | None = 500,
+    ) -> dict[str, Any]:
+        async with tracked_user_ingestion(self.db, user_id):
+            return await self._run_gmail_tracked(user_id, gmail_account_id, mode, max_results)
+
+    async def _run_gmail_tracked(
+        self,
+        user_id: str,
+        gmail_account_id: str,
+        mode: IngestionMode,
+        max_results: int | None,
     ) -> dict[str, Any]:
         sync_run = SyncRun(user_id=user_id, status=SyncStatus.RUNNING)
         self.db.add(sync_run)
@@ -115,6 +126,8 @@ class IngestionCoordinator:
                 {
                     "fetched": batch.metrics.get("fetched", len(batch.records)),
                     "fallback": batch.cursor.fallback_used,
+                    "coverage_complete": batch.metrics.get("coverage_complete", True),
+                    "coverage_truncated": batch.metrics.get("coverage_truncated", False),
                 },
             )
 
@@ -124,7 +137,16 @@ class IngestionCoordinator:
                 SourceType.GMAIL,
                 batch.records,
             )
+            await require_ingestion_user(self.db, user_id)
             persist_stats["emails_fetched"] = int(batch.metrics.get("fetched", len(batch.records)))
+            persist_stats["coverage_complete"] = bool(batch.metrics.get("coverage_complete", True))
+            persist_stats["coverage_truncated"] = bool(
+                batch.metrics.get("coverage_truncated", False)
+            )
+            persist_stats["coverage_pages"] = int(batch.metrics.get("coverage_pages", 0))
+            persist_stats["coverage_result_size_estimate"] = int(
+                batch.metrics.get("coverage_result_size_estimate", 0)
+            )
             if batch.errors:
                 persist_stats["emails_failed"] += len(batch.errors)
                 persist_stats["errors"].extend(
@@ -187,6 +209,12 @@ class IngestionCoordinator:
             sync_run.emails_fetched = persist_stats["emails_fetched"]
             sync_run.emails_processed = persist_stats["emails_processed"]
             sync_run.emails_failed = persist_stats["emails_failed"]
+            sync_run.coverage_complete = bool(persist_stats.get("coverage_complete", True))
+            sync_run.coverage_truncated = bool(persist_stats.get("coverage_truncated", False))
+            sync_run.coverage_pages = int(persist_stats.get("coverage_pages", 0))
+            sync_run.coverage_result_size_estimate = int(
+                persist_stats.get("coverage_result_size_estimate", 0)
+            )
             sync_run.errors = json.dumps(persist_stats["errors"])
             await self.db.commit()
 
@@ -297,6 +325,8 @@ class IngestionCoordinator:
         sync_run.status = SyncStatus.FAILED
         sync_run.end_time = datetime.now(UTC)
         sync_run.emails_failed = 1
+        sync_run.coverage_complete = False
+        sync_run.coverage_truncated = False
         sync_run.errors = json.dumps([{"error": public_error, "error_type": error_type.value}])
         await self.db.commit()
         await self._audit(
@@ -360,6 +390,7 @@ def _credential_conditions(
     return [
         GmailAccount.id == gmail_account_id,
         GmailAccount.user_id == user_id,
+        GmailAccount.auto_sync_status != "disconnecting",
         (
             GmailAccount.access_token_ref.is_(None)
             if access_token_ref is None
