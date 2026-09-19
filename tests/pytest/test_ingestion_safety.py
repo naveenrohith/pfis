@@ -121,3 +121,35 @@ async def test_legacy_unscoped_message_id_is_reused_without_duplicate_evidence(
     assert stats["emails_stored"] == 0
     assert stats["emails_skipped_duplicate"] == 1
     assert len(stored) == 1
+
+
+async def test_legacy_and_scoped_message_ids_are_duplicate_safe(
+    client, test_session_factory
+):
+    user = await create_user(client, "legacy-and-scoped-message-id")
+    record = _record(user["id"], "dual-message")
+
+    async with test_session_factory() as db:
+        db.add_all(
+            [
+                RawEmail(
+                    user_id=user["id"],
+                    gmail_message_id="dual-message",
+                    subject="Existing legacy source",
+                ),
+                RawEmail(
+                    user_id=user["id"],
+                    gmail_message_id=f'{user["id"]}:dual-message',
+                    subject="Existing scoped source",
+                ),
+            ]
+        )
+        await db.commit()
+
+        stats = await persist_source_records(db, user["id"], SourceType.GMAIL, [record])
+        await db.commit()
+        stored = list(await db.scalars(select(RawEmail).where(RawEmail.user_id == user["id"])))
+
+    assert stats["emails_stored"] == 0
+    assert stats["emails_skipped_duplicate"] == 1
+    assert len(stored) == 2

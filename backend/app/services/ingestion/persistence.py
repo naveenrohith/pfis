@@ -55,12 +55,14 @@ async def persist_source_records(
             async with db.begin_nested():
                 if scoped_message_id:
                     existing = await db.execute(
-                        select(RawEmail).where(
+                        select(RawEmail.id)
+                        .where(
                             RawEmail.user_id == user_id,
                             RawEmail.gmail_message_id.in_(
                                 _message_id_candidates(user_id, record.source_message_id)
                             ),
                         )
+                        .limit(1)
                     )
                     if existing.scalar_one_or_none():
                         stats["emails_skipped_duplicate"] += 1
