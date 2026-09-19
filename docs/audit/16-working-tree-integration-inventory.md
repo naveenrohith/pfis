@@ -55,7 +55,10 @@ generated files appear or disappear; zero unassigned is the enforced gate.
 ### IR-0 — measurement and integration control
 
 - `.github/workflows/ci.yml`, `.github/mcp.json`, `.vscode/mcp.json`,
-  `Makefile`, and `scripts/**`;
+  `Makefile`, `scripts/**`, and the root release-gate JSON artifacts
+  (`parser-quality-report.json`, `intelligence-release-report.json`,
+  `intelligence-scorecard-report.json`, `promotion-manifest.json`,
+  `migration-parity.json`, and `worktree-inventory.json`);
 - `docs/audit/**`;
 - `tests/pytest/test_release_gates.py`;
 - `backend/app/observability.py`, `backend/app/api/routes/health.py`, and

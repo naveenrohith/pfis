@@ -59,6 +59,8 @@ def test_worktree_inventory_uses_ordered_packet_ownership():
         "IR-4"
     )
     assert classify_path("frontend/src/app/App.tsx") == "IR-5"
+    assert classify_path("parser-quality-report.json") == "IR-0"
+    assert classify_path("worktree-inventory.json") == "IR-0"
     assert classify_path("docs/security.md") == "IR-6"
     assert classify_path("README.md") == "IR-6"
     assert classify_path("UNASSIGNED_ROOT_FILE.txt") is None

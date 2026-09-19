@@ -15,6 +15,9 @@ PACKET_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"^\.github/workflows/ci\.yml$|^\.github/mcp\.json$|^\.vscode/mcp\.json$|"
             r"^Makefile$|^scripts/|^docs/audit/|^test-results/|"
+            r"^(parser-quality-report|intelligence-release-report|"
+            r"intelligence-scorecard-report|promotion-manifest|"
+            r"migration-parity|worktree-inventory)\.json$|"
             r"^tests/pytest/test_release_gates\.py$|"
             r"^backend/app/(observability\.py|api/routes/health\.py|schemas/operational\.py)$"
         ),
