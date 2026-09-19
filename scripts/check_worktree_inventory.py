@@ -24,10 +24,11 @@ PACKET_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"^tests/parser_corpus/|"
             r"^tests/fixtures/hdfc_deposit_statement_reviewed\.txt$|"
+            r"^backend/\.env\.example$|"
             r"^backend/app/services/(classification|connectors|gmail|ingestion|parser)/|"
             r"^backend/app/services/(hdfc.*statement_extractor|statement_detection)\.py$|"
             r"^backend/app/(models/(email|sync)\.py|api/routes/(gmail|jobs)\.py|schemas/job\.py)$|"
-            r"^backend/alembic/versions/(030|042)_|"
+            r"^backend/alembic/versions/(030|042|056)_|"
             r"^tests/pytest/test_(connector|gmail|ingestion|jobs|parser|pipeline|hdfc.*statement).*\.py$|"
             r"^docs/(parser|integrations)\.md$"
         ),
@@ -35,7 +36,7 @@ PACKET_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "IR-2",
         re.compile(
-            r"^backend/alembic/versions/(018|019|020|021|022|023|024|025|026|027|028|029|034|038|040)_|"
+            r"^backend/alembic/versions/(015|018|019|020|021|022|023|024|025|026|027|028|029|034|038|040)_|"
             r"^backend/app/(models/(account|transaction|user|workspace)\.py|"
             r"schemas/(account|auth|transaction|user)\.py|"
             r"api/routes/(accounts|auth|budgets|transactions|users)\.py)$|"

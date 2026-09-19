@@ -4,6 +4,7 @@ import {
   dateInputValueInTimezone,
   formatChartCurrency,
   formatCurrency,
+  formatDate,
   formatCompact,
   formatSignedAmount,
   initials,
@@ -39,6 +40,10 @@ describe('format helpers', () => {
 
   it('groups a far-past date as Earlier', () => {
     expect(relativeDateGroup('2000-01-01')).toBe('Earlier');
+  });
+
+  it('formats calendar dates consistently across runtime locales', () => {
+    expect(formatDate('2026-08-11')).toBe('11 Aug 2026');
   });
 
   it('groups today', () => {

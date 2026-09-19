@@ -57,6 +57,12 @@ const MONTH_NAMES = [
   'December',
 ];
 
+const DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+});
+
 export function monthLabel(month: number, year: number): string {
   return `${MONTH_NAMES[month - 1]} ${year}`;
 }
@@ -106,11 +112,7 @@ export function formatDate(value?: string | null): string {
   if (!value) return '—';
   const date = parseDateValue(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(date);
+  return DATE_FORMATTER.format(date);
 }
 
 export function dateInputValueInTimezone(timezone: string, instant = new Date()): string {

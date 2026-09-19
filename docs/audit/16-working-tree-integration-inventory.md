@@ -63,13 +63,14 @@ generated files appear or disappear; zero unassigned is the enforced gate.
 
 ### IR-1 — source and ingestion truth
 
-- `tests/parser_corpus/**` and the reviewed de-identified HDFC deposit fixture;
+- `tests/parser_corpus/**`, the reviewed de-identified HDFC deposit fixture, and
+  the backend OAuth/Gmail environment example;
 - `backend/app/services/{classification,connectors,gmail,ingestion,parser}/**`;
 - `backend/app/services/hdfc*_statement_extractor.py` and
   `backend/app/services/statement_detection.py`;
 - `backend/app/models/{email,sync}.py`, `backend/app/api/routes/{gmail,jobs}.py`,
   and `backend/app/schemas/job.py`;
-- migrations 030 and 042;
+- migrations 030, 042, and 056;
 - pytest modules whose basename begins with `test_connector`, `test_gmail`,
   `test_ingestion`, `test_jobs`, `test_parser`, `test_pipeline`, or
   `test_hdfc_statement`;
@@ -77,7 +78,7 @@ generated files appear or disappear; zero unassigned is the enforced gate.
 
 ### IR-2 — ledger and lifecycle truth
 
-- migrations 018-029 plus 034, 038, and 040;
+- migrations 015-029 plus 034, 038, and 040;
 - account, transaction, user, and workspace models/schemas and their account,
   auth, budget, transaction, and user routes;
 - services beginning with `account_`, `transaction_`, or `retention_`, plus
