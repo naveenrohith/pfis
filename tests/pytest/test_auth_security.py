@@ -598,7 +598,9 @@ async def test_gmail_callback_rejects_an_oauth_state_invalidated_by_disconnect(
     assert response.headers["location"] == "/dashboard?gmail_error=gmail_connection_invalidated"
     assert revoked == ["unclaimed-refresh-token"]
     async with test_session_factory() as db:
-        assert await db.scalar(select(GmailAccount).where(GmailAccount.user_id == user["id"])) is None
+        assert (
+            await db.scalar(select(GmailAccount).where(GmailAccount.user_id == user["id"])) is None
+        )
 
 
 async def test_gmail_disconnect_removes_local_grant_when_provider_is_unavailable(

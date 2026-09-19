@@ -123,9 +123,7 @@ async def test_legacy_unscoped_message_id_is_reused_without_duplicate_evidence(
     assert len(stored) == 1
 
 
-async def test_legacy_and_scoped_message_ids_are_duplicate_safe(
-    client, test_session_factory
-):
+async def test_legacy_and_scoped_message_ids_are_duplicate_safe(client, test_session_factory):
     user = await create_user(client, "legacy-and-scoped-message-id")
     record = _record(user["id"], "dual-message")
 

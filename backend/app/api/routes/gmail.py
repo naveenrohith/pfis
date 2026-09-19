@@ -163,9 +163,7 @@ async def gmail_connect(
             offline=True,
         )
         browser_token = token_urlsafe(32)
-        owner_result = await db.execute(
-            select(User).where(User.id == user_id).with_for_update()
-        )
+        owner_result = await db.execute(select(User).where(User.id == user_id).with_for_update())
         owner = owner_result.scalar_one_or_none()
         if owner is None or not owner.is_active or owner.deletion_started_at is not None:
             raise HTTPException(status_code=403, detail="User account is inactive")
@@ -279,9 +277,7 @@ async def gmail_callback(
             token_data,
             expected_nonce=decrypt_secret(nonce_ref),
         )
-        owner_result = await db.execute(
-            select(User).where(User.id == user_id).with_for_update()
-        )
+        owner_result = await db.execute(select(User).where(User.id == user_id).with_for_update())
         owner = owner_result.scalar_one_or_none()
         if (
             owner is None
