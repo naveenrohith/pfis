@@ -8,6 +8,7 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from app.api.routes import auth as auth_routes
 from app.api.routes import gmail as gmail_routes
 from app.models.auth import AuthSession
@@ -16,6 +17,7 @@ from app.models.sync import ConnectorAuditEvent, OAuthState
 from app.models.user import User
 from app.security import decrypt_secret, encrypt_secret, hash_session_token
 from app.services.gmail import oauth_service
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -163,6 +165,67 @@ async def test_register_login_and_me(client, auth_required):
     assert payload["is_active"] is True
 
 
+async def test_register_rejects_short_password_and_duplicate_email(client):
+    email = "duplicate-auth@example.com"
+    short = await client.post(
+        "/api/auth/register",
+        json={"email": email, "name": "Short", "password": "short"},
+    )
+    assert short.status_code == 422
+
+    first = await client.post(
+        "/api/auth/register",
+        json={"email": email, "name": "First", "password": "Sup3rSecure!"},
+    )
+    first.raise_for_status()
+    duplicate = await client.post(
+        "/api/auth/register",
+        json={"email": email.upper(), "name": "Duplicate", "password": "Sup3rSecure!"},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["message"] == "An account with this email already exists"
+
+
+@pytest.mark.parametrize("field", ["is_active", "deletion_started_at"])
+async def test_login_rejects_unavailable_accounts(client, test_session_factory, field):
+    user, _ = await register_user(client, f"unavailable-{field}")
+    async with test_session_factory() as db:
+        owner = await db.get(User, user["id"])
+        assert owner is not None
+        if field == "is_active":
+            owner.is_active = False
+        else:
+            owner.deletion_started_at = datetime.now(UTC)
+        await db.commit()
+
+    response = await client.post(
+        "/api/auth/login",
+        json={"email": user["email"], "password": "Sup3rSecure!"},
+    )
+    assert response.status_code == 403
+    assert "account" in response.json()["error"]["message"].lower()
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        ("not_configured", "/dashboard?auth_error=google_not_configured"),
+        ("startup", "/dashboard?auth_error=google_start_failed"),
+    ],
+)
+async def test_google_login_hides_startup_failures(client, monkeypatch, failure, expected):
+    def fail(**_kwargs):
+        if failure == "not_configured":
+            raise HTTPException(status_code=500, detail="client secret leaked")
+        raise RuntimeError("provider secret leaked")
+
+    monkeypatch.setattr(auth_routes.oauth_service, "get_authorization_url", fail)
+    response = await client.get("/api/auth/google/login", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == expected
+    assert "secret" not in response.text.lower()
+
+
 async def test_google_callback_creates_session_and_user(client, monkeypatch):
     state = "state-google"
 
@@ -276,6 +339,32 @@ async def test_google_callback_rejects_browser_transaction_mismatch(client, monk
 
     response = await client.get(
         f"/api/auth/google/callback?code=oauth-code&state={state}",
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+
+
+async def test_gmail_callback_rejects_browser_transaction_mismatch(client, monkeypatch):
+    state = "gmail-browser-bound-state"
+    user = await create_user(client, "gmail-browser-bound")
+    monkeypatch.setattr(
+        gmail_routes,
+        "get_authorization_url",
+        lambda **_kwargs: (
+            "https://accounts.google.test/gmail",
+            state,
+            "verifier",
+            "nonce",
+        ),
+    )
+    connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={user['id']}", follow_redirects=False
+    )
+    assert connect.status_code == 307
+    client.cookies.delete(gmail_routes.settings.OAUTH_COOKIE_NAME)
+
+    response = await client.get(
+        f"/api/auth/gmail/callback?code=gmail-code&state={state}",
         follow_redirects=False,
     )
     assert response.status_code == 400
@@ -962,6 +1051,65 @@ async def test_gmail_reconnect_preserves_cursor_and_rejects_mailbox_replacement(
         account = (await db.execute(select(GmailAccount))).scalar_one()
         assert account.google_account_id == "subject-one"
         assert decrypt_secret(account.access_token_ref) == "access-reconnect-code"
+
+
+async def test_gmail_reconnect_requires_a_new_refresh_token_after_auth_error(
+    client, monkeypatch, test_session_factory
+):
+    user = await create_user(client, "gmail-refresh-required")
+    state = "gmail-refresh-required-state"
+    async with test_session_factory() as db:
+        db.add(
+            GmailAccount(
+                user_id=user["id"],
+                google_account_id="refresh-required-subject",
+                access_token_ref=encrypt_secret("old-access"),
+                refresh_token_ref=encrypt_secret("old-refresh"),
+                auto_sync_status="paused",
+                auto_sync_error="Gmail authorization is invalid or revoked",
+            )
+        )
+        await db.commit()
+
+    monkeypatch.setattr(
+        gmail_routes,
+        "get_authorization_url",
+        lambda **_kwargs: ("https://accounts.google.test/gmail", state, "v", "n"),
+    )
+    monkeypatch.setattr(
+        gmail_routes,
+        "exchange_code_for_tokens",
+        lambda *_args, **_kwargs: {
+            "access_token": "new-access",
+            "id_token": "new-id",
+            "scopes": gmail_routes.GMAIL_SCOPES,
+        },
+    )
+    monkeypatch.setattr(
+        gmail_routes,
+        "verify_google_identity",
+        lambda *_args, **_kwargs: {
+            "google_account_id": "refresh-required-subject",
+            "email": "refresh-required@example.com",
+            "name": "Refresh Required",
+        },
+    )
+
+    connect = await client.get(
+        f"/api/auth/gmail/connect?user_id={user['id']}", follow_redirects=False
+    )
+    assert connect.status_code == 307
+    callback = await client.get(
+        f"/api/auth/gmail/callback?state={state}&code=reauth-code",
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/dashboard?gmail_error=gmail_transaction_invalid"
+
+    async with test_session_factory() as db:
+        account = await db.scalar(select(GmailAccount).where(GmailAccount.user_id == user["id"]))
+    assert account is not None
+    assert decrypt_secret(account.access_token_ref) == "old-access"
 
 
 async def test_gmail_callback_converts_ownership_race_to_safe_redirect(

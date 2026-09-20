@@ -150,7 +150,7 @@ truthfully provision or certify them.
 
 ## Phase 11 Acceptance Criteria
 
-- Backend CI measures statement and branch coverage and rejects regressions below 70%.
+- Backend CI measures statement and branch coverage and rejects regressions below 85%.
 - Ingestion validates user and source ownership inside the service boundary.
 - A source record and its stored event are handled atomically per record.
 - Connector and job failures persist, audit, and broadcast stable public errors;
