@@ -11,6 +11,7 @@ from app.models.sync import SyncRun, SyncStatus
 from app.models.user import User
 from app.services.gmail import oauth_service
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from tests.pytest.helpers import create_user
 
@@ -127,6 +128,75 @@ async def test_gmail_sync_route_returns_provider_stats_on_success(
     }
     assert captured["user_id"] == user["id"]
     assert captured["max_results"] == 42
+
+
+async def test_gmail_sync_route_reports_missing_account_and_provider_failure(
+    client, test_session_factory, monkeypatch
+):
+    missing = await create_user(client, "gmail-route-sync-missing")
+    response = await client.post(f"/api/gmail/sync?user_id={missing['id']}")
+    assert response.status_code == 404
+    assert "No Gmail account connected" in response.json()["error"]["message"]
+
+    failed = await create_user(client, "gmail-route-sync-failed")
+    async with test_session_factory() as db:
+        db.add(
+            GmailAccount(
+                user_id=failed["id"],
+                google_account_id="sync-failed-account",
+                access_token_ref="access",
+            )
+        )
+        await db.commit()
+
+    secret = "provider response must stay private"
+
+    async def fail_sync(**_kwargs):
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(gmail_routes, "sync_gmail_emails", fail_sync)
+    failed_response = await client.post(f"/api/gmail/sync?user_id={failed['id']}")
+    assert failed_response.status_code == 500
+    assert failed_response.json()["error"]["message"] == "Internal server error"
+    assert secret not in failed_response.text
+
+
+async def test_gmail_auto_sync_updates_state_and_rejects_disconnect_in_progress(
+    client, test_session_factory
+):
+    user = await create_user(client, "gmail-auto-sync-branches")
+    async with test_session_factory() as db:
+        db.add(
+            GmailAccount(
+                user_id=user["id"],
+                google_account_id="auto-sync-branches",
+                auto_sync_enabled=True,
+                auto_sync_status="idle",
+            )
+        )
+        await db.commit()
+
+    paused = await client.patch(
+        f"/api/gmail/auto-sync?user_id={user['id']}",
+        json={"enabled": False, "interval_seconds": 600},
+    )
+    paused.raise_for_status()
+    assert paused.json()["enabled"] is False
+    assert paused.json()["status"] == "paused"
+    assert paused.json()["interval_seconds"] == 600
+
+    async with test_session_factory() as db:
+        account = await db.scalar(select(GmailAccount).where(GmailAccount.user_id == user["id"]))
+        assert account is not None
+        account.auto_sync_status = "disconnecting"
+        await db.commit()
+
+    rejected = await client.patch(
+        f"/api/gmail/auto-sync?user_id={user['id']}",
+        json={"enabled": True},
+    )
+    assert rejected.status_code == 409
+    assert "disconnect" in rejected.json()["error"]["message"].lower()
 
 
 @pytest.mark.parametrize(
