@@ -125,3 +125,58 @@ async def test_imported_card_payment_can_be_reviewed_and_linked(client):
     refreshed.raise_for_status()
     assert refreshed.json()["is_transfer"] is True
     assert refreshed.json()["card_event"] == "payment"
+
+
+async def test_imported_asset_transfer_uses_transfer_evidence_and_links_both_legs(client):
+    user = await create_user(client, "asset-transfer-matching")
+    bank = await _account(client, user["id"], "bank", "4455")
+    cash = await _account(client, user["id"], "cash", "6677")
+    debit = await _transaction(
+        client,
+        user["id"],
+        bank["id"],
+        transaction_type="debit",
+        payment_method="bank_transfer",
+        payment_rail="transfer",
+        card_event="none",
+        merchant="Self transfer to cash",
+    )
+    credit = await _transaction(
+        client,
+        user["id"],
+        cash["id"],
+        transaction_type="credit",
+        payment_method="bank_transfer",
+        payment_rail="transfer",
+        card_event="none",
+        merchant="Self transfer from bank",
+    )
+
+    candidates = await client.get(
+        f"/api/transactions/transfer-match-candidates?user_id={user['id']}"
+    )
+    candidates.raise_for_status()
+    candidate = next(
+        item
+        for item in candidates.json()
+        if item["debit_transaction_id"] == debit["id"]
+        and item["credit_transaction_id"] == credit["id"]
+    )
+    assert candidate["kind"] == "account_transfer"
+    assert "asset_counterparty" in candidate["reason_codes"]
+    assert "transfer_evidence" in candidate["reason_codes"]
+
+    linked = await client.post(
+        f"/api/transactions/{debit['id']}/transfer-link?user_id={user['id']}",
+        json={
+            "counterparty_transaction_id": credit["id"],
+            "kind": "account_transfer",
+        },
+    )
+    linked.raise_for_status()
+    assert linked.json()["payment_rail"] == "transfer"
+
+    refreshed = await client.get(f"/api/transactions/{credit['id']}?user_id={user['id']}")
+    refreshed.raise_for_status()
+    assert refreshed.json()["is_transfer"] is True
+    assert refreshed.json()["card_event"] == "none"

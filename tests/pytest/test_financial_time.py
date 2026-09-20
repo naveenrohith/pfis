@@ -26,6 +26,13 @@ def test_financial_today_rejects_a_naive_clock():
         financial_today("UTC", now_utc=datetime(2026, 7, 30, 20, 0))
 
 
+def test_timezone_name_validation_rejects_blank_values():
+    from app.utils.financial_time import validate_timezone_name
+
+    with pytest.raises(ValueError, match="Timezone is required"):
+        validate_timezone_name("   ")
+
+
 async def test_stored_user_timezone_controls_the_financial_day(
     client,
     test_session_factory,
