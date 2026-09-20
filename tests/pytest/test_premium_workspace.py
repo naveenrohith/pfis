@@ -6,7 +6,7 @@ import pytest
 from app.models.workspace import DashboardPreference
 from app.security import create_access_token
 
-from tests.pytest.helpers import auth_headers, create_user
+from tests.pytest.helpers import auth_headers, create_user, user_today
 
 
 async def _transaction(client, user_id: str, **overrides):
@@ -30,7 +30,7 @@ async def _transaction(client, user_id: str, **overrides):
 @pytest.mark.asyncio
 async def test_transaction_filters_and_deterministic_guidance(client):
     user = await create_user(client, "guidance")
-    today = date.today()
+    today = user_today(user)
     await _transaction(client, user["id"], amount=250, reference_id="coffee")
     await _transaction(
         client,
@@ -92,7 +92,7 @@ async def test_transaction_filters_and_deterministic_guidance(client):
 @pytest.mark.asyncio
 async def test_guidance_current_position_uses_balance_read_model(client):
     user = await create_user(client, "guidance-position")
-    today = date.today()
+    today = user_today(user)
     account = await client.post(
         f"/api/accounts?user_id={user['id']}",
         json={
@@ -147,7 +147,7 @@ async def test_guidance_current_position_uses_balance_read_model(client):
 @pytest.mark.asyncio
 async def test_guidance_card_upcoming_state_uses_timeline_read_model(client):
     user = await create_user(client, "guidance-card-upcoming")
-    today = date.today()
+    today = user_today(user)
     card = await client.post(
         f"/api/accounts?user_id={user['id']}",
         json={
@@ -268,7 +268,7 @@ async def test_old_dashboard_layout_uses_current_defaults(client, test_session_f
 @pytest.mark.asyncio
 async def test_net_worth_and_transfer_exclusion(client):
     user = await create_user(client, "networth")
-    today = date.today()
+    today = user_today(user)
 
     asset = await client.post(
         f"/api/accounts?user_id={user['id']}",

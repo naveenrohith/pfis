@@ -7,7 +7,7 @@ import pytest
 from app.models.forecast import CashFlowForecastSnapshot
 from httpx import AsyncClient
 
-from tests.pytest.helpers import auth_headers, create_user, register_user
+from tests.pytest.helpers import auth_headers, create_user, register_user, user_today
 
 
 def _shift_month(value: date, offset: int) -> tuple[int, int]:
@@ -49,7 +49,7 @@ async def test_forecast_snapshot_is_immutable_idempotent_and_future_bounded(
     user = await create_user(client, "forecast-snapshot")
     other = await create_user(client, "forecast-snapshot-other")
     category_id = (await client.get("/api/categories/")).json()[0]["id"]
-    today = date.today()
+    today = user_today(user)
     await _seed_spend(
         client,
         user["id"],
@@ -111,7 +111,7 @@ async def test_completed_forecast_outcome_is_measured_once_and_remains_queryable
 ):
     user = await create_user(client, "forecast-outcome")
     category_id = (await client.get("/api/categories/")).json()[0]["id"]
-    today = date.today()
+    today = user_today(user)
     target_month, target_year = _shift_month(today, -1)
     target_date = date(target_year, target_month, 5)
     await _seed_spend(

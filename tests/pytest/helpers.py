@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, date, datetime
 
 from app.security import create_access_token
+from app.utils.financial_time import financial_today
 from httpx import AsyncClient
 
 
@@ -48,3 +50,8 @@ async def register_user(client: AsyncClient, prefix: str = "auth") -> tuple[dict
 
 def auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def user_today(user: dict, *, now_utc: datetime | None = None) -> date:
+    """Return the test user's financial day independently of the host timezone."""
+    return financial_today(user["timezone"], now_utc=now_utc or datetime.now(UTC))
