@@ -7,7 +7,7 @@ from app.models.roadmap import RoadmapBill
 from app.services.temporal_event_service import TemporalEventService
 from httpx import AsyncClient
 
-from tests.pytest.helpers import create_user
+from tests.pytest.helpers import create_user, user_today
 
 
 async def _seed_transaction(
@@ -95,7 +95,7 @@ async def test_empty_temporal_timeline_has_stable_versioned_shape(client: AsyncC
 async def test_temporal_timeline_unifies_explicit_and_pattern_evidence(client: AsyncClient):
     user = await create_user(client, "temporal-unified")
     category_id = (await client.get("/api/categories/")).json()[0]["id"]
-    today = date.today()
+    today = user_today(user)
 
     overdue_bill = await client.post(
         f"/api/bills?user_id={user['id']}",
@@ -176,7 +176,7 @@ async def test_transaction_lifecycle_events_preserve_status_and_ledger_neutralit
 ):
     user = await create_user(client, "temporal-transaction-lifecycle")
     category_id = (await client.get("/api/categories/")).json()[0]["id"]
-    today = date.today()
+    today = user_today(user)
 
     pending = await _seed_transaction(
         client,
@@ -278,7 +278,7 @@ async def test_transaction_lifecycle_events_preserve_status_and_ledger_neutralit
 @pytest.mark.asyncio
 async def test_paid_bill_is_explicit_observation_without_false_ledger_match(client: AsyncClient):
     user = await create_user(client, "temporal-paid")
-    today = date.today()
+    today = user_today(user)
     created = await client.post(
         f"/api/bills?user_id={user['id']}",
         json={
@@ -314,7 +314,7 @@ async def test_paid_bill_is_explicit_observation_without_false_ledger_match(clie
 @pytest.mark.asyncio
 async def test_temporal_timeline_rejects_unbounded_or_reversed_ranges(client: AsyncClient):
     user = await create_user(client, "temporal-range")
-    today = date.today()
+    today = user_today(user)
     reversed_range = await client.get(
         f"/api/knowledge/events?user_id={user['id']}"
         f"&range_start={today.isoformat()}&range_end={(today - timedelta(days=1)).isoformat()}"
@@ -331,7 +331,7 @@ async def test_temporal_timeline_rejects_unbounded_or_reversed_ranges(client: As
 @pytest.mark.asyncio
 async def test_temporal_decisions_persist_update_and_can_be_removed(client: AsyncClient):
     user = await create_user(client, "temporal-decision")
-    today = date.today()
+    today = user_today(user)
     event = await _seed_bill_event(
         client,
         user["id"],
@@ -386,7 +386,7 @@ async def test_exact_transaction_links_are_owned_validated_and_explain_conflicts
     user = await create_user(client, "temporal-link-owner")
     other = await create_user(client, "temporal-link-other")
     category_id = (await client.get("/api/categories/")).json()[0]["id"]
-    today = date.today()
+    today = user_today(user)
     event = await _seed_bill_event(
         client,
         user["id"],
@@ -482,7 +482,7 @@ async def test_recomputation_audit_is_non_mutating_and_finds_orphaned_decisions(
     test_session_factory,
 ):
     user = await create_user(client, "temporal-recomputation-audit")
-    today = date.today()
+    today = user_today(user)
     event = await _seed_bill_event(
         client,
         user["id"],

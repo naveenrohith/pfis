@@ -13,7 +13,7 @@ from app.services.transaction_service import TransactionService
 from httpx import AsyncClient
 from sqlalchemy import func, select
 
-from tests.pytest.helpers import auth_headers, create_user, register_user
+from tests.pytest.helpers import auth_headers, create_user, register_user, user_today
 
 
 async def _create_account(
@@ -62,7 +62,8 @@ async def test_account_response_exposes_transaction_rolled_current_bank_and_card
     client: AsyncClient,
 ):
     user = await create_user(client, "account-current-positions")
-    snapshot_date = date.today() - timedelta(days=1)
+    today = user_today(user)
+    snapshot_date = today - timedelta(days=1)
     for suffix, account_type in (("8111", "bank"), ("8222", "credit_card")):
         account = await _create_account(
             client,
@@ -82,7 +83,7 @@ async def test_account_response_exposes_transaction_rolled_current_bank_and_card
                 "currency": "INR",
                 "transaction_type": "debit",
                 "transaction_status": "completed",
-                "transaction_date": date.today().isoformat(),
+                "transaction_date": today.isoformat(),
                 "financial_account_id": account["id"],
                 "merchant_raw": f"Current position fixture {account_type}",
             },
@@ -102,27 +103,28 @@ async def test_account_response_exposes_transaction_rolled_current_bank_and_card
     assert bank["latest_balance"] == 100
     assert bank["current_balance"] == 80
     assert bank["current_balance_status"] == "estimated"
-    assert bank["current_balance_as_of"] == date.today().isoformat()
+    assert bank["current_balance_as_of"] == today.isoformat()
     assert bank["current_balance_confidence"] > 0
 
     card = by_type["credit_card"]
     assert card["latest_balance"] == 100
     assert card["current_balance"] == 120
     assert card["current_balance_status"] == "estimated"
-    assert card["current_balance_as_of"] == date.today().isoformat()
+    assert card["current_balance_as_of"] == today.isoformat()
     assert card["current_balance_confidence"] > 0
 
 
 @pytest.mark.asyncio
 async def test_user_can_resolve_unknown_account_identity_without_replacing_it(client: AsyncClient):
     user = await create_user(client, "resolve-account-identity")
+    today = user_today(user)
     transaction = await client.post(
         f"/api/transactions/?user_id={user['id']}",
         json={
             "amount": 425,
             "currency": "INR",
             "transaction_type": "debit",
-            "transaction_date": date.today().isoformat(),
+            "transaction_date": today.isoformat(),
             "merchant_raw": "Identity evidence",
             "account_last4": "8182",
         },
@@ -160,7 +162,7 @@ async def test_user_can_resolve_unknown_account_identity_without_replacing_it(cl
             "amount": 500,
             "currency": "INR",
             "transaction_type": "debit",
-            "transaction_date": (date.today().replace(day=1)).isoformat(),
+            "transaction_date": today.replace(day=1).isoformat(),
             "merchant_raw": "Future linked evidence",
             "account_last4": "8182",
             "reference_id": "resolved-account-future",
@@ -171,7 +173,7 @@ async def test_user_can_resolve_unknown_account_identity_without_replacing_it(cl
 
     timeline = await client.get(
         f"/api/knowledge/events?user_id={user['id']}"
-        f"&range_start={date.today().isoformat()}&range_end={date.today().isoformat()}"
+        f"&range_start={today.isoformat()}&range_end={today.isoformat()}"
     )
     timeline.raise_for_status()
     account_events = [

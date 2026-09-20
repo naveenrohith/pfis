@@ -46,7 +46,7 @@ from app.services.transaction_service import (
 )
 from sqlalchemy import func, select
 
-from tests.pytest.helpers import create_user
+from tests.pytest.helpers import create_user, user_today
 
 HDFC_DEPOSIT_FIXTURE = (
     Path(__file__).parents[1] / "fixtures" / "hdfc_deposit_statement_reviewed.txt"
@@ -999,9 +999,10 @@ async def test_connector_coverage_gap_blocks_current_position(client, test_sessi
 
 async def test_net_worth_uses_eligible_current_positions_after_settled_activity(client):
     user = await create_user(client, "net-worth-current-position")
+    today = user_today(user)
     bank = await _account(client, user["id"], "bank", "4405")
     card = await _account(client, user["id"], "credit_card", "4406")
-    anchor_date = date.today() - timedelta(days=2)
+    anchor_date = today - timedelta(days=2)
     for account, amount in ((bank, 10000), (card, 2000)):
         snapshot = await client.post(
             f"/api/accounts/{account['id']}/balances?user_id={user['id']}",
@@ -1023,7 +1024,7 @@ async def test_net_worth_uses_eligible_current_positions_after_settled_activity(
                 "amount": amount,
                 "transaction_type": transaction_type,
                 "transaction_status": "settled",
-                "transaction_date": (date.today() - timedelta(days=1)).isoformat(),
+                "transaction_date": (today - timedelta(days=1)).isoformat(),
                 "merchant_raw": merchant,
                 "confidence_score": 0.99,
                 "financial_account_id": account["id"],
@@ -1035,7 +1036,7 @@ async def test_net_worth_uses_eligible_current_positions_after_settled_activity(
     response.raise_for_status()
     body = response.json()
     assert body["current_position_status"] == "estimated"
-    assert body["current_position_as_of"] == date.today().isoformat()
+    assert body["current_position_as_of"] == today.isoformat()
     assert body["assets"] == 9000
     assert body["liabilities"] == 2300
     assert body["net_worth"] == 6700
@@ -2974,8 +2975,8 @@ async def test_card_refund_tracker_exposes_pending_and_recent_posted_refunds(cli
 
 async def test_card_projection_includes_bounded_recurring_charge_candidates(client):
     user = await create_user(client, "card-recurring-projection")
+    today = user_today(user)
     card = await _account(client, user["id"], "credit_card", "9922")
-    today = date.today()
     statement_date = today - timedelta(days=5)
     period_start = statement_date - timedelta(days=30)
 

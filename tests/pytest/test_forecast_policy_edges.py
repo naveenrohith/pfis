@@ -13,7 +13,7 @@ from app.services.card_utilization_history_service import CardUtilizationHistory
 from app.services.connectors.base import CardPositionObservation
 from app.utils.financial_time import financial_today
 
-from tests.pytest.helpers import create_user
+from tests.pytest.helpers import create_user, user_today
 
 
 async def _account(client, user_id: str, account_type: str, suffix: str) -> dict:
@@ -215,7 +215,7 @@ def test_card_utilization_trend_handles_history_and_current_cycle_directions():
 async def test_balance_forecast_marks_cash_shortfall_from_confirmed_commitment(client):
     user = await create_user(client, "forecast-shortfall-edge")
     account = await _account(client, user["id"], "bank", "9401")
-    today = date.today()
+    today = user_today(user)
 
     anchor = await client.post(
         f"/api/accounts/{account['id']}/balances?user_id={user['id']}",
@@ -253,7 +253,7 @@ async def test_balance_forecast_marks_credit_limit_pressure_from_settled_history
 ):
     user = await create_user(client, "forecast-limit-pressure-edge")
     card = await _account(client, user["id"], "credit_card", "9402")
-    today = date.today()
+    today = user_today(user)
     anchor = await client.post(
         f"/api/accounts/{card['id']}/balances?user_id={user['id']}",
         json={"amount": 950, "as_of": today.isoformat(), "source": "statement"},
@@ -328,7 +328,7 @@ async def test_balance_forecast_projects_liability_schedule_rows(client):
     )
     account_response.raise_for_status()
     account = account_response.json()
-    today = date.today()
+    today = user_today(user)
 
     anchor = await client.post(
         f"/api/accounts/{account['id']}/balances?user_id={user['id']}",
