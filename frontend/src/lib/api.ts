@@ -1,6 +1,7 @@
 import type {
   AuthSessionResponse,
   AutoSyncStatus,
+  FinancialChangePage,
   AccountLinkRule,
   BudgetTracker,
   BulkUpdateResponse,
@@ -317,6 +318,10 @@ export const api = {
     rememberSessionConfiguration(
       await request<AuthSessionResponse>('/auth/session', { tolerate401: true }),
     ),
+  financialChanges: (userId: string, afterSequence: number, limit = 250) =>
+    request<FinancialChangePage>('/sync/changes', {
+      query: { user_id: userId, after_sequence: afterSequence, limit },
+    }),
   logout: () => request<{ status: string }>('/auth/logout', { method: 'POST' }),
   startDemo: async () =>
     rememberSessionConfiguration(

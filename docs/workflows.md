@@ -48,6 +48,33 @@ row.
 6. OAuth refresh failures are terminal credential errors for the current job and are not retried as unexpected failures.
 7. Reconnecting Gmail resumes enabled auto-sync; the scheduler runs due accounts without requiring the user to click Sync.
 
+## Cross-domain financial updates
+
+1. A committed transaction, statement, account, card, liability, commitment, or
+   other mapped source change appends one metadata-only journal event in the
+   same database transaction. A rollback leaves neither the source mutation nor
+   its notification behind. A changed financial timezone is explicitly mapped
+   to activity, Today, planning, and guidance; learned merchant-rule changes
+   refresh activity and data views.
+2. The event names affected view domains; it does not copy financial values or
+   decide what a balance, credit score, or EMI means. Frontend policy maps those
+   tags to current-user query roots so Today, insights, accounts, statements,
+   cards, and planning refresh together where their source dependencies overlap.
+3. Each API worker tails committed journal rows and sends low-latency socket
+   hints to its local connections. Browsers replay the per-user sequence on
+   socket connection, reconnect, online/visible transitions, and every 15
+   seconds as a recovery fallback. Other tabs signal that replay may be needed;
+   each tab still fetches and checks its own sequence.
+4. The journal retains 90 days of event metadata. An expired or future cursor
+   causes a user-scoped full query invalidation and resumes from the returned
+   high-water mark. Source financial rows follow their own existing retention
+   policies and are not deleted by journal pruning.
+5. “Live updates” describes PFIS change delivery only. Gmail remains scheduled
+   polling, HDFC statements remain user-imported evidence, and no production
+   HDFC balance connection or credit-bureau score feed is implied by this path.
+   Monthly Stability and Data Confidence are PFIS internal indicators, not a
+   bureau credit score.
+
 ### Gmail disconnect
 
 1. The user confirms **Disconnect Gmail** in Data & settings.
@@ -59,8 +86,6 @@ row.
    explains this before confirmation and the API reports the retained count.
 5. A non-secret connector audit event records the revocation outcome and
    retained-data semantics.
-8. WebSocket events update the dashboard live; polling remains a fallback.
-
 ## Processing
 
 1. Fetch unprocessed `RawEmail` rows for a user.
@@ -362,7 +387,7 @@ recoverable.
 
 1. Data & settings → Financial day shows the boundary PFIS currently uses.
 2. The user chooses a valid city-based IANA timezone and saves it to the owned
-   profile.
+   profile. The profile update emits a durable change event for other sessions.
 3. Today, default monthly periods, balance freshness, recurring expectations,
    due/upcoming decisions, and forecast elapsed days use that timezone.
 4. Source transaction and statement dates remain unchanged evidence.

@@ -22,6 +22,7 @@ from app.services.connectors.errors import (
 from app.services.connectors.gmail_connector import GmailConnector
 from app.services.connectors.source_record import SourceType
 from app.services.domain_events import DomainEvent, domain_event_dispatcher
+from app.services.financial_change_capture import queue_financial_change
 from app.services.ingestion.activity import require_ingestion_user, tracked_user_ingestion
 from app.services.ingestion.persistence import persist_source_records
 from app.services.sync_events import sync_event_manager
@@ -104,6 +105,7 @@ class IngestionCoordinator:
                 with self.db.no_autoflush:
                     refreshed_update_result = await self.db.execute(refreshed_update)
                 if refreshed_update_result.rowcount == 1:
+                    await queue_financial_change(self.db, user_id, {"data"})
                     await self.db.commit()
                     await self.db.refresh(account)
                     credential_snapshot = refreshed_snapshot
@@ -195,6 +197,8 @@ class IngestionCoordinator:
                     logger.info(
                         "Gmail sync completion skipped account update after credential replacement"
                     )
+                else:
+                    await queue_financial_change(self.db, user_id, {"data"})
                 await self.db.refresh(account)
             await domain_event_dispatcher.publish(
                 DomainEvent(
@@ -321,6 +325,8 @@ class IngestionCoordinator:
             with self.db.no_autoflush:
                 account_update_result = await self.db.execute(account_update)
             account_update_applied = account_update_result.rowcount == 1
+            if account_update_applied:
+                await queue_financial_change(self.db, user_id, {"data"})
             await self.db.refresh(account)
         sync_run.status = SyncStatus.FAILED
         sync_run.end_time = datetime.now(UTC)

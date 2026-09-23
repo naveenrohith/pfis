@@ -42,7 +42,7 @@ type DataView = 'inbox' | 'pipeline' | 'statements' | 'settings';
 
 export function DataExperience() {
   const { activeSection, scrollTo, setCustomizeOpen } = useDashboardUi();
-  const { running, liveConnected, runSync, gmailConnectUrl } = useSync();
+  const { running, updateChannelLabel, updateChannelVariant, runSync, gmailConnectUrl } = useSync();
   const status = useSyncStatus();
   const autoSync = useAutoSyncStatus();
   const view: DataView =
@@ -60,9 +60,8 @@ export function DataExperience() {
         description="Manage connections, inspect processing health, recover failures, and tune your workspace."
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={liveConnected ? 'success' : 'default'}>
-              <Wifi aria-hidden="true" className="h-3.5 w-3.5" />{' '}
-              {liveConnected ? 'Status connected' : 'Periodic status refresh'}
+            <Badge variant={updateChannelVariant}>
+              <Wifi aria-hidden="true" className="h-3.5 w-3.5" /> {updateChannelLabel}
             </Badge>
             <Button variant="outline" onClick={() => setCustomizeOpen(true)}>
               <SlidersHorizontal aria-hidden="true" className="h-4 w-4" /> Preferences

@@ -45,7 +45,7 @@ export function TodayExperience() {
     queryFn: () => api.guidanceDecisions(user!.id),
     enabled: Boolean(user),
   });
-  const { liveConnected, running } = useSync();
+  const { running, updateChannelLabel, updateChannelVariant } = useSync();
   const updateRecommendation = useMutation({
     mutationFn: ({
       recommendationId,
@@ -169,14 +169,18 @@ export function TodayExperience() {
               : 'Review accepted actions and record what happened. Each outcome is final.'
         }
         action={
-          <Badge variant={liveConnected ? 'success' : 'outline'}>
+          <Badge variant={updateChannelVariant}>
             <span
               className={cn(
                 'h-1.5 w-1.5 rounded-full',
-                liveConnected ? 'bg-success' : 'bg-muted-foreground',
+                updateChannelVariant === 'success'
+                  ? 'bg-success'
+                  : updateChannelVariant === 'warning'
+                    ? 'bg-warning'
+                    : 'bg-muted-foreground',
               )}
             />
-            {running ? 'Syncing' : liveConnected ? 'Connected' : 'Saved snapshot'}
+            {running ? 'Syncing' : updateChannelLabel}
           </Badge>
         }
       />

@@ -4,6 +4,7 @@ import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import type { Job, JobStatus, SyncEvent } from '@/lib/types';
+import { invalidateFinancialChangeDomains } from './financialChangeQueries';
 
 export interface ActivityEntry {
   time: string;
@@ -13,18 +14,45 @@ export interface ActivityEntry {
 const MAX_LOG = 30;
 const JOB_POLL_INTERVAL_MS = 2_000;
 const JOB_MAX_ATTEMPTS = 900; // 30 minutes for large Gmail accounts.
+const CHANGE_REPLAY_INTERVAL_MS = 15_000;
+const CHANGE_CURSOR_STORAGE_PREFIX = 'pfis.financial-change-cursor.v1';
+
+export type ChangeFeedStatus = 'catching_up' | 'caught_up' | 'offline';
+type ChangeFeedBadgeVariant = 'success' | 'warning' | 'default';
+
+function readChangeCursor(userId: string): number {
+  try {
+    const value = Number(
+      window.sessionStorage.getItem(`${CHANGE_CURSOR_STORAGE_PREFIX}:${userId}`),
+    );
+    return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeChangeCursor(userId: string, sequence: number): void {
+  try {
+    window.sessionStorage.setItem(`${CHANGE_CURSOR_STORAGE_PREFIX}:${userId}`, String(sequence));
+  } catch {
+    // The in-memory replay continues to work when browser storage is unavailable.
+  }
+}
 
 export function useSyncPipeline() {
   const { user, session } = useAuth();
+  const userId = user?.id;
   const queryClient = useQueryClient();
   const { notify } = useToast();
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<JobStatus | 'idle'>('idle');
   const [liveConnected, setLiveConnected] = useState(false);
+  const [changeFeedStatus, setChangeFeedStatus] = useState<ChangeFeedStatus>('catching_up');
   const [log, setLog] = useState<ActivityEntry[]>([]);
   const pollRef = useRef<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const wsRetryRef = useRef<number | null>(null);
+  const replayChangesRef = useRef<(() => Promise<void>) | null>(null);
   const gmailConnectUrl = user ? api.gmailConnectUrl(user.id) : null;
 
   const append = useCallback((message: string) => {
@@ -78,12 +106,120 @@ export function useSyncPipeline() {
         case 'balance_refresh_failed':
           invalidateAll();
           return `Balance refresh failed: ${String(data.error ?? 'unknown error')}`;
+        case 'financial_state_updated':
+          void replayChangesRef.current?.();
+          return 'Financial views refreshed';
         default:
           return null;
       }
     },
     [invalidateAll],
   );
+
+  useEffect(() => {
+    if (!userId) return;
+    let disposed = false;
+    let replayRunning = false;
+    let replayRequested = false;
+    let cursor = readChangeCursor(userId);
+    let replayTimer: number | null = null;
+    const channel =
+      typeof BroadcastChannel === 'undefined'
+        ? null
+        : new BroadcastChannel('pfis.financial-changes.v1');
+
+    const replay = async () => {
+      if (disposed) return;
+      if (replayRunning) {
+        replayRequested = true;
+        return;
+      }
+      replayRunning = true;
+      let reachedHead = false;
+      let cursorAdvanced = false;
+      let cursorReset = false;
+      try {
+        for (let pageNumber = 0; pageNumber < 20 && !disposed; pageNumber += 1) {
+          const page = await api.financialChanges(userId, cursor);
+          if (disposed) return;
+
+          if (page.reset_required) {
+            await invalidateFinancialChangeDomains(queryClient, userId, ['cursor_reset']);
+            cursor = page.current_sequence;
+            writeChangeCursor(userId, cursor);
+            cursorAdvanced = true;
+            cursorReset = true;
+            reachedHead = true;
+            break;
+          }
+
+          for (const event of page.events) {
+            if (event.sequence <= cursor) continue;
+            await invalidateFinancialChangeDomains(queryClient, userId, event.domains);
+            cursor = event.sequence;
+            writeChangeCursor(userId, cursor);
+            cursorAdvanced = true;
+          }
+
+          if (!page.has_more) {
+            reachedHead = cursor >= page.current_sequence;
+            break;
+          }
+        }
+
+        if (!disposed) {
+          setChangeFeedStatus(reachedHead ? 'caught_up' : 'catching_up');
+          if (cursorAdvanced)
+            channel?.postMessage({ userId, sequence: cursor, reset: cursorReset });
+          if (!reachedHead) {
+            replayTimer = window.setTimeout(() => void replay(), 100);
+          }
+        }
+      } catch {
+        if (!disposed) setChangeFeedStatus('offline');
+      } finally {
+        replayRunning = false;
+        if (replayRequested && !disposed) {
+          replayRequested = false;
+          void replay();
+        }
+      }
+    };
+
+    replayChangesRef.current = replay;
+    const onOnlineOrVisible = () => {
+      if (navigator.onLine && document.visibilityState === 'visible') void replay();
+    };
+    const onCrossTabChange = (
+      message: MessageEvent<{ userId?: string; sequence?: number; reset?: boolean }>,
+    ) => {
+      if (
+        message.data?.userId === userId &&
+        (message.data.reset || Number(message.data.sequence) > cursor)
+      ) {
+        void replay();
+      }
+    };
+
+    channel?.addEventListener('message', onCrossTabChange);
+    const fallbackTimer = window.setInterval(() => {
+      if (navigator.onLine) void replay();
+    }, CHANGE_REPLAY_INTERVAL_MS);
+    window.addEventListener('online', onOnlineOrVisible);
+    document.addEventListener('visibilitychange', onOnlineOrVisible);
+    void replay();
+
+    return () => {
+      disposed = true;
+      replayChangesRef.current = null;
+      if (replayTimer !== null) window.clearTimeout(replayTimer);
+      window.clearInterval(fallbackTimer);
+      window.removeEventListener('online', onOnlineOrVisible);
+      document.removeEventListener('visibilitychange', onOnlineOrVisible);
+      channel?.removeEventListener('message', onCrossTabChange);
+      channel?.close();
+    };
+  }, [userId, queryClient]);
 
   useEffect(() => {
     if (!user) return;
@@ -100,6 +236,7 @@ export function useSyncPipeline() {
       ws.onopen = () => {
         attempt = 0;
         setLiveConnected(true);
+        void replayChangesRef.current?.();
         heartbeat = window.setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) ws.send('ping');
         }, 25_000);
@@ -243,10 +380,28 @@ export function useSyncPipeline() {
     }
   }, [user, running, append, notify, pollJob]);
 
+  const updateChannelLabel =
+    changeFeedStatus === 'offline'
+      ? 'Updates delayed'
+      : changeFeedStatus === 'catching_up'
+        ? 'Checking updates'
+        : liveConnected
+          ? 'Live updates'
+          : 'Polling updates';
+  const updateChannelVariant: ChangeFeedBadgeVariant =
+    changeFeedStatus === 'offline'
+      ? 'warning'
+      : changeFeedStatus === 'caught_up'
+        ? 'success'
+        : 'default';
+
   return {
     running,
     status,
     liveConnected,
+    changeFeedStatus,
+    updateChannelLabel,
+    updateChannelVariant,
     log,
     runSync,
     retrySync,

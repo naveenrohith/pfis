@@ -159,14 +159,20 @@ async def test_job_handlers_cover_sync_retention_and_balance_provider_outcomes(m
     async def redact(_db, *, user_id, batch_size):
         return {"redacted": (user_id, batch_size)}
 
+    async def prune_changes(_db):
+        return 7
+
     monkeypatch.setattr(module, "retry_parse_failures", retry)
     monkeypatch.setattr(module, "redact_expired_raw_email_content", redact)
+    monkeypatch.setattr(module, "prune_financial_change_events", prune_changes)
     assert await module._handle_retry_parse_failures(_Db(), "user-1", {}) == {"retried": 20}
     assert await module._handle_raw_email_retention(_Db(), "user-1", {"batch_size": 9999}) == {
-        "redacted": ("user-1", 2000)
+        "redacted": ("user-1", 2000),
+        "financial_change_events_pruned": 7,
     }
     assert await module._handle_raw_email_retention(_Db(), "", {"batch_size": 0}) == {
-        "redacted": (None, 1)
+        "redacted": (None, 1),
+        "financial_change_events_pruned": 7,
     }
 
     gmail_account = SimpleNamespace(id="gmail-1", auto_sync_status="active")

@@ -272,13 +272,41 @@ export type SyncEventName =
   | 'sync_completed'
   | 'sync_failed'
   | 'balance_refresh_completed'
-  | 'balance_refresh_failed';
+  | 'balance_refresh_failed'
+  | 'financial_state_updated';
 
 export interface SyncEvent {
   event: SyncEventName;
   user_id: string;
   timestamp: string;
   data?: Record<string, unknown>;
+}
+
+export type FinancialChangeDomain =
+  | 'activity'
+  | 'today'
+  | 'insights'
+  | 'accounts'
+  | 'cards'
+  | 'planning'
+  | 'guidance'
+  | 'statements'
+  | 'data';
+
+export interface FinancialChangeEvent {
+  event_id: string;
+  sequence: number;
+  event_type: 'financial_state_updated';
+  domains: FinancialChangeDomain[];
+  created_at: string;
+}
+
+export interface FinancialChangePage {
+  events: FinancialChangeEvent[];
+  current_sequence: number;
+  oldest_available_sequence: number | null;
+  has_more: boolean;
+  reset_required: boolean;
 }
 
 export type BudgetStatus = 'under' | 'warning' | 'over';

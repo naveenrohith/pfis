@@ -45,6 +45,10 @@ from app.schemas.transaction import (
     TransactionSplitResponse,
     TransactionUpdate,
 )
+from app.services.financial_change_capture import (
+    TRANSACTION_CHANGE_DOMAINS,
+    queue_financial_change,
+)
 from app.services.ledger_currency import get_ledger_currency, require_ledger_currency
 from app.services.temporal_source_history import (
     capture_financial_account_snapshot,
@@ -990,6 +994,7 @@ class TransactionService:
             for item in data.splits
         ]
         self.db.add_all(splits)
+        await queue_financial_change(self.db, user_id, TRANSACTION_CHANGE_DOMAINS)
         await self.db.commit()
         for split in splits:
             await self.db.refresh(split)
@@ -1267,6 +1272,11 @@ class TransactionService:
                 .values(transaction_id=None)
             )
             await self.db.execute(delete(Transaction).where(Transaction.id.in_(transaction_ids)))
+            await queue_financial_change(
+                self.db,
+                txn.user_id,
+                TRANSACTION_CHANGE_DOMAINS,
+            )
             for user_id, transaction_date in affected_periods:
                 await self._invalidate_monthly_summary(user_id, transaction_date)
             await self.db.commit()

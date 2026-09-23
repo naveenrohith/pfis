@@ -78,6 +78,13 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
 - `ParseFailure`: dead-letter queue for failed parser attempts.
 - `UserCorrection`: feedback loop for corrected merchant/category/amount fields.
 - `BackgroundJob`: async job tracking.
+- `FinancialChangeCursor` and `FinancialChangeEvent`: per-user sequence
+  allocation plus a durable, metadata-only invalidation journal. Each source
+  transaction emits one event per affected user, coalescing its changed domains;
+  event rows are retained for 90 days and then pruned while the high-water
+  cursor remains. An older or future browser cursor requires a full user-scoped
+  refresh. These operational rows are excluded from portable financial exports
+  and cascade with user deletion.
 - `OAuthState`: single-use OAuth transaction with expiry, flow type, browser binding, encrypted PKCE verifier, encrypted OIDC nonce, and the owner's Gmail connection generation. A disconnect or account deletion increments the owner generation and invalidates pending Gmail states.
 
 `User.gmail_connection_generation` is a persisted fence for Gmail OAuth intents.
@@ -101,6 +108,13 @@ profiles to `Asia/Kolkata`. Financial services derive "today," current periods,
 freshness windows, due/upcoming decisions, and forecast elapsed days from this
 field. Source-authored transaction dates remain evidence and are never shifted
 to another day.
+
+Financial change events are not a second ledger or an audit copy of source
+records. Their allowlisted domains are `activity`, `today`, `insights`,
+`accounts`, `cards`, `planning`, `guidance`, `statements`, and `data`. The source
+ORM write and its invalidation metadata commit or roll back together; computed
+read-model writes intentionally do not generate another event. Browser cursors
+are recovery positions only and contain no credential or financial information.
 
 `User.raw_email_retention_days` is nullable and constrained to 30, 90, 180, or
 365 when present. The default is 365; null is the explicit keep-until-deleted

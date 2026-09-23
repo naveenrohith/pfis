@@ -77,7 +77,8 @@ PACKET_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "IR-5",
         re.compile(
-            r"^frontend/|^backend/requirements\.txt$|^backend/app/|^tests/pytest/|^\.github/|^Makefile$"
+            r"^frontend/|^backend/requirements\.txt$|^backend/app/|^backend/alembic/versions/057_|"
+            r"^tests/pytest/|^\.github/|^Makefile$"
         ),
     ),
     ("IR-6", re.compile(r"^README\.md$|^docs/")),
