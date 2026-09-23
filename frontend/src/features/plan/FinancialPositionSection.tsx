@@ -155,7 +155,7 @@ function CashPlanSetup({ plan, accounts }: { plan?: CashPlan; accounts: Financia
         queryClient.invalidateQueries({ queryKey: ['cardDueRunway', user!.id] }),
       ]);
       setBalanceAmount('');
-      notify('Verified balance recorded', 'success');
+      notify('Observed balance recorded', 'success');
     },
     onError: (error) => notify((error as Error).message, 'error'),
   });
@@ -226,10 +226,10 @@ function CashPlanSetup({ plan, accounts }: { plan?: CashPlan; accounts: Financia
               <EmptyState
                 icon={<Landmark className="h-5 w-5" aria-hidden="true" />}
                 title="No bank account evidence yet"
-                description="Add a bank account manually, then return here to record its verified position."
+                description="Add a bank account manually, then return here to record a dated balance observation."
                 action={
                   <Button variant="outline" onClick={() => scrollTo('networth')}>
-                    Add account in Verified position
+                    Add account in Position
                   </Button>
                 }
               />
@@ -320,7 +320,7 @@ function CashPlanSetup({ plan, accounts }: { plan?: CashPlan; accounts: Financia
           <div>
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <div>
-                <p className="text-sm font-bold">2. Recent verified balance</p>
+                <p className="text-sm font-bold">2. Recent observed balance</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   {selectedAccount?.latest_balance == null
                     ? 'No balance observation has been recorded.'
@@ -549,7 +549,7 @@ function CashPlanWorkspace({
     ? 'Provider-observed position'
     : plan.balance_basis === 'estimated'
       ? 'Estimated current position'
-      : 'Verified position';
+      : 'Observed position';
   const positionAsOf =
     plan.planning_balance_as_of ?? plan.estimated_balance_as_of ?? plan.balance_as_of;
 
@@ -562,7 +562,9 @@ function CashPlanWorkspace({
               FLEXIBLE MONEY UNTIL {formatDate(plan.next_income_date)}
             </p>
             <p className="money-value mt-2 text-4xl font-extrabold tracking-[-0.06em] sm:text-5xl">
-              {formatCurrency(plan.flexible_money ?? 0, plan.currency)}
+              {plan.flexible_money == null
+                ? 'Not calculated'
+                : formatCurrency(plan.flexible_money, plan.currency)}
             </p>
             <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
               Flexible money after confirmed commitments and approved reserves. It is a planning
@@ -575,15 +577,19 @@ function CashPlanWorkspace({
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-extrabold uppercase tracking-[0.1em] text-foreground">
                 <span>{positionBasis}</span>
                 <span className="text-muted-foreground/60">·</span>
-                <span>{formatCurrency(currentPosition, plan.currency)}</span>
+                <span>
+                  {currentPosition == null
+                    ? 'Position unavailable'
+                    : formatCurrency(currentPosition, plan.currency)}
+                </span>
                 {positionAsOf ? <span>· as of {formatDate(positionAsOf)}</span> : null}
               </div>
               <p className="mt-1 leading-5">
                 {providerObserved
                   ? `Provider observation${plan.observed_at ? ` retrieved ${formatTime(plan.observed_at)}` : ''}; commitments and reserves are applied below.`
                   : plan.balance_basis === 'estimated'
-                    ? `Verified anchor plus ${formatCurrency(plan.settled_movement_since_observation ?? 0, plan.currency)} of eligible settled movement.`
-                    : 'No eligible settled movement has changed the verified anchor.'}
+                    ? `Observed anchor plus ${formatCurrency(plan.settled_movement_since_observation ?? 0, plan.currency)} of eligible settled movement.`
+                    : 'No eligible settled movement has changed the observed anchor.'}
               </p>
             </div>
           </div>
@@ -1016,7 +1022,7 @@ export function BalancePathPanel({
       ? 'Evidence path'
       : forecast.status === 'needs_review'
         ? 'Needs position review'
-        : 'Needs verified anchor';
+        : 'Needs observed anchor';
   const milestones = forecast.points
     .filter(
       (point, index, points) =>
@@ -1049,7 +1055,7 @@ export function BalancePathPanel({
 
       {forecast.status === 'needs_anchor' ? (
         <div className="mt-5 rounded-lg border border-dashed border-border p-4 text-sm leading-6 text-muted-foreground">
-          Record a verified or connected observation for this account. PFIS will then show the
+          Record a dated balance or connect an observation for this account. PFIS will then show the
           future path without turning partial transaction history into a fake current amount.
         </div>
       ) : (
@@ -1074,12 +1080,16 @@ export function BalancePathPanel({
                   : formatCurrency(forecast.lowest_expected_balance, forecast.currency)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {forecast.lowest_expected_date ? formatDate(forecast.lowest_expected_date) : 'No path'}
+                {forecast.lowest_expected_date
+                  ? formatDate(forecast.lowest_expected_date)
+                  : 'No path'}
               </p>
             </div>
             <div className="rounded-lg bg-muted/55 p-4">
               <p className="text-xs font-bold text-muted-foreground">Uncertainty</p>
-              <p className="mt-1 text-xl font-extrabold">{Math.round(forecast.confidence * 100)}%</p>
+              <p className="mt-1 text-xl font-extrabold">
+                {Math.round(forecast.confidence * 100)}%
+              </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {forecast.data_sufficiency} evidence · {forecast.event_count} dated events
               </p>
@@ -1088,8 +1098,8 @@ export function BalancePathPanel({
 
           {forecast.first_shortfall_date ? (
             <p className="mt-4 rounded-lg bg-danger/10 px-4 py-3 text-sm font-bold leading-6 text-danger">
-              The lower band crosses below zero by {formatDate(forecast.first_shortfall_date)}. Review
-              the dated outflows before treating flexible money as safe.
+              The lower band crosses below zero by {formatDate(forecast.first_shortfall_date)}.
+              Review the dated outflows before treating flexible money as safe.
             </p>
           ) : null}
 
@@ -1115,8 +1125,14 @@ export function BalancePathPanel({
                       : formatCurrency(point.expected_balance, forecast.currency)}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    band {point.low_balance == null ? '—' : formatCurrency(point.low_balance, forecast.currency)}{' '}
-                    – {point.high_balance == null ? '—' : formatCurrency(point.high_balance, forecast.currency)}
+                    band{' '}
+                    {point.low_balance == null
+                      ? '—'
+                      : formatCurrency(point.low_balance, forecast.currency)}{' '}
+                    –{' '}
+                    {point.high_balance == null
+                      ? '—'
+                      : formatCurrency(point.high_balance, forecast.currency)}
                   </p>
                   {point.risk !== 'none' ? (
                     <Badge variant={point.risk === 'shortfall' ? 'danger' : 'warning'}>

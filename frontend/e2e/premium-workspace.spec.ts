@@ -55,6 +55,27 @@ test('Today is keyboard reachable, responsive, and free of serious accessibility
 
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   await expect(page.locator('main')).not.toContainText('You have kept ₹0');
+  const viewport = page.viewportSize();
+  if (viewport && viewport.width < 768) {
+    const destinationNav = page.getByRole('navigation', { name: 'Primary financial destinations' });
+    const quickAdd = page.getByRole('button', { name: 'Quick add activity' });
+    const navBox = await destinationNav.boundingBox();
+    const addBox = await quickAdd.boundingBox();
+    expect(navBox).not.toBeNull();
+    expect(addBox).not.toBeNull();
+    expect(addBox!.y).toBeGreaterThanOrEqual(navBox!.y - 1);
+    expect(addBox!.y + addBox!.height).toBeLessThanOrEqual(navBox!.y + navBox!.height + 1);
+  } else if (viewport && viewport.width < 1024) {
+    const rail = page.getByTestId('workspace-rail');
+    const quickAdd = page.getByRole('button', { name: 'Quick add activity' });
+    const railBox = await rail.boundingBox();
+    const addBox = await quickAdd.boundingBox();
+    expect(railBox).not.toBeNull();
+    expect(addBox).not.toBeNull();
+    expect(railBox!.width).toBeLessThanOrEqual(100);
+    expect(addBox!.x).toBeGreaterThanOrEqual(railBox!.x);
+    expect(addBox!.x + addBox!.width).toBeLessThanOrEqual(railBox!.x + railBox!.width);
+  }
 
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+K');
   await expect(page.getByRole('dialog', { name: 'PFIS command palette' })).toBeVisible();
@@ -107,13 +128,38 @@ test('all five destinations and their primary tabs are deep-linkable', async ({ 
   await expectNoHorizontalOverflow(page);
 });
 
+test('Cards direct hash settles on a stable target across lazy loading', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-07-16T09:00:00+05:30'));
+  await page.context().addCookies(demoCookies);
+  const viewport = page.viewportSize();
+  if (viewport) await page.setViewportSize({ width: viewport.width, height: 480 });
+  await page.goto('/dashboard/#cards');
+
+  await expect(page).toHaveURL(/#cards$/);
+  const cardsHeading = page.getByRole('heading', { name: 'Card accounts', exact: true });
+  await expect(cardsHeading).toBeVisible({ timeout: 20_000 });
+  const anchor = page.locator('#cards');
+  await expect(anchor).toBeVisible();
+
+  const headerBottom = await page
+    .getByRole('banner')
+    .evaluate((element) => element.getBoundingClientRect().bottom);
+  const viewportHeight = await page.evaluate(() => window.innerHeight);
+  await expect
+    .poll(() => anchor.evaluate((element) => element.getBoundingClientRect().top))
+    .toBeGreaterThanOrEqual(headerBottom - 1);
+  await expect
+    .poll(() => cardsHeading.evaluate((element) => element.getBoundingClientRect().top))
+    .toBeLessThan(viewportHeight);
+});
+
 test('financial roadmap workspaces are responsive, keyboard reachable, and accessible', async ({
   page,
 }) => {
   await openDemoWorkspace(page);
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
-  for (const tabName of ['Safe to spend', 'Position', 'Cards', 'Commitments', 'Outlook', 'Budgets']) {
+  for (const tabName of ['Safe to spend', 'Position', 'Commitments', 'Outlook']) {
     const tab = page.getByRole('tab', { name: tabName, exact: true });
     await tab.scrollIntoViewIfNeeded();
     await tab.focus();
@@ -130,15 +176,30 @@ test('financial roadmap workspaces are responsive, keyboard reachable, and acces
     await expectNoHorizontalOverflow(page);
   }
 
-  await page.getByRole('tab', { name: 'Cards', exact: true }).click();
-  await expect(page).toHaveURL(/#cards$/);
   await page.getByRole('tab', { name: 'Commitments', exact: true }).click();
   await expect(page).toHaveURL(/#obligations$/);
+  await page.getByRole('button', { name: 'Card accounts', exact: true }).click();
+  await expect(page).toHaveURL(/#cards$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/#obligations$/);
+  await page.getByRole('button', { name: 'Card accounts', exact: true }).click();
+  await expect(page).toHaveURL(/#cards$/);
+  await page.getByRole('button', { name: /^Back to Commitments$/ }).click();
+  await expect(page).toHaveURL(/#obligations$/);
+  await page.getByText('More commitment views').click();
   await page.getByRole('button', { name: 'All liabilities', exact: true }).click();
   await expect(page).toHaveURL(/#liabilities$/);
 
-  await page.getByRole('button', { name: 'Bills & safeguards', exact: true }).click();
+  await page.getByRole('button', { name: /^Back to Commitments$/ }).click();
   await expect(page).toHaveURL(/#obligations$/);
+
+  await page.getByRole('tab', { name: 'Outlook', exact: true }).click();
+  await expect(page).toHaveURL(/#analytics$/);
+  await page.getByRole('button', { name: 'Budgets and spending limits' }).click();
+  await expect(page).toHaveURL(/#budgets$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/#analytics$/);
+  await expect(page.getByRole('button', { name: 'Budgets and spending limits' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Data & settings', exact: true }).click();
   const statementsTab = page.getByRole('tab', { name: 'Statements', exact: true });
@@ -157,6 +218,56 @@ test('financial roadmap workspaces are responsive, keyboard reachable, and acces
   );
   expect(serious).toEqual([]);
   await expectNoHorizontalOverflow(page);
+});
+
+test('missing net-worth data stays unavailable instead of displaying zero', async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== 'desktop',
+    'One browser project is sufficient to exercise the failed-position state',
+  );
+  await page.route('**/api/accounts*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 'e2e-position-account',
+          user_id: 'e2e-user',
+          institution_name: 'Example Bank',
+          account_type: 'bank',
+          balance_kind: 'asset',
+          masked_number: '***1234',
+          currency: 'INR',
+          is_active: true,
+          identity_status: 'confirmed',
+          latest_balance: 1000,
+          balance_as_of: '2026-09-01',
+          created_at: '2026-09-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
+  let positionFailureServed = false;
+  await page.route('**/api/net-worth*', (route) => {
+    positionFailureServed = true;
+    return route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: 'Temporary position failure' }),
+    });
+  });
+  await openDemoWorkspace(page);
+
+  await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await page.getByRole('tab', { name: 'Position', exact: true }).click();
+  await expect.poll(() => positionFailureServed).toBe(true);
+  await expect(page.getByRole('alert')).toContainText('Position data is unavailable', {
+    timeout: 20_000,
+  });
+  await expect(page.getByText('Unavailable', { exact: true })).toHaveCount(3);
+  await expect(page.locator('main')).not.toContainText('Add your first balance');
 });
 
 test('reduced motion disables non-essential workspace animation', async ({ page }, testInfo) => {

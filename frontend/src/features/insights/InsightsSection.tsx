@@ -17,6 +17,7 @@ import {
   Store,
 } from 'lucide-react';
 import { useDashboardUi } from '@/app/DashboardUiContext';
+import { ChartFrame } from '@/components/system';
 import { Button } from '@/components/ui/Button';
 import { EmptyState, Skeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -29,7 +30,7 @@ import {
   useSummary,
   useWorkspaceSnapshot,
 } from '@/features/workspace/queries';
-import { formatChartCurrency, formatCompact, formatCurrency } from '@/lib/format';
+import { formatChartCurrency, formatCompact, formatCurrency, formatDate } from '@/lib/format';
 
 export function InsightsSection(_props: { embedded?: boolean } = {}) {
   const { user } = useAuth();
@@ -99,70 +100,88 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
             description="Daily observed debit spend. Peaks are investigation points, not balance changes."
           />
           {trend.length ? (
-            <>
-              <div className="mt-6 h-72" role="img" aria-label="Daily observed spending trend">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={trend} margin={{ left: -16, right: 8, top: 8, bottom: 2 }}>
-                    <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                      interval="preserveStartEnd"
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                      tickFormatter={(value) => formatCompact(value)}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <Tooltip
-                      formatter={(value) => formatChartCurrency(value, currency)}
-                      contentStyle={{
-                        background: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: 10,
-                        color: 'hsl(var(--card-foreground))',
-                      }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="total"
-                      stroke="hsl(var(--intelligence))"
-                      strokeWidth={3}
-                      dot={false}
-                      activeDot={{ r: 5 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              <details className="mt-3 text-sm">
-                <summary className="focus-ring cursor-pointer rounded py-2 font-bold">
-                  Read the chart as a table
-                </summary>
-                <table className="mt-2 w-full text-left text-sm">
-                  <thead className="text-muted-foreground">
-                    <tr>
-                      <th className="py-2">Date</th>
-                      <th className="py-2 text-right">Spend</th>
-                      <th className="py-2 text-right">Entries</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {trend.map((point) => (
-                      <tr key={point.date} className="border-t border-border/65">
-                        <td className="py-2">{point.date}</td>
-                        <td className="py-2 text-right tabular-nums">
-                          {formatCurrency(point.total, currency)}
-                        </td>
-                        <td className="py-2 text-right tabular-nums">{point.count ?? '—'}</td>
+            <div className="mt-6">
+              <ChartFrame
+                title="Observed spend by day"
+                description={`Daily debit spend · ${currency} · ${formatDate(trend[0].date)} to ${formatDate(trend[trend.length - 1].date)}`}
+                summary={`Daily observed debit spend from ${formatDate(trend[0].date)} to ${formatDate(trend[trend.length - 1].date)}. Peaks are investigation points, not balance changes.`}
+                dataTable={
+                  <table className="w-full min-w-[28rem] text-left text-sm">
+                    <caption className="sr-only">
+                      Daily observed debit spend and entry count
+                    </caption>
+                    <thead>
+                      <tr className="border-b border-border/65 text-xs text-muted-foreground">
+                        <th scope="col" className="px-2 py-2">
+                          Date
+                        </th>
+                        <th scope="col" className="px-2 py-2 text-right">
+                          Spend ({currency})
+                        </th>
+                        <th scope="col" className="px-2 py-2 text-right">
+                          Entries
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </details>
-            </>
+                    </thead>
+                    <tbody>
+                      {trend.map((point) => (
+                        <tr key={point.date} className="border-b border-border/45 last:border-0">
+                          <th scope="row" className="px-2 py-2 font-bold">
+                            {formatDate(point.date)}
+                          </th>
+                          <td className="money-value px-2 py-2 text-right">
+                            {formatCurrency(point.total, currency)}
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums">
+                            {point.count ?? '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                }
+              >
+                <div className="h-72 min-w-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={trend} margin={{ left: 4, right: 12, top: 8, bottom: 4 }}>
+                      <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={(value) => formatDate(String(value))}
+                        tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                        interval="preserveStartEnd"
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                        tickFormatter={(value) => formatCompact(value)}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <Tooltip
+                        formatter={(value) => formatChartCurrency(value, currency)}
+                        contentStyle={{
+                          background: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: 10,
+                          color: 'hsl(var(--card-foreground))',
+                        }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="total"
+                        name={`Daily spend (${currency})`}
+                        stroke="hsl(var(--intelligence))"
+                        strokeWidth={3}
+                        dot={false}
+                        activeDot={{ r: 5 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </ChartFrame>
+            </div>
           ) : (
             <EmptyState
               icon={<CalendarRange />}

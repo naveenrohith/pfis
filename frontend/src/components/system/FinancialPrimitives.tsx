@@ -25,7 +25,7 @@ export function PageIntro({
             {eyebrow}
           </p>
         ) : null}
-        <h1 className="text-balance text-3xl font-extrabold leading-[1.05] tracking-[-0.05em] sm:text-4xl lg:text-[3.25rem]">
+        <h1 className="text-balance text-3xl font-extrabold leading-[1.08] tracking-[-0.045em] sm:text-4xl lg:text-[2.8rem]">
           {title}
         </h1>
         {description ? (

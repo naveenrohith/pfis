@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { CardUtilizationHistoryPanel } from './CardUtilizationHistoryPanel';
 import type { CardUtilizationHistory } from '@/lib/types';
@@ -52,16 +52,121 @@ describe('CardUtilizationHistoryPanel', () => {
     render(<CardUtilizationHistoryPanel history={history} currency="INR" />);
 
     expect(screen.getByRole('heading', { name: 'Moving up' })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: /Utilization moved from 18.0%/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/Utilization moved from 18.0%/i)).toHaveLength(2);
     expect(screen.getByText(/Some settled rows still need review/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('View 2 recent evidence points'));
+    fireEvent.click(screen.getByText('View all 2 plotted evidence points'));
 
     expect(
-      screen.getByRole('table', { name: 'Recent card utilization evidence points' }),
+      screen.getByRole('table', { name: 'All plotted card utilization evidence points' }),
     ).toBeInTheDocument();
     expect(screen.getAllByText('Settled-ledger estimate')).not.toHaveLength(0);
     expect(screen.getByText('Over target')).toBeInTheDocument();
+  });
+
+  it('keeps every plotted source point in chronological order in the evidence table', () => {
+    const completeHistory: CardUtilizationHistory = {
+      ...history,
+      statement_points: Array.from({ length: 12 }, (_, index) => ({
+        ...history.statement_points[0],
+        as_of: `2025-01-${String(index + 1).padStart(2, '0')}`,
+        statement_id: `statement-${index + 1}`,
+        utilization_pct: 10 + index,
+      })),
+      daily_points: Array.from({ length: 10 }, (_, index) => ({
+        ...history.daily_points[0],
+        as_of: `2026-08-${String(index + 1).padStart(2, '0')}`,
+        utilization_pct: 20 + index,
+      })),
+    };
+    render(<CardUtilizationHistoryPanel history={completeHistory} currency="INR" />);
+
+    fireEvent.click(screen.getByText('View all 22 plotted evidence points'));
+
+    const table = screen.getByRole('table', {
+      name: 'All plotted card utilization evidence points',
+    });
+    const rows = within(table).getAllByRole('row');
+    expect(rows).toHaveLength(23);
+    expect(rows[1]).toHaveTextContent('Issuer statement');
+    expect(rows[22]).toHaveTextContent('Settled-ledger estimate');
+    expect(rows[1]).toHaveTextContent('2025');
+    expect(rows[22]).toHaveTextContent('2026');
+  });
+
+  it('plots statement and ledger estimates as separate evidence segments', () => {
+    const segmentedHistory: CardUtilizationHistory = {
+      ...history,
+      statement_points: [
+        ...history.statement_points,
+        {
+          ...history.statement_points[0],
+          as_of: '2026-06-01',
+          statement_id: 'statement-0',
+          balance: 15000,
+          utilization_pct: 15,
+        },
+      ],
+      daily_points: [
+        ...history.daily_points,
+        {
+          ...history.daily_points[0],
+          as_of: '2026-08-12',
+          balance: 35000,
+          utilization_pct: 35,
+        },
+      ],
+    };
+    const { container } = render(
+      <CardUtilizationHistoryPanel history={segmentedHistory} currency="INR" />,
+    );
+
+    expect(container.querySelectorAll('polyline')).toHaveLength(2);
+    expect(container.querySelector('polyline.text-muted-foreground')).toHaveAttribute(
+      'stroke-dasharray',
+      '3 2',
+    );
+  });
+
+  it('retains dated evidence when no point has plottable utilization', () => {
+    const unplottableHistory: CardUtilizationHistory = {
+      ...history,
+      statement_points: [
+        {
+          ...history.statement_points[0],
+          credit_limit: null,
+          utilization_pct: null,
+          status: 'unavailable',
+        },
+      ],
+      daily_points: [
+        {
+          ...history.daily_points[0],
+          credit_limit: 0,
+          utilization_pct: null,
+          status: 'unavailable',
+        },
+      ],
+      trend: 'unavailable',
+      trend_basis: 'unavailable',
+      trend_delta_pct: null,
+    };
+
+    render(<CardUtilizationHistoryPanel history={unplottableHistory} currency="INR" />);
+
+    expect(
+      screen.getByRole('heading', { name: 'Utilization can’t be plotted yet' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/none has both a recorded balance and a positive credit limit/i),
+    ).toBeInTheDocument();
+
+    const table = screen.getByRole('table', {
+      name: 'Retained card records without plottable utilization',
+    });
+    expect(within(table).getByText('Issuer statement')).toBeInTheDocument();
+    expect(within(table).getByText('Settled-ledger estimate')).toBeInTheDocument();
+    expect(within(table).getAllByText('No usable limit')).toHaveLength(2);
   });
 
   it('gives the user a next step when history is empty or unavailable', () => {

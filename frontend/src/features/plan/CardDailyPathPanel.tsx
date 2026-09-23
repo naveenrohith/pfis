@@ -1,4 +1,5 @@
 import { Activity, AlertTriangle, CalendarRange, ShieldCheck } from 'lucide-react';
+import { ChartFrame } from '@/components/system';
 import { formatCurrency, formatDate } from '@/lib/format';
 import type { CardStatementProjection, CardStatementProjectionPoint } from '@/lib/types';
 
@@ -59,10 +60,12 @@ export function CardDailyPathPanel({
   projection,
   currency,
   targetPct,
+  creditLimit,
 }: {
   projection: CardStatementProjection;
   currency: string;
   targetPct?: number | null;
+  creditLimit?: number | null;
 }) {
   const points = projection.daily_path ?? [];
   if (projection.status !== 'available' || !points.length) return null;
@@ -72,9 +75,20 @@ export function CardDailyPathPanel({
   const targetPressure = firstPointWithStatus(points, 'target_status');
   const limitPressure = firstPointWithStatus(points, 'credit_limit_status');
   const datedEvents = eventPoints(points);
+  const hasLimitAnchor = creditLimit != null && creditLimit > 0;
   const maxUtilization = Math.max(
     100,
-    Math.ceil(Math.max(...points.map((point) => point.projected_utilization_pct), 0) / 10) * 10,
+    Math.ceil(
+      Math.max(
+        ...points.map((point) =>
+          Math.max(
+            point.projected_utilization_pct,
+            hasLimitAnchor ? (point.range_high / creditLimit!) * 100 : 0,
+          ),
+        ),
+        0,
+      ) / 10,
+    ) * 10,
   );
   const chartPoints = points
     .map(
@@ -82,6 +96,20 @@ export function CardDailyPathPanel({
         `${pointX(index, points.length).toFixed(2)},${pointY(point.projected_utilization_pct, maxUtilization).toFixed(2)}`,
     )
     .join(' ');
+  const uncertaintyBand = hasLimitAnchor
+    ? [
+        ...points.map(
+          (point, index) =>
+            `${pointX(index, points.length).toFixed(2)},${pointY((point.range_high / creditLimit!) * 100, maxUtilization).toFixed(2)}`,
+        ),
+        ...points
+          .map(
+            (point, index) =>
+              `${pointX(index, points.length).toFixed(2)},${pointY((point.range_low / creditLimit!) * 100, maxUtilization).toFixed(2)}`,
+          )
+          .reverse(),
+      ].join(' ')
+    : null;
   const limitY = pointY(100, maxUtilization).toFixed(2);
   const targetY =
     targetPct == null ? null : pointY(Math.max(targetPct, 0), maxUtilization).toFixed(2);
@@ -111,8 +139,10 @@ export function CardDailyPathPanel({
               A dated view of what may happen next
             </h2>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Each point carries the current pace, known dated events, and a cumulative uncertainty
-              band. This is a PFIS estimate, not an issuer schedule or live available-credit value.
+              {hasLimitAnchor
+                ? 'The shaded range is the projected balance range expressed against the credit limit on file.'
+                : 'The estimate range is available in the day-by-day evidence below. A utilization band needs a credit limit on file.'}{' '}
+              This is a PFIS estimate, not an issuer schedule or live available-credit value.
             </p>
           </div>
         </div>
@@ -123,29 +153,27 @@ export function CardDailyPathPanel({
       </div>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(16rem,0.65fr)] lg:items-start">
-        <div className="rounded-lg border border-border/65 bg-muted/25 p-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <div>
-              <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
-                UTILIZATION TRAJECTORY
-              </p>
-              <p className="mt-1 text-sm font-extrabold">{chartLabel}</p>
-            </div>
-            <p className="text-xs text-muted-foreground">Scale: 0-{maxUtilization}%</p>
-          </div>
-          <div className="mt-4 overflow-hidden rounded-md bg-card/80 px-2 py-3">
-            <svg
-              className="h-40 w-full"
-              viewBox="0 0 100 100"
-              role="img"
-              aria-label={chartLabel}
-              preserveAspectRatio="none"
-            >
+        <div className="min-w-0 rounded-lg border border-border/65 bg-muted/25 p-4">
+          <ChartFrame
+            title="Projected utilization by day"
+            description={`Percent of the credit limit on file · ${formatDate(first.date)} to ${formatDate(close.date)} · scale 0–${maxUtilization}%`}
+            summary={`${chartLabel} ${hasLimitAnchor ? 'The shaded band shows the low-to-high projected balance range as utilization of the credit limit on file.' : 'The utilization range is not plotted because no credit limit anchor is available.'}`}
+          >
+            <svg className="h-40 w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
               <title>Daily card utilization trajectory</title>
               <desc>
-                The line is the central PFIS estimate. A dashed target guide is shown when a user
-                utilization target exists; the hard-limit guide is 100 percent.
+                The solid line is the central PFIS estimate. A shaded region shows the low-to-high
+                projected balance range when a credit limit anchor is available. Dashed guides show
+                the configured target and 100 percent hard limit.
               </desc>
+              {uncertaintyBand ? (
+                <polygon
+                  points={uncertaintyBand}
+                  fill="currentColor"
+                  className="text-intelligence/15"
+                  stroke="none"
+                />
+              ) : null}
               <line
                 x1="0"
                 y1={limitY}
@@ -189,12 +217,18 @@ export function CardDailyPathPanel({
                 />
               ))}
             </svg>
-          </div>
+          </ChartFrame>
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-intelligence" aria-hidden="true" />
               Central estimate
             </span>
+            {hasLimitAnchor ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-3 rounded-sm bg-intelligence/20" aria-hidden="true" />
+                Projected range
+              </span>
+            ) : null}
             <span className="inline-flex items-center gap-1.5">
               <span className="h-px w-3 border-t border-dashed border-danger" aria-hidden="true" />
               Hard limit / 100%

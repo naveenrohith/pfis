@@ -71,12 +71,8 @@ export const WORKSPACES: WorkspaceDefinition[] = [
     sections: [
       { id: 'cash-plan', label: 'Safe to spend' },
       { id: 'networth', label: 'Position' },
-      { id: 'cards', label: 'Cards' },
       { id: 'obligations', label: 'Commitments' },
       { id: 'analytics', label: 'Outlook' },
-      { id: 'budgets', label: 'Budgets' },
-      { id: 'liabilities', label: 'All liabilities' },
-      { id: 'household', label: 'Household' },
     ],
   },
   {
@@ -112,6 +108,13 @@ const sectionToWorkspace = new Map<DashboardSectionId, WorkspaceId>(
   ),
 );
 
+const legacyPlanSections = new Set<DashboardSectionId>([
+  'cards',
+  'budgets',
+  'liabilities',
+  'household',
+]);
+
 const legacyWorkspaceAliases: Record<string, WorkspaceId> = {
   home: 'today',
   understand: 'insights',
@@ -120,14 +123,19 @@ const legacyWorkspaceAliases: Record<string, WorkspaceId> = {
 };
 
 export function dashboardSection(sectionId: string): DashboardSectionId | null {
-  return sectionToWorkspace.has(sectionId as DashboardSectionId)
+  return sectionToWorkspace.has(sectionId as DashboardSectionId) ||
+    legacyPlanSections.has(sectionId as DashboardSectionId)
     ? (sectionId as DashboardSectionId)
     : null;
 }
 
 export function workspaceForSection(sectionId: string): WorkspaceId | null {
   const section = dashboardSection(sectionId);
-  return section ? (sectionToWorkspace.get(section) ?? null) : null;
+  return section
+    ? legacyPlanSections.has(section)
+      ? 'plan'
+      : (sectionToWorkspace.get(section) ?? null)
+    : null;
 }
 
 export function dashboardWorkspace(workspaceId: string): WorkspaceId | null {

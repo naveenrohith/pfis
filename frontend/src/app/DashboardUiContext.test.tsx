@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { DashboardUiProvider, useDashboardUi } from './DashboardUiContext';
 
 function Harness() {
   const { activeWorkspace, activeSection, commandOpen, scrollTo } = useDashboardUi();
+  const [cardsReady, setCardsReady] = useState(false);
   return (
     <>
       <p data-testid="workspace">{activeWorkspace}</p>
@@ -12,7 +14,19 @@ function Harness() {
       <button type="button" onClick={() => scrollTo('transactions')}>
         Open transactions
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          scrollTo('cards', 'push');
+          window.setTimeout(() => setCardsReady(true), 30);
+        }}
+      >
+        Open card accounts
+      </button>
       {activeWorkspace === 'activity' && <div id="transactions">Transactions target</div>}
+      {activeWorkspace === 'plan' && activeSection === 'cards' && cardsReady ? (
+        <div id="cards">Cards target</div>
+      ) : null}
     </>
   );
 }
@@ -36,6 +50,57 @@ describe('DashboardUiProvider navigation', () => {
     expect(screen.getByTestId('section')).toHaveTextContent('transactions');
     expect(window.location.hash).toBe('#transactions');
     await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
+  });
+
+  it('keeps user-opened detail navigation in browser history', () => {
+    window.history.replaceState(null, '', '#obligations');
+    const initialHistoryLength = window.history.length;
+    render(
+      <DashboardUiProvider>
+        <Harness />
+      </DashboardUiProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open card accounts' }));
+
+    expect(window.location.hash).toBe('#cards');
+    expect(window.history.length).toBe(initialHistoryLength + 1);
+  });
+
+  it('waits for a lazy destination anchor before scrolling', async () => {
+    window.history.replaceState(null, '', '#obligations');
+    const scrolledTargets: string[] = [];
+    Element.prototype.scrollIntoView = function () {
+      scrolledTargets.push((this as HTMLElement).id);
+    };
+    render(
+      <DashboardUiProvider>
+        <Harness />
+      </DashboardUiProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open card accounts' }));
+
+    await waitFor(() => expect(screen.getByText('Cards target')).toBeInTheDocument());
+    await waitFor(() => expect(scrolledTargets).toContain('cards'));
+  });
+
+  it('restores the active Plan stage when browser Back changes the hash', async () => {
+    window.history.pushState(null, '', '#obligations');
+    window.history.pushState(null, '', '#cards');
+    render(
+      <DashboardUiProvider>
+        <Harness />
+      </DashboardUiProvider>,
+    );
+
+    window.history.back();
+
+    await waitFor(() => {
+      expect(window.location.hash).toBe('#obligations');
+      expect(screen.getByTestId('workspace')).toHaveTextContent('plan');
+      expect(screen.getByTestId('section')).toHaveTextContent('obligations');
+    });
   });
 
   it('restores a compatible workspace from a legacy hash', () => {

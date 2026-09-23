@@ -58,7 +58,7 @@ function DashboardWorkspace() {
   return (
     <div
       className={cn(
-        'grid min-h-screen bg-background lg:grid-cols-[88px_minmax(0,1fr)]',
+        'grid min-h-screen bg-background md:grid-cols-[88px_minmax(0,1fr)]',
         preferences.data?.density === 'compact' && 'dashboard-compact',
       )}
     >
@@ -69,7 +69,7 @@ function DashboardWorkspace() {
         Skip to workspace content
       </a>
       <SectionNav />
-      <div className="min-w-0 pb-24 lg:pb-0">
+      <div className="min-w-0 pb-24 md:pb-0">
         <Header />
         <main
           id="workspace-content"

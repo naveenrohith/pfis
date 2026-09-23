@@ -32,7 +32,7 @@ interface DashboardUiContextValue {
   setExplorerSearch: (value: string) => void;
   focusedReviewId: string | null;
   focusReview: (id: string | null) => void;
-  scrollTo: (id: string) => void;
+  scrollTo: (id: string, historyMode?: 'push' | 'replace') => void;
   quickAddOpen: boolean;
   setQuickAddOpen: (open: boolean) => void;
   commandOpen: boolean;
@@ -74,7 +74,7 @@ export function DashboardUiProvider({ children }: { children: React.ReactNode })
     });
   }, []);
 
-  const scrollTo = useCallback((id: string) => {
+  const scrollTo = useCallback((id: string, historyMode: 'push' | 'replace' = 'replace') => {
     const section = dashboardSection(id);
     if (!section) return;
     const workspace = workspaceForSection(section);
@@ -84,7 +84,14 @@ export function DashboardUiProvider({ children }: { children: React.ReactNode })
     setActiveSection(section);
     setPendingSection(section);
     if (window.location.hash !== `#${section}`) {
-      window.history.replaceState(null, '', `#${section}`);
+      const url = new URL(window.location.href);
+      url.hash = section;
+      const nextLocation = `${url.pathname}${url.search}${url.hash}`;
+      if (historyMode === 'push') {
+        window.history.pushState(window.history.state, '', nextLocation);
+      } else {
+        window.history.replaceState(window.history.state, '', nextLocation);
+      }
     }
   }, []);
 
@@ -95,22 +102,54 @@ export function DashboardUiProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!pendingSection) return;
-    const frame = window.requestAnimationFrame(() => {
-      document
-        .getElementById(pendingSection)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    let frame = 0;
+    let timeout: number | undefined;
+    let observer: MutationObserver | undefined;
+
+    const scrollWhenReady = () => {
+      const target = document.getElementById(pendingSection);
+      if (!target) return false;
+
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      observer?.disconnect();
+      if (timeout !== undefined) window.clearTimeout(timeout);
       setPendingSection(null);
+      return true;
+    };
+
+    frame = window.requestAnimationFrame(() => {
+      if (scrollWhenReady()) return;
+
+      observer = new MutationObserver(() => {
+        if (scrollWhenReady()) observer?.disconnect();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      if (scrollWhenReady()) return;
+
+      timeout = window.setTimeout(() => {
+        observer?.disconnect();
+        setPendingSection(null);
+      }, 15_000);
     });
-    return () => window.cancelAnimationFrame(frame);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      if (timeout !== undefined) window.clearTimeout(timeout);
+    };
   }, [activeWorkspace, pendingSection]);
 
   useEffect(() => {
-    const onHashChange = () => {
+    const onLocationChange = () => {
       const section = sectionFromHash(window.location.hash);
       if (section) scrollTo(section);
     };
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    window.addEventListener('hashchange', onLocationChange);
+    window.addEventListener('popstate', onLocationChange);
+    return () => {
+      window.removeEventListener('hashchange', onLocationChange);
+      window.removeEventListener('popstate', onLocationChange);
+    };
   }, [scrollTo]);
 
   useEffect(() => {

@@ -13,6 +13,8 @@ describe('workspace navigation model', () => {
     expect(workspaceForSection('transactions')).toBe('activity');
     expect(workspaceForSection('pipeline')).toBe('data');
     expect(workspaceForSection('settings')).toBe('data');
+    expect(workspaceForSection('cards')).toBe('plan');
+    expect(workspaceForSection('liabilities')).toBe('plan');
   });
 
   it('uses a stable entry section for each workspace', () => {
@@ -28,6 +30,8 @@ describe('workspace navigation model', () => {
     expect(sectionFromHash('#home')).toBe('overview');
     expect(sectionFromHash('#system')).toBe('inbox');
     expect(sectionFromHash('#settings')).toBe('settings');
+    expect(sectionFromHash('#cards')).toBe('cards');
+    expect(sectionFromHash('#budgets')).toBe('budgets');
     expect(sectionFromHash('#not-a-section')).toBeNull();
     expect(sectionFromHash('#%E0%A4%A')).toBeNull();
     expect(sectionFromHash('')).toBeNull();
