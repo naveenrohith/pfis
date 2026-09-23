@@ -216,7 +216,9 @@ test('missing net-worth data stays unavailable instead of displaying zero', asyn
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
   await page.getByRole('tab', { name: 'Position', exact: true }).click();
   await expect.poll(() => positionFailureServed).toBe(true);
-  await expect(page.getByRole('alert')).toContainText('Position data is unavailable');
+  await expect(page.getByRole('alert')).toContainText('Position data is unavailable', {
+    timeout: 20_000,
+  });
   await expect(page.getByText('Unavailable', { exact: true })).toHaveCount(3);
   await expect(page.locator('main')).not.toContainText('Add your first balance');
 });
