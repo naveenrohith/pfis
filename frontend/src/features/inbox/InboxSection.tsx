@@ -151,7 +151,7 @@ export function InboxSection({ embedded = false }: { embedded?: boolean } = {}) 
             <div className="flex items-center gap-2">
               <Badge variant={statusVariant}>{latest ? `Latest: ${latest}` : 'No sync yet'}</Badge>
               <Badge variant={liveConnected ? 'success' : 'default'}>
-                {liveConnected ? 'Live updates' : 'Polling updates'}
+                {liveConnected ? 'Status connected' : 'Periodic status refresh'}
               </Badge>
               {(needsReauthorization || disconnected) && gmailConnectUrl ? (
                 <ButtonLink variant="outline" size="sm" href={gmailConnectUrl}>

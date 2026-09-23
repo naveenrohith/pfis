@@ -11,16 +11,12 @@ import {
   X,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  ActionSurface,
-  FinancialHero,
-  InsightSurface,
-  PageIntro,
-} from '@/components/system';
+import { ActionSurface, FinancialHero, InsightSurface, PageIntro } from '@/components/system';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState, Skeleton } from '@/components/ui/Skeleton';
 import { useDashboardUi } from '@/app/DashboardUiContext';
+import { WorkspaceContextBar } from '@/components/system';
 import { useAuth } from '@/features/auth/AuthContext';
 import { RecommendationFollowUp } from '@/features/guidance/RecommendationFollowUp';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
@@ -36,7 +32,10 @@ import { buildTodayBriefCopy } from './todayCopy';
 export function TodayExperience() {
   const { user } = useAuth();
   const { month, year } = useWorkspace();
-  const { scrollTo } = useDashboardUi();
+  const { activeSection, scrollTo } = useDashboardUi();
+  const currentView = ['overview', 'guidance', 'recommendations'].includes(activeSection)
+    ? activeSection
+    : 'overview';
   const queryClient = useQueryClient();
   const { notify } = useToast();
   const workspace = useWorkspaceSnapshot();
@@ -136,7 +135,6 @@ export function TodayExperience() {
   const actionGoals = primaryAction?.goal_links ?? [];
   const actionResolution = primaryAction?.resolution;
   const actionTarget = primaryAction?.target ?? 'insights';
-  const healthScore = financialHealth?.monthly_stability;
   const recurringBurden = financialHealth?.recurring_burden;
   const evidence = (data?.insights ?? []).slice(0, 2);
   const lowData = financialHealth?.data_sufficiency === 'low';
@@ -151,22 +149,23 @@ export function TodayExperience() {
   });
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <PageIntro
-        eyebrow={`${greeting(user?.timezone ?? 'Asia/Kolkata')} · Financial brief`}
+        eyebrow={`${greeting(user?.timezone ?? 'Asia/Kolkata')} · ${currentView === 'overview' ? 'Financial brief' : currentView === 'guidance' ? 'Evidence' : 'Action history'}`}
         title={
-          lowData ? (
-            headline
-          ) : (
-            <>
-              {headline}{' '}
-              <span className={netCashFlow >= 0 ? 'text-success' : 'text-coral'}>
-                {netCashFlow >= 0 ? 'Your buffer is growing.' : 'Your spending is running ahead.'}
-              </span>
-            </>
-          )
+          currentView === 'overview'
+            ? headline
+            : currentView === 'guidance'
+              ? 'What changed, and why?'
+              : 'Your action follow-up'
         }
-        description={summary}
+        description={
+          currentView === 'overview'
+            ? summary
+            : currentView === 'guidance'
+              ? 'A short, evidence-led explanation of the changes behind this month’s brief.'
+              : 'Review accepted actions and record what happened. Each outcome is final.'
+        }
         action={
           <Badge variant={liveConnected ? 'success' : 'outline'}>
             <span
@@ -175,35 +174,72 @@ export function TodayExperience() {
                 liveConnected ? 'bg-success' : 'bg-muted-foreground',
               )}
             />
-            {running ? 'Syncing' : liveConnected ? 'Live' : 'Saved snapshot'}
+            {running ? 'Syncing' : liveConnected ? 'Connected' : 'Saved snapshot'}
           </Badge>
         }
       />
 
-      {lowData ? (
-        <div className="flex items-start gap-3 rounded-xl border border-warning/20 bg-warning/10 px-4 py-3 text-sm">
-          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-          <div>
-            <p className="font-extrabold">This brief has limited evidence</p>
-            <p className="mt-1 text-muted-foreground">
-              PFIS found fewer than three transactions in this period. Trends and recommendations
-              will become more reliable as activity arrives.
-            </p>
-          </div>
-        </div>
-      ) : null}
+      <WorkspaceContextBar label="Today views">
+        <nav
+          aria-label="Today views"
+          className="scrollbar-none flex min-h-11 max-w-full items-center gap-1 overflow-x-auto rounded-lg bg-secondary/75 p-1 sm:w-auto"
+        >
+          {[
+            { value: 'overview', label: 'Brief' },
+            { value: 'guidance', label: 'Why it changed' },
+            { value: 'recommendations', label: 'Actions' },
+          ].map((view) => (
+            <a
+              key={view.value}
+              href={`#${view.value}`}
+              aria-current={currentView === view.value ? 'page' : undefined}
+              onClick={(event) => {
+                if (
+                  event.button !== 0 ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                scrollTo(view.value);
+              }}
+              className={cn(
+                'focus-ring relative z-10 inline-flex min-h-11 shrink-0 items-center rounded-md px-3 text-sm font-bold transition-colors',
+                currentView === view.value
+                  ? 'bg-card text-foreground shadow-lift'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {view.label}
+            </a>
+          ))}
+        </nav>
+      </WorkspaceContextBar>
 
-      <div
-        id="recommendations"
-        className="grid scroll-mt-24 gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,.65fr)]"
-      >
-        <FinancialHero>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm text-muted-foreground">Net cash flow</p>
+      {currentView === 'overview' ? (
+        <div className="scroll-mt-24 space-y-6">
+          {lowData ? (
+            <div className="flex items-start gap-3 border-y border-warning/25 bg-warning/5 px-4 py-3 text-sm">
+              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              <div>
+                <p className="font-extrabold">This brief has limited evidence</p>
+                <p className="mt-1 text-muted-foreground">
+                  PFIS found fewer than three transactions in this period. Trends and
+                  recommendations will become more reliable as activity arrives.
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,.65fr)]">
+            <FinancialHero>
+              <p className="text-sm text-muted-foreground">Net cash flow this month</p>
               <p
                 className={cn(
-                  'money-value mt-1 text-4xl sm:text-5xl lg:text-6xl',
+                  'money-value mt-1 text-4xl sm:text-5xl',
                   netCashFlow < 0 && 'text-danger',
                 )}
               >
@@ -215,241 +251,222 @@ export function TodayExperience() {
                   : netMovement === 0
                     ? 'Unchanged from last month'
                     : `${formatCurrency(Math.abs(netMovement), currency)} ${
-                        netMovement >= 0 ? 'better' : 'lower'
+                        netMovement >= 0 ? 'higher' : 'lower'
                       } than last month`}
               </p>
+              <FinancialHorizon
+                plan={cashPlan.data}
+                loading={cashPlan.isLoading}
+                onComplete={() => scrollTo('cash-plan')}
+              />
+            </FinancialHero>
+
+            <ActionSurface
+              icon={<Sparkles className="h-4 w-4" />}
+              title={primaryAction?.title ?? 'Explore the drivers behind this month'}
+              description={
+                primaryAction?.description ??
+                'PFIS has no urgent action for this period. Review the evidence and keep your data current.'
+              }
+              actionLabel={primaryAction?.action_label ?? 'Open insights'}
+              onAction={() => scrollTo(actionTarget)}
+              secondary={
+                primaryAction?.expected_impact ||
+                (primaryAction?.reason_codes?.length
+                  ? `Based on ${primaryAction.reason_codes.length} signals`
+                  : 'Based on your selected month')
+              }
+              footer={
+                primaryAction && !decisions.isLoading ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={
+                        updateRecommendation.isPending || actionResolution?.status === 'blocked'
+                      }
+                      onClick={() =>
+                        updateRecommendation.mutate({
+                          recommendationId: primaryAction.id,
+                          state: 'accepted',
+                        })
+                      }
+                    >
+                      <Check aria-hidden="true" className="h-3.5 w-3.5" /> Use this action
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-background hover:bg-background/10"
+                      disabled={updateRecommendation.isPending}
+                      aria-label={`Snooze ${primaryAction.title} for 7 days`}
+                      onClick={() =>
+                        updateRecommendation.mutate({
+                          recommendationId: primaryAction.id,
+                          state: 'snoozed',
+                        })
+                      }
+                    >
+                      <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-background hover:bg-background/10"
+                      disabled={updateRecommendation.isPending}
+                      aria-label={`Mark ${primaryAction.title} as not relevant`}
+                      onClick={() =>
+                        updateRecommendation.mutate({
+                          recommendationId: primaryAction.id,
+                          state: 'not_relevant',
+                        })
+                      }
+                    >
+                      <X aria-hidden="true" className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ) : undefined
+              }
+            />
+          </div>
+
+          {primaryAction &&
+          !decisions.isLoading &&
+          (actionResolution ||
+            primaryAction.consequence ||
+            primaryAction.smallest_action ||
+            actionConflicts.length ||
+            actionGoals.length) ? (
+            <details className="border-y border-border/70 px-1 py-3">
+              <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
+                Show recommendation evidence and trade-offs
+              </summary>
+              <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
+                {actionResolution ? (
+                  <p>
+                    <span className="font-bold text-foreground">{actionResolution.label}:</span>{' '}
+                    {actionResolution.next_step}
+                  </p>
+                ) : null}
+                {primaryAction.consequence ? (
+                  <p>
+                    <span className="font-bold text-foreground">Bounded consequence:</span>{' '}
+                    {formatRecommendationConsequence(primaryAction.consequence, currency)}
+                  </p>
+                ) : null}
+                {primaryAction.smallest_action ? (
+                  <p>
+                    <span className="font-bold text-foreground">Smallest feasible step:</span>{' '}
+                    {primaryAction.smallest_action}
+                  </p>
+                ) : null}
+                {actionConflicts.slice(0, 2).map((conflict) => (
+                  <p key={conflict.code}>
+                    <span className="font-bold text-warning">{conflict.title}:</span>{' '}
+                    {conflict.description}
+                  </p>
+                ))}
+                {actionGoals.length ? (
+                  <p>
+                    <span className="font-bold text-foreground">Supports:</span>{' '}
+                    {actionGoals.map((goal) => goal.label).join(', ')}
+                  </p>
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+
+          <section aria-labelledby="financial-pulse-title">
+            <div className="mb-3 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-end">
+              <div>
+                <p className="text-xs font-bold text-muted-foreground">At a glance</p>
+                <h2 id="financial-pulse-title" className="mt-1 text-lg font-extrabold">
+                  Two signals for this month
+                </h2>
+              </div>
+              <Button variant="link" onClick={() => scrollTo('analytics')}>
+                View full outlook <ArrowRight className="h-4 w-4" />
+              </Button>
             </div>
-            {healthScore !== undefined ? (
-              <div className="text-right">
-                <p className="text-xs text-muted-foreground">Monthly stability</p>
-                <p
-                  className={cn(
-                    'money-value mt-1 text-3xl',
-                    healthScore >= 70
-                      ? 'text-success'
-                      : healthScore >= 45
-                        ? 'text-warning'
-                        : 'text-danger',
-                  )}
-                >
-                  {Math.round(healthScore)}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Data confidence {financialHealth?.data_confidence ?? 0}
-                </p>
-              </div>
-            ) : null}
-          </div>
-          <FinancialHorizon
-            plan={cashPlan.data}
-            loading={cashPlan.isLoading}
-            onComplete={() => scrollTo('cash-plan')}
-          />
-        </FinancialHero>
-
-        <ActionSurface
-          icon={<Sparkles className="h-4 w-4" />}
-          title={primaryAction?.title ?? 'Explore the drivers behind this month'}
-          description={
-            primaryAction?.description ??
-            'PFIS has no urgent action for this period. Review the evidence and keep your data current.'
-          }
-          actionLabel={primaryAction?.action_label ?? 'Open insights'}
-          onAction={() => scrollTo(actionTarget)}
-          secondary={
-            primaryAction?.expected_impact ||
-            (primaryAction?.reason_codes?.length
-              ? `Based on ${primaryAction.reason_codes.length} verified signal${primaryAction.reason_codes.length === 1 ? '' : 's'}`
-              : 'Based on your selected month')
-          }
-          footer={
-            primaryAction && !decisions.isLoading ? (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={
-                    updateRecommendation.isPending || actionResolution?.status === 'blocked'
-                  }
-                  onClick={() =>
-                    updateRecommendation.mutate({
-                      recommendationId: primaryAction.id,
-                      state: 'accepted',
-                    })
-                  }
-                >
-                  <Check aria-hidden="true" className="h-3.5 w-3.5" /> Use this action
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-background hover:bg-background/10"
-                  disabled={updateRecommendation.isPending}
-                  aria-label={`Snooze ${primaryAction.title} for 7 days`}
-                  onClick={() =>
-                    updateRecommendation.mutate({
-                      recommendationId: primaryAction.id,
-                      state: 'snoozed',
-                    })
-                  }
-                >
-                  <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-background hover:bg-background/10"
-                  disabled={updateRecommendation.isPending}
-                  aria-label={`Mark ${primaryAction.title} as not relevant`}
-                  onClick={() =>
-                    updateRecommendation.mutate({
-                      recommendationId: primaryAction.id,
-                      state: 'not_relevant',
-                    })
-                  }
-                >
-                  <X aria-hidden="true" className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ) : undefined
-          }
-        />
-      </div>
-
-      {primaryAction &&
-      !decisions.isLoading &&
-      (actionResolution ||
-        primaryAction.consequence ||
-        primaryAction.smallest_action ||
-        actionConflicts.length ||
-        actionGoals.length) ? (
-        <details className="rounded-xl border border-border/70 bg-card px-4 py-3 sm:px-5">
-          <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
-            Show recommendation evidence and trade-offs
-          </summary>
-          <div className="mt-3 grid gap-2 text-sm leading-6 text-muted-foreground">
-            {actionResolution ? (
-              <p>
-                <span className="font-bold text-foreground">{actionResolution.label}:</span>{' '}
-                {actionResolution.next_step}
-              </p>
-            ) : null}
-            {primaryAction.consequence ? (
-              <p>
-                <span className="font-bold text-foreground">Bounded consequence:</span>{' '}
-                {formatRecommendationConsequence(primaryAction.consequence, currency)}
-              </p>
-            ) : null}
-            {primaryAction.smallest_action ? (
-              <p>
-                <span className="font-bold text-foreground">Smallest feasible step:</span>{' '}
-                {primaryAction.smallest_action}
-              </p>
-            ) : null}
-            {actionConflicts.slice(0, 2).map((conflict) => (
-              <p key={conflict.code}>
-                <span className="font-bold text-warning">{conflict.title}:</span>{' '}
-                {conflict.description}
-              </p>
-            ))}
-            {actionGoals.length ? (
-              <p>
-                <span className="font-bold text-foreground">Supports:</span>{' '}
-                {actionGoals.map((goal) => goal.label).join(', ')}
-              </p>
-            ) : null}
-          </div>
-        </details>
-      ) : null}
-
-      <RecommendationFollowUp />
-
-      <section aria-labelledby="financial-pulse-title">
-        <div className="mb-5 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-end">
-          <div>
-            <p className="text-xs font-bold text-muted-foreground">Financial pulse</p>
-            <h2
-              id="financial-pulse-title"
-              className="mt-1 text-2xl font-extrabold tracking-[-0.035em]"
-            >
-              The three signals that matter now
-            </h2>
-          </div>
-          <Button variant="link" onClick={() => scrollTo('analytics')}>
-            View full outlook <ArrowRight className="h-4 w-4" />
-          </Button>
-        </div>
-        <div className="grid gap-5 border-y border-border/70 py-6 md:grid-cols-3 md:divide-x md:divide-border">
-          <Pulse
-            label="Spent this month"
-            value={formatCurrency(spend, currency)}
-            context={formatComparison(monthComparison?.spend_change_pct)}
-            tone={
-              monthComparison?.spend_change_pct && monthComparison.spend_change_pct > 0
-                ? 'danger'
-                : 'neutral'
-            }
-          />
-          <Pulse
-            label="Projected month end"
-            value={formatCurrency(projection?.projected_net ?? netCashFlow, currency)}
-            context={
-              projection
-                ? `At ${formatCurrency(projection.daily_spend_rate, currency)} per day`
-                : 'Projection is being prepared'
-            }
-            tone={(projection?.projected_net ?? netCashFlow) < 0 ? 'warning' : 'positive'}
-          />
-          <Pulse
-            label="Recurring burden"
-            value={recurringBurden === undefined ? '—' : `${recurringBurden.toFixed(1)}%`}
-            context={
-              projection
-                ? `${formatCurrency(projection.recurring_commitments, currency)} in commitments`
-                : 'Commitment analysis is being prepared'
-            }
-            tone={recurringBurden !== undefined && recurringBurden > 35 ? 'warning' : 'neutral'}
-          />
-        </div>
-      </section>
-
-      <section
-        id="guidance"
-        className="grid scroll-mt-24 gap-7 lg:grid-cols-[minmax(260px,.72fr)_minmax(0,1.28fr)]"
-      >
-        <div>
-          <p className="text-xs font-bold text-muted-foreground">What changed</p>
-          <h2 className="mt-1 text-2xl font-extrabold tracking-[-0.035em]">
-            Evidence behind today’s brief
-          </h2>
-          <p className="mt-3 max-w-sm text-sm leading-6 text-muted-foreground">
-            PFIS separates observed facts from recommendations so you can see why each action
-            appears.
-          </p>
-        </div>
-        <div className="space-y-6">
-          {evidence.length ? (
-            evidence.map((item, index) => (
-              <InsightSurface
-                key={`${item.title}-${index}`}
-                icon={
-                  index === 0 ? (
-                    <TrendingUp className="h-4 w-4" />
-                  ) : (
-                    <WalletCards className="h-4 w-4" />
-                  )
-                }
-                title={item.title}
-                description={item.description}
+            <div className="grid gap-5 border-y border-border/70 py-4 sm:grid-cols-2 sm:divide-x sm:divide-border">
+              <Pulse
+                label="Spent this month"
+                value={formatCurrency(spend, currency)}
+                context={formatComparison(monthComparison?.spend_change_pct)}
                 tone={
-                  item.severity === 'success'
-                    ? 'positive'
-                    : item.severity === 'warning' || item.severity === 'danger'
-                      ? 'attention'
-                      : 'neutral'
+                  monthComparison?.spend_change_pct && monthComparison.spend_change_pct > 0
+                    ? 'danger'
+                    : 'neutral'
                 }
               />
-            ))
+              <Pulse
+                label="Projected month end"
+                value={formatCurrency(projection?.projected_net ?? netCashFlow, currency)}
+                context={
+                  projection
+                    ? `At ${formatCurrency(projection.daily_spend_rate, currency)} per day`
+                    : 'Projection is being prepared'
+                }
+                tone={(projection?.projected_net ?? netCashFlow) < 0 ? 'warning' : 'positive'}
+              />
+            </div>
+          </section>
+
+          <footer className="flex flex-col justify-between gap-3 border-t border-border/70 pt-4 text-xs text-muted-foreground sm:flex-row">
+            <p data-testid="brief-data-through">
+              Based on activity through {projection?.data_through || 'the selected period'} ·{' '}
+              {snapshot?.transaction_count ?? 0} transactions
+              {data?.sync_summary.last_synced_at
+                ? ` · Synced ${formatTime(data.sync_summary.last_synced_at)}`
+                : ''}
+            </p>
+            <button
+              type="button"
+              onClick={() => scrollTo('guidance')}
+              className="focus-ring rounded text-left font-bold text-primary"
+            >
+              See how PFIS reached this →
+            </button>
+          </footer>
+        </div>
+      ) : null}
+
+      {currentView === 'guidance' ? (
+        <section id="guidance" className="scroll-mt-24 space-y-5" aria-labelledby="guidance-title">
+          <div className="max-w-2xl">
+            <p className="text-xs font-bold text-muted-foreground">Evidence, not another score</p>
+            <h2 id="guidance-title" className="mt-1 text-xl font-extrabold">
+              The signals behind this brief
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              PFIS separates observed changes from recommendations so you can inspect why an action
+              appears.
+            </p>
+          </div>
+          {evidence.length ? (
+            <div className="divide-y divide-border border-y border-border">
+              {evidence.map((item, index) => (
+                <InsightSurface
+                  key={`${item.title}-${index}`}
+                  icon={
+                    index === 0 ? (
+                      <TrendingUp className="h-4 w-4" />
+                    ) : (
+                      <WalletCards className="h-4 w-4" />
+                    )
+                  }
+                  title={item.title}
+                  description={item.description}
+                  tone={
+                    item.severity === 'success'
+                      ? 'positive'
+                      : item.severity === 'warning' || item.severity === 'danger'
+                        ? 'attention'
+                        : 'neutral'
+                  }
+                />
+              ))}
+            </div>
           ) : (
             <InsightSurface
               icon={<TrendingDown className="h-4 w-4" />}
@@ -458,25 +475,59 @@ export function TodayExperience() {
               tone="positive"
             />
           )}
-        </div>
-      </section>
+          <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+            <Pulse
+              label="Recurring burden"
+              value={recurringBurden === undefined ? '—' : `${recurringBurden.toFixed(1)}%`}
+              context={
+                projection
+                  ? `${formatCurrency(projection.recurring_commitments, currency)} in commitments`
+                  : 'Commitment analysis is being prepared'
+              }
+              tone={recurringBurden !== undefined && recurringBurden > 35 ? 'warning' : 'neutral'}
+            />
+            <Pulse
+              label="Data confidence"
+              value={
+                financialHealth?.data_confidence == null
+                  ? 'Not available'
+                  : `${financialHealth.data_confidence}%`
+              }
+              context="Read alongside the underlying evidence, not as a guarantee."
+              tone="neutral"
+            />
+          </div>
+          <footer className="border-t border-border pt-4 text-xs text-muted-foreground">
+            Based on activity through {projection?.data_through || 'the selected period'} ·{' '}
+            {snapshot?.transaction_count ?? 0} transactions
+            {data?.sync_summary.last_synced_at
+              ? ` · Synced ${formatTime(data.sync_summary.last_synced_at)}`
+              : ''}
+          </footer>
+        </section>
+      ) : null}
 
-      <footer className="flex flex-col justify-between gap-3 border-t border-border/70 pt-5 text-xs text-muted-foreground sm:flex-row">
-        <p data-testid="brief-data-through">
-          Based on activity through {projection?.data_through || 'the selected period'} ·{' '}
-          {snapshot?.transaction_count ?? 0} transactions
-          {data?.sync_summary.last_synced_at
-            ? ` · Synced ${formatTime(data.sync_summary.last_synced_at)}`
-            : ''}
-        </p>
-        <button
-          type="button"
-          onClick={() => scrollTo('guidance')}
-          className="focus-ring rounded text-left font-bold text-primary"
-        >
-          See how PFIS reached this →
-        </button>
-      </footer>
+      {currentView === 'recommendations' ? (
+        <section id="recommendations" className="scroll-mt-24" aria-labelledby="actions-title">
+          <h2 id="actions-title" className="sr-only">
+            Accepted action follow-up
+          </h2>
+          {decisions.isLoading ? (
+            <Skeleton className="h-28" />
+          ) : (decisions.data ?? []).some(
+              (decision: RecommendationDecision) => decision.state === 'accepted',
+            ) ? (
+            <RecommendationFollowUp />
+          ) : (
+            <EmptyState
+              icon={<Check className="h-5 w-5" aria-hidden="true" />}
+              title="No action outcomes to review"
+              description="When you choose an action from the brief, its follow-up will appear here."
+              action={<Button onClick={() => scrollTo('overview')}>Back to your brief</Button>}
+            />
+          )}
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -507,174 +558,146 @@ function FinancialHorizon({
   loading: boolean;
   onComplete: () => void;
 }) {
-  const ready = plan?.readiness === 'ready';
+  const readyPlan = plan?.readiness === 'ready' && plan.flexible_money != null ? plan : null;
+  const ready = readyPlan != null;
   const currentPosition =
     plan?.planning_balance ?? plan?.estimated_balance ?? plan?.verified_balance;
   const currentPositionAsOf =
     plan?.planning_balance_as_of ?? plan?.estimated_balance_as_of ?? plan?.balance_as_of;
   const currentPositionLabel =
-    plan?.balance_basis === 'estimated' ? 'Estimated current position' : 'Verified bank position';
+    plan?.balance_basis === 'estimated' ? 'Estimated bank position' : 'Observed bank position';
   const missingAction: Record<NonNullable<CashPlan['readiness']>, string> = {
     ready: '',
-    needs_verified_balance: 'Record a verified bank balance',
-    needs_fresh_balance: 'Refresh the verified bank balance',
+    needs_verified_balance: 'Record an observed bank balance',
+    needs_fresh_balance: 'Refresh the observed bank balance',
     needs_next_income: 'Confirm the next income date',
     needs_position_review: 'Review current bank activity',
   };
-  const horizonItems = ready
-    ? [
-        {
-          label: currentPositionLabel,
-          evidence: plan.balance_basis === 'estimated' ? 'Estimated' : 'Observed',
-          value: formatCurrency(currentPosition, plan.currency),
-          detail: `As of ${formatDate(currentPositionAsOf)}`,
-        },
-        {
-          label: 'Confirmed obligations',
-          evidence: 'Confirmed',
-          value: `−${formatCurrency(plan.commitment_total, plan.currency)}`,
-          detail: `Due before ${formatDate(plan.next_income_date)}`,
-        },
-        {
-          label: 'Approved reserves',
-          evidence: 'Approved',
-          value: `−${formatCurrency(plan.approved_reserve_total, plan.currency)}`,
-          detail: 'Only allocations you explicitly approved',
-        },
-        {
-          label: 'Flexible money',
-          evidence: 'Calculated',
-          value: formatCurrency(plan.flexible_money ?? 0, plan.currency),
-          detail: `Available to plan until ${formatDate(plan.next_income_date)}`,
-        },
-      ]
-    : [
-        {
-          label: currentPositionLabel,
-          evidence:
-            plan?.readiness === 'needs_position_review'
-              ? 'Review'
-              : currentPosition != null
-                ? 'Observed'
-                : 'Required',
-          value:
-            currentPosition != null
-              ? formatCurrency(currentPosition, plan?.currency)
-              : 'Not recorded',
-          detail: currentPositionAsOf
-            ? `As of ${formatDate(currentPositionAsOf)}${plan?.readiness === 'needs_position_review' ? ' · not spendable yet' : ''}`
-            : 'No estimate used',
-        },
-        {
-          label: 'Confirmed obligations',
-          evidence: 'Held',
-          value: 'Not calculated',
-          detail: 'Calculated only after the required facts are current',
-        },
-        {
-          label: 'Approved reserves',
-          evidence: 'Held',
-          value: 'Not calculated',
-          detail: 'Draft reserves never reduce money',
-        },
-        {
-          label: 'Next confirmed income',
-          evidence: plan?.next_income_date ? 'Confirmed' : 'Required',
-          value: plan?.next_income_date ? formatDate(plan.next_income_date) : 'Not confirmed',
-          detail: 'PFIS never guesses salary timing',
-        },
-      ];
 
   return (
-    <figure className="mt-8" aria-labelledby="money-horizon-title">
-      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-primary/15 pb-4">
-        <div>
-          <p className="text-[0.68rem] font-extrabold uppercase tracking-[0.18em] text-foreground">
-            Financial horizon
+    <figure className="mt-6 border-t border-primary/15 pt-4" aria-labelledby="money-horizon-title">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-foreground">
+            Safe to spend
           </p>
-          <h2 id="money-horizon-title" className="mt-1 text-lg font-extrabold tracking-tight">
+          <h2 id="money-horizon-title" className="mt-1 text-xl font-extrabold tracking-tight">
             {loading
-              ? 'Checking verified planning inputs'
-              : ready
-                ? `${formatCurrency(plan.flexible_money ?? 0, plan.currency)} is flexible until ${formatDate(plan.next_income_date)}`
+              ? 'Checking planning inputs'
+              : readyPlan
+                ? formatCurrency(readyPlan.flexible_money, readyPlan.currency)
                 : plan
-                  ? missingAction[plan.readiness]
-                  : 'Connect a verified bank position'}
+                  ? missingAction[plan.readiness] || 'Review calculation inputs'
+                  : 'Set up a bank position'}
           </h2>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            {readyPlan
+              ? `Flexible until ${formatDate(readyPlan.next_income_date)} · ${readyPlan.balance_basis === 'estimated' ? 'estimated position' : 'observed position'}${currentPositionAsOf ? ` as of ${formatDate(currentPositionAsOf)}` : ''}`
+              : 'Not calculated until the required evidence is ready.'}
+          </p>
         </div>
         <Badge variant={ready ? 'success' : 'warning'}>
-          {ready ? 'Statement-backed plan' : 'Data action needed'}
+          {ready ? 'Ready for planning' : 'Evidence needed'}
         </Badge>
       </div>
 
-      <dl className="relative mt-6 grid gap-x-5 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
-        <div
-          className="absolute left-4 right-4 top-2 hidden h-px bg-gradient-to-r from-primary/45 via-settlement/45 to-intelligence/45 lg:block"
-          aria-hidden="true"
-        />
-        {horizonItems.map((item, index) => (
-          <div key={item.label} className="relative min-w-0">
-            <span
-              className={cn(
-                'mb-4 hidden h-4 w-4 rounded-full border-[3px] border-background shadow-[0_0_0_1px_hsl(var(--primary)/.35)] lg:block',
-                index === horizonItems.length - 1 ? 'bg-intelligence' : 'bg-primary',
-              )}
-              aria-hidden="true"
-            />
-            <dt className="text-xs font-bold text-muted-foreground">{item.label}</dt>
-            <dd
-              className={cn(
-                'money-value mt-1 truncate text-xl',
-                ready && index === horizonItems.length - 1 ? 'text-intelligence' : '',
-              )}
-            >
-              {item.value}
-            </dd>
-            <dd className="mt-1 text-[0.68rem] font-extrabold uppercase tracking-[0.12em] text-foreground">
-              {item.evidence}
-            </dd>
-            <dd className="mt-1 text-xs leading-5 text-muted-foreground">{item.detail}</dd>
-          </div>
-        ))}
-      </dl>
-
       {!ready ? (
         <Button className="mt-5" size="sm" variant="outline" onClick={onComplete}>
-          Complete Cash Plan evidence <ArrowRight className="h-4 w-4" />
+          Review Safe to spend <ArrowRight className="h-4 w-4" />
         </Button>
       ) : null}
 
       <details className="mt-4 border-t border-primary/15 pt-2 text-sm">
         <summary className="focus-ring cursor-pointer rounded-md py-2 font-bold text-muted-foreground hover:text-foreground">
-          Evidence and calculation assumptions
+          Show calculation details
         </summary>
         {plan ? (
-          <div className="mt-2 grid gap-4 pb-2 text-xs leading-5 text-muted-foreground sm:grid-cols-[.7fr_1.3fr]">
-            <p>
-              Funding scope{' '}
-              <strong className="text-foreground">
-                {plan.primary_financial_account_id ? 'one confirmed bank account' : 'not selected'}
-              </strong>
-              <br />
-              Balance as of{' '}
-              <strong className="text-foreground">{formatDate(plan.balance_as_of)}</strong>
-            </p>
-            <ul className="list-disc space-y-1 pl-4">
-              {plan.assumptions.map((assumption) => (
-                <li key={assumption}>{assumption}</li>
-              ))}
-              {ready ? (
-                <li>
-                  Flexible money equals verified bank balance minus confirmed pre-income commitments
-                  minus approved reserve allocations.
-                </li>
+          <div className="mt-3 space-y-4 pb-2">
+            <dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <dt className="text-xs font-bold text-muted-foreground">{currentPositionLabel}</dt>
+                <dd className="mt-1 text-sm font-extrabold">
+                  {currentPosition == null
+                    ? 'Not recorded'
+                    : formatCurrency(currentPosition, plan.currency)}
+                </dd>
+                <dd className="mt-1 text-xs text-muted-foreground">
+                  {currentPositionAsOf
+                    ? `As of ${formatDate(currentPositionAsOf)}`
+                    : 'No dated observation'}
+                  {plan.balance_basis === 'estimated'
+                    ? ' · estimate'
+                    : ' · user/provider observation'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-bold text-muted-foreground">Confirmed obligations</dt>
+                <dd className="mt-1 text-sm font-extrabold">
+                  {ready
+                    ? `−${formatCurrency(plan.commitment_total, plan.currency)}`
+                    : 'Not calculated'}
+                </dd>
+                <dd className="mt-1 text-xs text-muted-foreground">
+                  {ready
+                    ? `Due before ${formatDate(plan.next_income_date)}`
+                    : 'Held until required evidence is ready'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-bold text-muted-foreground">Approved reserves</dt>
+                <dd className="mt-1 text-sm font-extrabold">
+                  {ready
+                    ? `−${formatCurrency(plan.approved_reserve_total, plan.currency)}`
+                    : 'Not calculated'}
+                </dd>
+                <dd className="mt-1 text-xs text-muted-foreground">
+                  Draft reserves do not reduce the amount
+                </dd>
+              </div>
+              {readyPlan ? (
+                <div>
+                  <dt className="text-xs font-bold text-muted-foreground">Flexible money</dt>
+                  <dd className="mt-1 text-sm font-extrabold">
+                    {formatCurrency(readyPlan.flexible_money, readyPlan.currency)}
+                  </dd>
+                  <dd className="mt-1 text-xs text-muted-foreground">
+                    Available to plan until {formatDate(readyPlan.next_income_date)}
+                  </dd>
+                </div>
               ) : null}
-            </ul>
+              <div>
+                <dt className="text-xs font-bold text-muted-foreground">Next confirmed income</dt>
+                <dd className="mt-1 text-sm font-extrabold">
+                  {plan.next_income_date ? formatDate(plan.next_income_date) : 'Not confirmed'}
+                </dd>
+                <dd className="mt-1 text-xs text-muted-foreground">
+                  PFIS does not guess income timing
+                </dd>
+              </div>
+            </dl>
+            <div className="grid gap-3 border-t border-primary/15 pt-3 text-xs leading-5 text-muted-foreground sm:grid-cols-[.7fr_1.3fr]">
+              <p>
+                Funding scope{' '}
+                <strong className="text-foreground">
+                  {plan.primary_financial_account_id ? 'one selected bank account' : 'not selected'}
+                </strong>
+              </p>
+              <ul className="list-disc space-y-1 pl-4">
+                {plan.assumptions.map((assumption) => (
+                  <li key={assumption}>{assumption}</li>
+                ))}
+                {readyPlan ? (
+                  <li>
+                    Flexible money equals the observed or estimated bank position minus confirmed
+                    pre-income commitments and approved reserve allocations.
+                  </li>
+                ) : null}
+              </ul>
+            </div>
           </div>
         ) : (
           <p className="pb-2 text-xs text-muted-foreground">
-            PFIS will show the observed facts and deterministic calculation after a funding account
-            is selected.
+            PFIS will show the observed facts and calculation after a funding account is selected.
           </p>
         )}
       </details>

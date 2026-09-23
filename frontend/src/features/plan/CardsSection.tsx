@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CalendarDays,
@@ -46,14 +46,35 @@ import type {
 } from '@/lib/types';
 import { CardUtilizationHistoryPanel } from './CardUtilizationHistoryPanel';
 
-type CardWorkspaceView = 'overview' | 'activity' | 'plan' | 'evidence';
+type CardWorkspaceView = 'now' | 'pay' | 'activity' | 'evidence';
 
 const CARD_WORKSPACE_TABS = [
-  { value: 'overview', label: 'Overview' },
+  { value: 'now', label: 'Now' },
   { value: 'activity', label: 'Activity' },
-  { value: 'plan', label: 'Payment plan' },
-  { value: 'evidence', label: 'Evidence & controls' },
+  { value: 'pay', label: 'Pay' },
+  { value: 'evidence', label: 'Evidence' },
 ] as const;
+
+function cardViewFromUrl(value: string | null): CardWorkspaceView {
+  if (value === 'activity') return 'activity';
+  if (value === 'evidence') return 'evidence';
+  if (value === 'pay' || value === 'plan') return 'pay';
+  return 'now';
+}
+
+function cardRouteFromUrl(): { cardId: string | null; view: CardWorkspaceView } {
+  const params = new URLSearchParams(window.location.search);
+  return { cardId: params.get('card'), view: cardViewFromUrl(params.get('cardView')) };
+}
+
+function writeCardRoute(cardId: string, view: CardWorkspaceView, replace = false) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('card', cardId);
+  url.searchParams.set('cardView', view);
+  const nextLocation = `${url.pathname}${url.search}${url.hash}`;
+  if (replace) window.history.replaceState(window.history.state, '', nextLocation);
+  else window.history.pushState(window.history.state, '', nextLocation);
+}
 
 const projectionStatusCopy: Record<
   Exclude<CardStatementProjection['status'], 'available'>,
@@ -65,7 +86,7 @@ const projectionStatusCopy: Record<
   },
   needs_current_position: {
     title: 'A current balance anchor is needed',
-    detail: 'Add a verified balance or fresh provider observation before forecasting.',
+    detail: 'Record an observed balance or use a fresh provider observation before forecasting.',
   },
   needs_credit_limit: {
     title: 'The credit limit is missing',
@@ -144,7 +165,7 @@ function balanceStatusLabel(card: CardOverview): string {
     case 'incomplete':
       return 'History is incomplete';
     default:
-      return 'Needs a verified anchor';
+      return 'Needs an observed anchor';
   }
 }
 
@@ -654,7 +675,7 @@ function CardDueRunwayPanel({ runway, isLoading }: { runway?: CardDueRunway; isL
               : runway.status === 'needs_payment_account'
                 ? 'Select the bank account that will fund this card. PFIS will not infer one from unrelated balances.'
                 : runway.status === 'needs_funding_anchor'
-                  ? 'Record or sync a verified balance for the selected funding account before relying on this runway.'
+                  ? 'Record an observed balance or refresh the selected funding account before relying on this runway.'
                   : runway.status === 'due_passed'
                     ? 'The date has passed. Confirm settlement separately; PFIS does not assume that a planned payment succeeded.'
                     : 'The evidence is incomplete or stale, so PFIS is keeping affordability fail-closed.'}
@@ -778,7 +799,10 @@ function EmiEvidenceRow({ plan, currency }: { plan: CardEmiPlan; currency: strin
   );
 }
 
-export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
+export function CardsSection({
+  anchorId,
+  hideIntro = false,
+}: { anchorId?: string; hideIntro?: boolean } = {}) {
   const { user } = useAuth();
   const financialToday = dateInputValueInTimezone(user?.timezone ?? 'Asia/Kolkata');
   const queryClient = useQueryClient();
@@ -787,8 +811,28 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
     () => (accounts.data ?? []).filter((account) => account.account_type === 'credit_card'),
     [accounts.data],
   );
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [cardView, setCardView] = useState<CardWorkspaceView>('overview');
+  const [cardRoute, setCardRoute] = useState(cardRouteFromUrl);
+  const cardId =
+    cardRoute.cardId && cards.some((account) => account.id === cardRoute.cardId)
+      ? cardRoute.cardId
+      : (cards[0]?.id ?? '');
+  const cardView = cardRoute.view;
+  const navigateCard = (nextCardId: string, nextView: CardWorkspaceView) => {
+    writeCardRoute(nextCardId, nextView);
+    setCardRoute({ cardId: nextCardId, view: nextView });
+  };
+  useEffect(() => {
+    const handlePopState = () => setCardRoute(cardRouteFromUrl());
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+  useEffect(() => {
+    if (!cardId) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('card') !== cardId || params.get('cardView') !== cardView) {
+      writeCardRoute(cardId, cardView, true);
+    }
+  }, [cardId, cardView]);
   const [positionDialogOpen, setPositionDialogOpen] = useState(false);
   const [positionDraft, setPositionDraft] = useState({
     amount: '',
@@ -818,7 +862,6 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
     amount: '',
     planned_for: financialToday,
   });
-  const cardId = selectedId ?? cards[0]?.id ?? '';
   const balanceForecast = useAccountBalanceForecast(cardId, 30);
   const dueRunway = useCardDueRunway(cardId);
   const utilizationHistory = useCardUtilizationHistory(cardId);
@@ -996,7 +1039,7 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
       <EmptyState
         icon={<CreditCard className="h-5 w-5" aria-hidden="true" />}
         title="Add a credit card first"
-        description="A card workspace starts with a masked card account and a verified statement."
+        description="Add a card account and import a statement to review what is due and what needs attention."
       />
     );
   }
@@ -1017,7 +1060,10 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
   const statementHistory = card.statement_history ?? [];
   const coverageTotal = Object.values(card.coverage).reduce((total, count) => total + count, 0);
   const settledCount = card.coverage.matched + card.coverage.newly_imported;
-  const utilization = Math.min(Math.max(card.statement_utilization_pct ?? 0, 0), 100);
+  const utilization =
+    card.statement_utilization_pct == null
+      ? null
+      : Math.min(Math.max(card.statement_utilization_pct, 0), 100);
   const utilizationNeedsAttention =
     card.statement_utilization_pct != null &&
     card.utilization_target_pct != null &&
@@ -1033,15 +1079,17 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
       ? providerObserved
         ? `Provider observed ${formatCurrency(providerOutstanding, card.currency)} on ${formatDate(card.provider_current_outstanding_as_of ?? card.observed_balance_as_of!)}${(card.provider_observed_at ?? card.observed_at) ? ` · retrieved ${formatTime(card.provider_observed_at ?? card.observed_at!)}` : ''}; the position is inside its refresh window.`
         : `Observed ${formatCurrency(providerOutstanding, card.currency)} on ${formatDate(card.provider_current_outstanding_as_of ?? card.observed_balance_as_of!)}; settled activity is rolled forward to ${card.estimated_current_as_of ? formatDate(card.estimated_current_as_of) : 'today'}.`
-      : 'Import a statement or record a verified card balance before PFIS estimates current outstanding.';
+      : 'Import a statement or record an observed card balance before PFIS estimates current outstanding.';
 
   return (
     <div id={anchorId} className="scroll-mt-[10.5rem] space-y-6 lg:scroll-mt-[11.5rem]">
-      <PageIntro
-        eyebrow="Cards"
-        title="Cards"
-        description="See what is due, what is currently outstanding, and what needs attention next."
-      />
+      {!hideIntro ? (
+        <PageIntro
+          eyebrow="Cards"
+          title="Cards"
+          description="See what is due, what is currently outstanding, and what needs attention next."
+        />
+      ) : null}
 
       <div
         className="flex flex-col gap-3 rounded-xl border border-border/70 bg-card/60 p-2 sm:flex-row sm:items-center sm:justify-between"
@@ -1056,8 +1104,7 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
               type="button"
               key={item.id}
               onClick={() => {
-                setSelectedId(item.id);
-                setCardView('overview');
+                navigateCard(item.id, 'now');
               }}
               aria-pressed={item.id === cardId}
               className={`focus-ring min-h-10 rounded-md px-3 text-sm font-bold transition-colors ${
@@ -1080,7 +1127,7 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
             onClick={() => setPositionDialogOpen(true)}
             aria-haspopup="dialog"
           >
-            Record verified position
+            Record observed balance
           </Button>
         </div>
       </div>
@@ -1090,8 +1137,8 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
         onClose={() => {
           if (!savePosition.isPending) setPositionDialogOpen(false);
         }}
-        title="Record a verified position"
-        description="This saves a user-observed balance for planning. It does not confirm an issuer value or contact your bank."
+        title="Record an observed balance"
+        description="This saves a balance you observed for planning. It does not confirm an issuer value or contact your bank."
       >
         <form
           className="space-y-4"
@@ -1118,7 +1165,7 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
               required
             />
             <p className="text-xs leading-5 text-muted-foreground">
-              Enter the balance you verified yourself. PFIS will label it user-observed.
+              Enter the balance you observed. PFIS will label it user-entered, not issuer-verified.
             </p>
           </div>
           <div className="space-y-1.5">
@@ -1159,7 +1206,7 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
           <div>
             <div className="flex items-center gap-2 text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
               <ShieldCheck className="h-4 w-4 text-intelligence" aria-hidden="true" />
-              OFFICIAL STATEMENT POSITION
+              STATEMENT AMOUNT DUE
             </div>
             <p className="money-value mt-3 text-4xl font-extrabold tracking-[-0.06em] sm:text-5xl">
               {card.total_due == null
@@ -1168,7 +1215,7 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
             </p>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
               {card.due_date
-                ? `Total due by ${formatDate(card.due_date)}. This is issuer-stated evidence, not a live card balance.`
+                ? `Total due by ${formatDate(card.due_date)}. This is statement evidence, not a current card balance.`
                 : 'Import a supported statement to see due dates, limits, and reconciled coverage.'}
             </p>
             <div
@@ -1200,7 +1247,7 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
                   ? ` Pending activity of ${formatCurrency((card.pending_increase ?? 0) + (card.pending_decrease ?? 0), card.currency)} is shown separately.`
                   : ''}
                 {card.coverage_status === 'overdue'
-                  ? ' Provider refresh is overdue; PFIS keeps this amount reviewable rather than calling it live.'
+                  ? ' Provider refresh is overdue; PFIS keeps this amount reviewable rather than presenting it as current.'
                   : card.coverage_complete === false
                     ? ' Provider history is incomplete; PFIS keeps this amount reviewable rather than treating it as safe current truth.'
                     : ''}
@@ -1320,61 +1367,40 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
                   : '—'}
               </dd>
             </div>
+            <div>
+              <dt className="text-xs font-bold text-muted-foreground">Utilization</dt>
+              <dd className="mt-1 text-sm font-extrabold">
+                {card.estimated_utilization_pct == null && card.statement_utilization_pct == null
+                  ? 'Not available'
+                  : `${(card.estimated_utilization_pct ?? card.statement_utilization_pct!).toFixed(1)}%`}
+              </dd>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {card.estimated_utilization_pct != null ? 'Estimated' : 'At statement date'}
+              </p>
+            </div>
+            <div>
+              <dt className="text-xs font-bold text-muted-foreground">Payment runway</dt>
+              <dd className="mt-1 text-sm font-extrabold">
+                {dueRunway.data ? dueRunwayStatusLabel(dueRunway.data.status) : 'Checking…'}
+              </dd>
+            </div>
           </dl>
         </div>
       </FinancialHero>
-
-      <dl
-        className="grid gap-px overflow-hidden rounded-xl border border-border/70 bg-border/70 sm:grid-cols-3"
-        aria-label="Card decision summary"
-      >
-        <div className="bg-card p-4 sm:p-5">
-          <dt className="text-xs font-bold text-muted-foreground">Next payment</dt>
-          <dd className="money-value mt-1 text-lg font-extrabold">
-            {card.total_due == null ? 'Not available' : formatCurrency(card.total_due, card.currency)}
-          </dd>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {card.due_date ? `Due ${formatDate(card.due_date)}` : 'Import a statement for a due date'}
-          </p>
-        </div>
-        <div className="bg-card p-4 sm:p-5">
-          <dt className="text-xs font-bold text-muted-foreground">Current position</dt>
-          <dd className="money-value mt-1 text-lg font-extrabold">
-            {providerOutstanding == null && card.estimated_current_balance == null
-              ? 'Needs anchor'
-              : formatCurrency(
-                  providerOutstanding ?? card.estimated_current_balance!,
-                  card.currency,
-                )}
-          </dd>
-          <p className="mt-1 text-xs text-muted-foreground">{balanceStatusLabel(card)}</p>
-        </div>
-        <div className="bg-card p-4 sm:p-5">
-          <dt className="text-xs font-bold text-muted-foreground">Utilization · runway</dt>
-          <dd className="mt-1 text-lg font-extrabold">
-            {card.estimated_utilization_pct == null && card.statement_utilization_pct == null
-              ? 'Not available'
-              : `${(card.estimated_utilization_pct ?? card.statement_utilization_pct!).toFixed(1)}%`}
-          </dd>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {dueRunway.data ? dueRunwayStatusLabel(dueRunway.data.status) : 'Checking payment runway…'}
-          </p>
-        </div>
-      </dl>
 
       <Tabs
         ariaLabel="Card workspace views"
         value={cardView}
         onValueChange={(value) => {
           if (CARD_WORKSPACE_TABS.some((tab) => tab.value === value)) {
-            setCardView(value as CardWorkspaceView);
+            navigateCard(cardId, value as CardWorkspaceView);
           }
         }}
         options={CARD_WORKSPACE_TABS.map(({ value, label }) => ({ value, label }))}
         className="w-full"
       />
 
-      {cardView === 'overview' ? (
+      {cardView === 'now' ? (
         <div className="space-y-6">
           <BalancePathPanel forecast={balanceForecast.data} isLoading={balanceForecast.isLoading} />
 
@@ -1388,6 +1414,7 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
             projection={card.next_statement_projection}
             currency={card.currency}
             targetPct={card.utilization_target_pct}
+            creditLimit={card.provider_credit_limit ?? card.credit_limit}
           />
 
           <CardUtilizationHistoryPanel
@@ -1401,7 +1428,7 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
         </div>
       ) : null}
 
-      {cardView === 'plan' ? (
+      {cardView === 'pay' ? (
         <div className="space-y-6">
           <CardPortfolioUpcomingPanel
             portfolio={portfolioUpcoming.data}
@@ -1426,972 +1453,997 @@ export function CardsSection({ anchorId }: { anchorId?: string } = {}) {
       {cardView === 'evidence' ? (
         <div className="space-y-6">
           <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="statement-anatomy">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
-              ISSUER CALCULATION
-            </p>
-            <h2 id="statement-anatomy" className="mt-1 text-xl font-extrabold tracking-[-0.03em]">
-              How this statement arrived at the due
-            </h2>
-          </div>
-          <p className="text-xs leading-5 text-muted-foreground">
-            Values retain the statement-date provenance.
-          </p>
-        </div>
-        <div
-          className="mt-5 grid sm:grid-cols-5"
-          aria-label="Previous dues minus payments and credits plus purchases and debits plus finance charges equals total amount due"
-        >
-          <StatementAmount
-            label="Previous dues"
-            value={card.previous_due}
-            currency={card.currency}
-          />
-          <StatementAmount
-            label="Payments / credits"
-            value={card.payments_credits}
-            currency={card.currency}
-            operator="minus"
-          />
-          <StatementAmount
-            label="Purchases / debits"
-            value={card.purchases_debits}
-            currency={card.currency}
-            operator="plus"
-          />
-          <StatementAmount
-            label="Finance charges"
-            value={card.finance_charges}
-            currency={card.currency}
-            operator="plus"
-          />
-          <StatementAmount
-            label="Total due"
-            value={card.total_due}
-            currency={card.currency}
-            operator="equals"
-          />
-        </div>
-      </section>
-
-      {(card.emi_plans ?? []).length ? (
-        <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="emi-anatomy">
-          <div className="flex items-start gap-3">
-            <span className="bg-intelligence/12 grid h-10 w-10 shrink-0 place-items-center rounded-lg text-intelligence">
-              <Landmark className="h-4 w-4" aria-hidden="true" />
-            </span>
-            <div>
-              <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
-                EMI EVIDENCE
-              </p>
-              <h2 id="emi-anatomy" className="mt-1 text-xl font-extrabold tracking-[-0.03em]">
-                Principal, interest, tax and fees—separated
-              </h2>
-              <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-                PFIS groups issuer loan references across statements. It shows only observed
-                components and does not invent a tenure, annual rate, or remaining schedule.
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
+                  ISSUER CALCULATION
+                </p>
+                <h2
+                  id="statement-anatomy"
+                  className="mt-1 text-xl font-extrabold tracking-[-0.03em]"
+                >
+                  How this statement arrived at the due
+                </h2>
+              </div>
+              <p className="text-xs leading-5 text-muted-foreground">
+                Values retain the statement-date provenance.
               </p>
             </div>
-          </div>
-          <div className="mt-5">
-            {(card.emi_plans ?? []).map((plan) => (
-              <EmiEvidenceRow
-                key={plan.issuer_plan_reference}
-                plan={plan}
+            <div
+              className="mt-5 grid sm:grid-cols-5"
+              aria-label="Previous dues minus payments and credits plus purchases and debits plus finance charges equals total amount due"
+            >
+              <StatementAmount
+                label="Previous dues"
+                value={card.previous_due}
                 currency={card.currency}
               />
-            ))}
-          </div>
-        </section>
-      ) : null}
+              <StatementAmount
+                label="Payments / credits"
+                value={card.payments_credits}
+                currency={card.currency}
+                operator="minus"
+              />
+              <StatementAmount
+                label="Purchases / debits"
+                value={card.purchases_debits}
+                currency={card.currency}
+                operator="plus"
+              />
+              <StatementAmount
+                label="Finance charges"
+                value={card.finance_charges}
+                currency={card.currency}
+                operator="plus"
+              />
+              <StatementAmount
+                label="Total due"
+                value={card.total_due}
+                currency={card.currency}
+                operator="equals"
+              />
+            </div>
+          </section>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(19rem,0.65fr)]">
-        <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="statement-coverage">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
-                RECONCILIATION
+          {(card.emi_plans ?? []).length ? (
+            <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="emi-anatomy">
+              <div className="flex items-start gap-3">
+                <span className="bg-intelligence/12 grid h-10 w-10 shrink-0 place-items-center rounded-lg text-intelligence">
+                  <Landmark className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <div>
+                  <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
+                    EMI EVIDENCE
+                  </p>
+                  <h2 id="emi-anatomy" className="mt-1 text-xl font-extrabold tracking-[-0.03em]">
+                    Principal, interest, tax and fees—separated
+                  </h2>
+                  <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+                    PFIS groups issuer loan references across statements. It shows only observed
+                    components and does not invent a tenure, annual rate, or remaining schedule.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5">
+                {(card.emi_plans ?? []).map((plan) => (
+                  <EmiEvidenceRow
+                    key={plan.issuer_plan_reference}
+                    plan={plan}
+                    currency={card.currency}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(19rem,0.65fr)]">
+            <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="statement-coverage">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
+                    RECONCILIATION
+                  </p>
+                  <h2
+                    id="statement-coverage"
+                    className="mt-1 text-lg font-extrabold tracking-[-0.025em]"
+                  >
+                    {settledCount} of {coverageTotal} lines settled
+                  </h2>
+                </div>
+                <span
+                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${
+                    card.coverage.needs_review
+                      ? 'bg-warning/12 text-warning'
+                      : 'bg-success/12 text-success'
+                  }`}
+                >
+                  {card.coverage.needs_review ? (
+                    <Clock3 className="h-4 w-4" aria-hidden="true" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                  )}
+                </span>
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {[
+                  ['Matched', card.coverage.matched],
+                  ['Imported', card.coverage.newly_imported],
+                  ['Needs review', card.coverage.needs_review],
+                  ['Ignored', card.coverage.ignored_by_rule],
+                ].map(([label, count]) => (
+                  <div key={label} className="rounded-lg bg-muted/55 p-3">
+                    <p className="money-value text-lg font-extrabold">{count}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{label}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-4 text-xs leading-5 text-muted-foreground">
+                Review items do not create duplicate spending. They stay outside the ledger until
+                their evidence is resolved.
               </p>
-              <h2
-                id="statement-coverage"
-                className="mt-1 text-lg font-extrabold tracking-[-0.025em]"
-              >
-                {settledCount} of {coverageTotal} lines settled
+            </section>
+
+            <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="limit-snapshot">
+              <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
+                STATEMENT-DATE LIMITS
+              </p>
+              <h2 id="limit-snapshot" className="mt-1 text-lg font-extrabold tracking-[-0.025em]">
+                {card.statement_utilization_pct == null
+                  ? 'Utilisation unavailable'
+                  : `${card.statement_utilization_pct.toFixed(1)}% utilised`}
               </h2>
-            </div>
-            <span
-              className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${
-                card.coverage.needs_review
-                  ? 'bg-warning/12 text-warning'
-                  : 'bg-success/12 text-success'
-              }`}
-            >
-              {card.coverage.needs_review ? (
-                <Clock3 className="h-4 w-4" aria-hidden="true" />
-              ) : (
-                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-              )}
-            </span>
-          </div>
-          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {[
-              ['Matched', card.coverage.matched],
-              ['Imported', card.coverage.newly_imported],
-              ['Needs review', card.coverage.needs_review],
-              ['Ignored', card.coverage.ignored_by_rule],
-            ].map(([label, count]) => (
-              <div key={label} className="rounded-lg bg-muted/55 p-3">
-                <p className="money-value text-lg font-extrabold">{count}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{label}</p>
-              </div>
-            ))}
-          </div>
-          <p className="mt-4 text-xs leading-5 text-muted-foreground">
-            Review items do not create duplicate spending. They stay outside the ledger until their
-            evidence is resolved.
-          </p>
-        </section>
-
-        <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="limit-snapshot">
-          <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
-            STATEMENT-DATE LIMITS
-          </p>
-          <h2 id="limit-snapshot" className="mt-1 text-lg font-extrabold tracking-[-0.025em]">
-            {card.statement_utilization_pct == null
-              ? 'Utilisation unavailable'
-              : `${card.statement_utilization_pct.toFixed(1)}% utilised`}
-          </h2>
-          <div
-            className="mt-5 h-2 overflow-hidden rounded-full bg-muted"
-            role="progressbar"
-            aria-label="Statement utilisation"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(utilization)}
-          >
-            <div
-              className={`h-full rounded-full ${
-                utilizationNeedsAttention ? 'bg-warning' : 'bg-intelligence'
-              }`}
-              style={{ width: `${utilization}%` }}
-            />
-          </div>
-          <dl className="mt-5 space-y-3 text-sm">
-            <div className="flex items-baseline justify-between gap-4">
-              <dt className="text-muted-foreground">Total credit limit</dt>
-              <dd className="money-value font-extrabold">
-                {card.credit_limit == null ? '—' : formatCurrency(card.credit_limit, card.currency)}
-              </dd>
-            </div>
-            <div className="flex items-baseline justify-between gap-4">
-              <dt className="text-muted-foreground">Available credit</dt>
-              <dd className="money-value font-extrabold">
-                {card.available_credit_limit == null
-                  ? '—'
-                  : formatCurrency(card.available_credit_limit, card.currency)}
-              </dd>
-            </div>
-            <div className="flex items-baseline justify-between gap-4">
-              <dt className="text-muted-foreground">Available cash</dt>
-              <dd className="money-value font-extrabold">
-                {card.available_cash_limit == null
-                  ? '—'
-                  : formatCurrency(card.available_cash_limit, card.currency)}
-              </dd>
-            </div>
-            <div className="flex items-baseline justify-between gap-4">
-              <dt className="text-muted-foreground">Estimated utilisation</dt>
-              <dd className="money-value font-extrabold">
-                {card.estimated_utilization_pct == null
-                  ? '—'
-                  : `${card.estimated_utilization_pct.toFixed(1)}%`}
-              </dd>
-            </div>
-          </dl>
-          <p className="mt-4 text-xs leading-5 text-muted-foreground">
-            Limits are not live and remain labelled by the statement date. Estimated utilisation
-            uses the settled position and may differ from issuer holds or blocked EMI limit.
-          </p>
-          <details className="mt-4 border-t border-border/65 pt-4">
-            <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
-              Set a utilization and reward rule
-            </summary>
-            <form
-              className="mt-4 space-y-3"
-              onSubmit={(event) => {
-                event.preventDefault();
-                savePreferences.mutate();
-              }}
-            >
-              <div className="space-y-1.5">
-                <Label htmlFor="utilization-target">Utilization threshold (%)</Label>
-                <Input
-                  id="utilization-target"
-                  type="number"
-                  min="0.01"
-                  max="100"
-                  step="0.01"
-                  placeholder={String(card.utilization_target_pct ?? 30)}
-                  value={preferenceDraft.utilization_target_pct}
-                  onChange={(event) =>
-                    setPreferenceDraft((current) => ({
-                      ...current,
-                      utilization_target_pct: event.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
-                <div className="space-y-1.5">
-                  <Label htmlFor="reward-label">Explicit reward rule</Label>
-                  <Input
-                    id="reward-label"
-                    placeholder="Dining"
-                    value={preferenceDraft.reward_label}
-                    onChange={(event) =>
-                      setPreferenceDraft((current) => ({
-                        ...current,
-                        reward_label: event.target.value,
-                      }))
-                    }
+              {utilization != null ? (
+                <div
+                  className="mt-5 h-2 overflow-hidden rounded-full bg-muted"
+                  role="progressbar"
+                  aria-label="Statement utilization"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(utilization)}
+                >
+                  <div
+                    className={`h-full rounded-full ${
+                      utilizationNeedsAttention ? 'bg-warning' : 'bg-intelligence'
+                    }`}
+                    style={{ width: `${utilization}%` }}
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="reward-rate">Rate (%)</Label>
-                  <Input
-                    id="reward-rate"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={preferenceDraft.reward_rate}
-                    onChange={(event) =>
-                      setPreferenceDraft((current) => ({
-                        ...current,
-                        reward_rate: event.target.value,
-                      }))
-                    }
-                  />
+              ) : null}
+              <dl className="mt-5 space-y-3 text-sm">
+                <div className="flex items-baseline justify-between gap-4">
+                  <dt className="text-muted-foreground">Total credit limit</dt>
+                  <dd className="money-value font-extrabold">
+                    {card.credit_limit == null
+                      ? '—'
+                      : formatCurrency(card.credit_limit, card.currency)}
+                  </dd>
                 </div>
-              </div>
-              <Button
-                type="submit"
-                size="sm"
-                variant="outline"
-                disabled={savePreferences.isPending}
-              >
-                Save card guardrails
-              </Button>
-            </form>
-          </details>
-        </section>
-      </div>
-
+                <div className="flex items-baseline justify-between gap-4">
+                  <dt className="text-muted-foreground">Available credit</dt>
+                  <dd className="money-value font-extrabold">
+                    {card.available_credit_limit == null
+                      ? '—'
+                      : formatCurrency(card.available_credit_limit, card.currency)}
+                  </dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-4">
+                  <dt className="text-muted-foreground">Available cash</dt>
+                  <dd className="money-value font-extrabold">
+                    {card.available_cash_limit == null
+                      ? '—'
+                      : formatCurrency(card.available_cash_limit, card.currency)}
+                  </dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-4">
+                  <dt className="text-muted-foreground">Estimated utilisation</dt>
+                  <dd className="money-value font-extrabold">
+                    {card.estimated_utilization_pct == null
+                      ? '—'
+                      : `${card.estimated_utilization_pct.toFixed(1)}%`}
+                  </dd>
+                </div>
+              </dl>
+              <p className="mt-4 text-xs leading-5 text-muted-foreground">
+                Limits are not live and remain labelled by the statement date. Estimated utilisation
+                uses the settled position and may differ from issuer holds or blocked EMI limit.
+              </p>
+              <details className="mt-4 border-t border-border/65 pt-4">
+                <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
+                  Set a utilization and reward rule
+                </summary>
+                <form
+                  className="mt-4 space-y-3"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    savePreferences.mutate();
+                  }}
+                >
+                  <div className="space-y-1.5">
+                    <Label htmlFor="utilization-target">Utilization threshold (%)</Label>
+                    <Input
+                      id="utilization-target"
+                      type="number"
+                      min="0.01"
+                      max="100"
+                      step="0.01"
+                      placeholder={String(card.utilization_target_pct ?? 30)}
+                      value={preferenceDraft.utilization_target_pct}
+                      onChange={(event) =>
+                        setPreferenceDraft((current) => ({
+                          ...current,
+                          utilization_target_pct: event.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="reward-label">Explicit reward rule</Label>
+                      <Input
+                        id="reward-label"
+                        placeholder="Dining"
+                        value={preferenceDraft.reward_label}
+                        onChange={(event) =>
+                          setPreferenceDraft((current) => ({
+                            ...current,
+                            reward_label: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="reward-rate">Rate (%)</Label>
+                      <Input
+                        id="reward-rate"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={preferenceDraft.reward_rate}
+                        onChange={(event) =>
+                          setPreferenceDraft((current) => ({
+                            ...current,
+                            reward_rate: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    variant="outline"
+                    disabled={savePreferences.isPending}
+                  >
+                    Save card guardrails
+                  </Button>
+                </form>
+              </details>
+            </section>
+          </div>
         </div>
       ) : null}
 
       {cardView === 'activity' ? (
         <div className="space-y-6">
-          <section className="overflow-hidden rounded-xl bg-card" aria-labelledby="statement-ledger">
-        <div className="border-b border-border/65 p-5 sm:p-6">
-          <div className="flex items-start gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-              <ReceiptText className="h-4 w-4" aria-hidden="true" />
-            </span>
-            <div>
-              <h2 id="statement-ledger" className="text-lg font-extrabold tracking-[-0.025em]">
-                Latest statement ledger
-              </h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Issuer rows with their ledger classification and reconciliation outcome.
-              </p>
+          <section
+            className="overflow-hidden rounded-xl bg-card"
+            aria-labelledby="statement-ledger"
+          >
+            <div className="border-b border-border/65 p-5 sm:p-6">
+              <div className="flex items-start gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+                  <ReceiptText className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <div>
+                  <h2 id="statement-ledger" className="text-lg font-extrabold tracking-[-0.025em]">
+                    Latest statement ledger
+                  </h2>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    Issuer rows with their ledger classification and reconciliation outcome.
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        {statementLines.length ? (
-          <>
-            <ul className="divide-y divide-border/65 sm:hidden">
-              {statementLines.map((line) => {
-                const reducesLiability =
-                  line.transaction_type === 'credit' || line.transaction_type === 'refund';
-                return (
-                  <li key={line.id} className="p-5">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs text-muted-foreground">
-                        {formatDate(line.transaction_date)}
-                      </span>
-                      <OutcomeBadge outcome={line.review_outcome} />
-                    </div>
-                    <p className="mt-3 break-words text-sm font-extrabold leading-6">
-                      {line.merchant_normalized || line.description}
-                    </p>
-                    {line.merchant_normalized &&
-                    line.merchant_normalized.toLowerCase() !== line.description.toLowerCase() ? (
-                      <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">
-                        Statement evidence: {line.description}
-                      </p>
-                    ) : null}
-                    <div className="mt-2 flex items-baseline justify-between gap-4">
-                      <span className="text-xs text-muted-foreground">
-                        {statementEventLabel(line)}
-                      </span>
-                      <span
-                        className={`money-value text-sm font-extrabold ${
-                          reducesLiability ? 'text-success' : ''
-                        }`}
-                      >
-                        {reducesLiability ? '−' : '+'}
-                        {formatCurrency(line.amount, card.currency)}
-                      </span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-            <div className="hidden overflow-x-auto sm:block">
-              <table className="w-full min-w-[720px] border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b border-border/65 text-xs text-muted-foreground">
-                    <th scope="col" className="px-5 py-3 font-bold sm:px-6">
-                      Date
-                    </th>
-                    <th scope="col" className="px-3 py-3 font-bold">
-                      Merchant / statement evidence
-                    </th>
-                    <th scope="col" className="px-3 py-3 font-bold">
-                      Event
-                    </th>
-                    <th scope="col" className="px-3 py-3 font-bold">
-                      Outcome
-                    </th>
-                    <th scope="col" className="px-5 py-3 text-right font-bold sm:px-6">
-                      Amount
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/65">
+            {statementLines.length ? (
+              <>
+                <ul className="divide-y divide-border/65 sm:hidden">
                   {statementLines.map((line) => {
                     const reducesLiability =
                       line.transaction_type === 'credit' || line.transaction_type === 'refund';
                     return (
-                      <tr key={line.id} className="align-top hover:bg-muted/35">
-                        <td className="whitespace-nowrap px-5 py-4 text-xs text-muted-foreground sm:px-6">
-                          {formatDate(line.transaction_date)}
-                        </td>
-                        <td className="max-w-md px-3 py-4">
-                          <span className="block font-bold">
-                            {line.merchant_normalized || line.description}
+                      <li key={line.id} className="p-5">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs text-muted-foreground">
+                            {formatDate(line.transaction_date)}
                           </span>
-                          {line.merchant_normalized &&
-                          line.merchant_normalized.toLowerCase() !==
-                            line.description.toLowerCase() ? (
-                            <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                              {line.description}
-                            </span>
-                          ) : null}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-4 text-xs text-muted-foreground">
-                          {statementEventLabel(line)}
-                        </td>
-                        <td className="px-3 py-4">
                           <OutcomeBadge outcome={line.review_outcome} />
-                        </td>
-                        <td className="money-value whitespace-nowrap px-5 py-4 text-right font-extrabold sm:px-6">
-                          <span className={reducesLiability ? 'text-success' : undefined}>
+                        </div>
+                        <p className="mt-3 break-words text-sm font-extrabold leading-6">
+                          {line.merchant_normalized || line.description}
+                        </p>
+                        {line.merchant_normalized &&
+                        line.merchant_normalized.toLowerCase() !==
+                          line.description.toLowerCase() ? (
+                          <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">
+                            Statement evidence: {line.description}
+                          </p>
+                        ) : null}
+                        <div className="mt-2 flex items-baseline justify-between gap-4">
+                          <span className="text-xs text-muted-foreground">
+                            {statementEventLabel(line)}
+                          </span>
+                          <span
+                            className={`money-value text-sm font-extrabold ${
+                              reducesLiability ? 'text-success' : ''
+                            }`}
+                          >
                             {reducesLiability ? '−' : '+'}
                             {formatCurrency(line.amount, card.currency)}
                           </span>
-                        </td>
-                      </tr>
+                        </div>
+                      </li>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : (
-          <p className="p-6 text-sm text-muted-foreground">No statement ledger rows available.</p>
-        )}
-      </section>
-
-      {statementHistory.length ? (
-        <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="statement-history">
-          <div className="flex items-start gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-              <CalendarDays className="h-4 w-4" aria-hidden="true" />
-            </span>
-            <div>
-              <h2 id="statement-history" className="text-lg font-extrabold tracking-[-0.025em]">
-                Statement history
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Verified monthly snapshots, newest first.
+                </ul>
+                <div className="hidden overflow-x-auto sm:block">
+                  <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-border/65 text-xs text-muted-foreground">
+                        <th scope="col" className="px-5 py-3 font-bold sm:px-6">
+                          Date
+                        </th>
+                        <th scope="col" className="px-3 py-3 font-bold">
+                          Merchant / statement evidence
+                        </th>
+                        <th scope="col" className="px-3 py-3 font-bold">
+                          Event
+                        </th>
+                        <th scope="col" className="px-3 py-3 font-bold">
+                          Outcome
+                        </th>
+                        <th scope="col" className="px-5 py-3 text-right font-bold sm:px-6">
+                          Amount
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/65">
+                      {statementLines.map((line) => {
+                        const reducesLiability =
+                          line.transaction_type === 'credit' || line.transaction_type === 'refund';
+                        return (
+                          <tr key={line.id} className="align-top hover:bg-muted/35">
+                            <td className="whitespace-nowrap px-5 py-4 text-xs text-muted-foreground sm:px-6">
+                              {formatDate(line.transaction_date)}
+                            </td>
+                            <td className="max-w-md px-3 py-4">
+                              <span className="block font-bold">
+                                {line.merchant_normalized || line.description}
+                              </span>
+                              {line.merchant_normalized &&
+                              line.merchant_normalized.toLowerCase() !==
+                                line.description.toLowerCase() ? (
+                                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                                  {line.description}
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-xs text-muted-foreground">
+                              {statementEventLabel(line)}
+                            </td>
+                            <td className="px-3 py-4">
+                              <OutcomeBadge outcome={line.review_outcome} />
+                            </td>
+                            <td className="money-value whitespace-nowrap px-5 py-4 text-right font-extrabold sm:px-6">
+                              <span className={reducesLiability ? 'text-success' : undefined}>
+                                {reducesLiability ? '−' : '+'}
+                                {formatCurrency(line.amount, card.currency)}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <p className="p-6 text-sm text-muted-foreground">
+                No statement ledger rows available.
               </p>
-            </div>
-          </div>
-          <div className="mt-4 divide-y divide-border/65">
-            {statementHistory.map((statement) => (
-              <div
-                key={statement.id}
-                className="grid gap-2 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-6"
-              >
+            )}
+          </section>
+
+          {statementHistory.length ? (
+            <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="statement-history">
+              <div className="flex items-start gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+                  <CalendarDays className="h-4 w-4" aria-hidden="true" />
+                </span>
                 <div>
-                  <p className="font-extrabold">{formatDate(statement.statement_date)}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {statement.line_count} lines · {statement.needs_review_count} need review
+                  <h2 id="statement-history" className="text-lg font-extrabold tracking-[-0.025em]">
+                    Statement history
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Verified monthly snapshots, newest first.
                   </p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {statement.due_date ? `Due ${formatDate(statement.due_date)}` : 'No due date'}
-                </p>
-                <p className="money-value font-extrabold">
-                  {statement.total_due == null
-                    ? '—'
-                    : formatCurrency(statement.total_due, card.currency)}
-                </p>
               </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-          <section className="rounded-xl bg-card p-5 sm:p-6">
-        <h2 className="text-lg font-extrabold tracking-[-0.025em]">Activity centre</h2>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          Deterministic checks from PFIS evidence. Review with your issuer; PFIS cannot block,
-          reverse, or dispute card activity.
-        </p>
-        <div className="mt-5">
-          <CardRefundTrackerPanel tracker={card.refund_tracker} currency={card.currency} />
-        </div>
-        {card.activity_signals.length ? (
-          <ul className="mt-4 divide-y divide-border/65">
-            {card.activity_signals.map((signal) => {
-              const Icon =
-                signal.signal_type === 'duplicate_candidate'
-                  ? Copy
-                  : signal.signal_type === 'pending_reversal'
-                    ? RotateCcw
-                    : AlertTriangle;
-              return (
-                <li key={signal.id} className="flex min-w-0 gap-3 py-4 first:pt-0 last:pb-0">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-warning/10 text-warning">
-                    <Icon className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <h3 className="font-extrabold tracking-[-0.015em]">{signal.title}</h3>
-                      <span className="money-value text-sm">
-                        {formatCurrency(signal.amount, card.currency)}
-                      </span>
+              <div className="mt-4 divide-y divide-border/65">
+                {statementHistory.map((statement) => (
+                  <div
+                    key={statement.id}
+                    className="grid gap-2 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-6"
+                  >
+                    <div>
+                      <p className="font-extrabold">{formatDate(statement.statement_date)}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {statement.line_count} lines · {statement.needs_review_count} need review
+                      </p>
                     </div>
-                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                      {signal.description}
+                    <p className="text-xs text-muted-foreground">
+                      {statement.due_date ? `Due ${formatDate(statement.due_date)}` : 'No due date'}
                     </p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      {formatDate(signal.activity_date)} · {signal.basis}
+                    <p className="money-value font-extrabold">
+                      {statement.total_due == null
+                        ? '—'
+                        : formatCurrency(statement.total_due, card.currency)}
                     </p>
                   </div>
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <p className="mt-4 rounded-lg bg-muted/55 p-4 text-sm text-muted-foreground">
-            No duplicate, high-value, or pending-reversal signals in the available evidence.
-          </p>
-        )}
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="rounded-xl bg-card p-5 sm:p-6">
+            <h2 className="text-lg font-extrabold tracking-[-0.025em]">Activity centre</h2>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              Deterministic checks from PFIS evidence. Review with your issuer; PFIS cannot block,
+              reverse, or dispute card activity.
+            </p>
+            <div className="mt-5">
+              <CardRefundTrackerPanel tracker={card.refund_tracker} currency={card.currency} />
+            </div>
+            {card.activity_signals.length ? (
+              <ul className="mt-4 divide-y divide-border/65">
+                {card.activity_signals.map((signal) => {
+                  const Icon =
+                    signal.signal_type === 'duplicate_candidate'
+                      ? Copy
+                      : signal.signal_type === 'pending_reversal'
+                        ? RotateCcw
+                        : AlertTriangle;
+                  return (
+                    <li key={signal.id} className="flex min-w-0 gap-3 py-4 first:pt-0 last:pb-0">
+                      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-warning/10 text-warning">
+                        <Icon className="h-4 w-4" aria-hidden="true" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <h3 className="font-extrabold tracking-[-0.015em]">{signal.title}</h3>
+                          <span className="money-value text-sm">
+                            {formatCurrency(signal.amount, card.currency)}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          {signal.description}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {formatDate(signal.activity_date)} · {signal.basis}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="mt-4 rounded-lg bg-muted/55 p-4 text-sm text-muted-foreground">
+                No duplicate, high-value, or pending-reversal signals in the available evidence.
+              </p>
+            )}
           </section>
         </div>
       ) : null}
 
       {cardView === 'evidence' ? (
         <div className="space-y-6">
-      <div className="grid gap-6 xl:grid-cols-2">
-        <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="card-calendar-title">
-          <div className="flex items-start gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-              <CalendarDays className="h-4 w-4" aria-hidden="true" />
-            </span>
-            <div>
-              <h2 id="card-calendar-title" className="text-lg font-extrabold tracking-[-0.025em]">
-                Fees and milestones
-              </h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                User-entered reminders; they do not represent issuer actions.
-              </p>
-            </div>
-          </div>
-          <div className="mt-4">
-            {card.calendar.length ? (
-              card.calendar.map((event) => (
-                <LedgerRow
-                  key={event.id}
-                  leading={<CalendarDays className="h-4 w-4" aria-hidden="true" />}
-                  title={event.label}
-                  subtitle={`${event.event_type.replaceAll('_', ' ')} · ${event.source_kind}`}
-                  amount={formatDate(event.event_date)}
-                  selected={editingCalendarId === event.id}
-                  onSelect={() => {
-                    setEditingCalendarId(event.id);
-                    setCalendarDraft({
-                      event_type: event.event_type,
-                      label: event.label,
-                      event_date: event.event_date,
-                    });
-                  }}
-                />
-              ))
-            ) : (
-              <p className="rounded-lg bg-muted/55 p-4 text-sm text-muted-foreground">
-                No fee, renewal, or milestone reminders recorded.
-              </p>
-            )}
-          </div>
-          <details className="mt-4 rounded-lg border border-border/70 p-4">
-            <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
-              {editingCalendarId
-                ? 'Edit fee or milestone reminder'
-                : 'Add a fee or milestone reminder'}
-            </summary>
-            <form
-              className="mt-4 space-y-3"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (calendarDraft.label.trim()) saveCalendar.mutate();
-              }}
+          <div className="grid gap-6 xl:grid-cols-2">
+            <section
+              className="rounded-xl bg-card p-5 sm:p-6"
+              aria-labelledby="card-calendar-title"
             >
-              <div className="space-y-1.5">
-                <Label htmlFor="calendar-label">Reminder label</Label>
-                <Input
-                  id="calendar-label"
-                  value={calendarDraft.label}
-                  onChange={(event) =>
-                    setCalendarDraft((current) => ({
-                      ...current,
-                      label: event.target.value,
-                    }))
-                  }
-                  required
-                />
+              <div className="flex items-start gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+                  <CalendarDays className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <div>
+                  <h2
+                    id="card-calendar-title"
+                    className="text-lg font-extrabold tracking-[-0.025em]"
+                  >
+                    Fees and milestones
+                  </h2>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    User-entered reminders; they do not represent issuer actions.
+                  </p>
+                </div>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="mt-4">
+                {card.calendar.length ? (
+                  card.calendar.map((event) => (
+                    <LedgerRow
+                      key={event.id}
+                      leading={<CalendarDays className="h-4 w-4" aria-hidden="true" />}
+                      title={event.label}
+                      subtitle={`${event.event_type.replaceAll('_', ' ')} · ${event.source_kind}`}
+                      amount={formatDate(event.event_date)}
+                      selected={editingCalendarId === event.id}
+                      onSelect={() => {
+                        setEditingCalendarId(event.id);
+                        setCalendarDraft({
+                          event_type: event.event_type,
+                          label: event.label,
+                          event_date: event.event_date,
+                        });
+                      }}
+                    />
+                  ))
+                ) : (
+                  <p className="rounded-lg bg-muted/55 p-4 text-sm text-muted-foreground">
+                    No fee, renewal, or milestone reminders recorded.
+                  </p>
+                )}
+              </div>
+              <details className="mt-4 rounded-lg border border-border/70 p-4">
+                <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
+                  {editingCalendarId
+                    ? 'Edit fee or milestone reminder'
+                    : 'Add a fee or milestone reminder'}
+                </summary>
+                <form
+                  className="mt-4 space-y-3"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (calendarDraft.label.trim()) saveCalendar.mutate();
+                  }}
+                >
+                  <div className="space-y-1.5">
+                    <Label htmlFor="calendar-label">Reminder label</Label>
+                    <Input
+                      id="calendar-label"
+                      value={calendarDraft.label}
+                      onChange={(event) =>
+                        setCalendarDraft((current) => ({
+                          ...current,
+                          label: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="calendar-type">Type</Label>
+                      <Select
+                        id="calendar-type"
+                        value={calendarDraft.event_type}
+                        onChange={(event) =>
+                          setCalendarDraft((current) => ({
+                            ...current,
+                            event_type: event.target.value as CardCalendarEvent['event_type'],
+                          }))
+                        }
+                      >
+                        <option value="annual_fee">Annual fee</option>
+                        <option value="renewal">Renewal</option>
+                        <option value="fee_reversal">Fee reversal</option>
+                        <option value="milestone">Milestone</option>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="calendar-date">Date</Label>
+                      <Input
+                        id="calendar-date"
+                        type="date"
+                        value={calendarDraft.event_date}
+                        onChange={(event) =>
+                          setCalendarDraft((current) => ({
+                            ...current,
+                            event_date: event.target.value,
+                          }))
+                        }
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="submit"
+                      size="sm"
+                      variant="outline"
+                      disabled={saveCalendar.isPending || deleteCalendar.isPending}
+                    >
+                      {editingCalendarId ? 'Update reminder' : 'Save reminder'}
+                    </Button>
+                    {editingCalendarId ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={saveCalendar.isPending || deleteCalendar.isPending}
+                          onClick={() => {
+                            setEditingCalendarId(null);
+                            setCalendarDraft((current) => ({ ...current, label: '' }));
+                          }}
+                        >
+                          Cancel edit
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="danger"
+                          disabled={saveCalendar.isPending || deleteCalendar.isPending}
+                          onClick={() => {
+                            const target = card.calendar.find(
+                              (event) => event.id === editingCalendarId,
+                            );
+                            if (target) setCalendarDeleteTarget(target);
+                          }}
+                        >
+                          Delete reminder
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                  {saveCalendar.error || deleteCalendar.error ? (
+                    <p role="alert" className="text-sm font-bold text-danger">
+                      {(saveCalendar.error ?? deleteCalendar.error)?.message}
+                    </p>
+                  ) : null}
+                </form>
+              </details>
+              <Dialog
+                open={Boolean(calendarDeleteTarget)}
+                onClose={() => {
+                  if (!deleteCalendar.isPending) setCalendarDeleteTarget(null);
+                }}
+                title="Delete this reminder?"
+                description="This removes the personal reminder only; issuer statement evidence remains unchanged."
+              >
+                <p className="text-sm leading-6 text-muted-foreground">
+                  {calendarDeleteTarget
+                    ? `${calendarDeleteTarget.label} will no longer appear in the card timeline.`
+                    : 'The selected reminder will no longer appear in the card timeline.'}
+                </p>
+                <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <Button
+                    data-dialog-initial-focus
+                    variant="ghost"
+                    onClick={() => setCalendarDeleteTarget(null)}
+                    disabled={deleteCalendar.isPending}
+                  >
+                    Keep reminder
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      if (calendarDeleteTarget) deleteCalendar.mutate(calendarDeleteTarget.id);
+                    }}
+                    disabled={!calendarDeleteTarget || deleteCalendar.isPending}
+                  >
+                    {deleteCalendar.isPending ? 'Deleting…' : 'Delete reminder'}
+                  </Button>
+                </div>
+              </Dialog>
+            </section>
+
+            <section
+              className="rounded-xl bg-card p-5 sm:p-6"
+              aria-labelledby="card-disputes-title"
+            >
+              <div>
+                <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
+                  USER-RECORDED CASES
+                </p>
+                <h2
+                  id="card-disputes-title"
+                  className="mt-1 text-lg font-extrabold tracking-[-0.025em]"
+                >
+                  Dispute tracker
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Track a case you raised with the issuer. PFIS does not submit disputes.
+                </p>
+              </div>
+              <div className="mt-4 divide-y divide-border/65">
+                {(disputes.data ?? []).map((dispute) => (
+                  <div key={dispute.id} className="py-4 first:pt-0">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <p className="font-extrabold">{dispute.label}</p>
+                      <span className="money-value text-sm font-extrabold">
+                        {formatCurrency(dispute.amount, card.currency)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {formatDate(dispute.complaint_date)} · {dispute.status}
+                      {dispute.reference_number ? ` · ${dispute.reference_number}` : ''}
+                    </p>
+                    {dispute.status !== 'resolved' ? (
+                      <Button
+                        className="mt-2"
+                        size="sm"
+                        variant="outline"
+                        disabled={resolveDispute.isPending}
+                        onClick={() => resolveDispute.mutate(dispute.id)}
+                      >
+                        Record resolved
+                      </Button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <details className="mt-4 rounded-lg border border-border/70 p-4">
+                <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
+                  Record an issuer dispute
+                </summary>
+                <form
+                  className="mt-4 grid gap-4 sm:grid-cols-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (disputeDraft.label.trim() && Number(disputeDraft.amount) > 0) {
+                      createDispute.mutate();
+                    }
+                  }}
+                >
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor="dispute-line">Statement line (optional)</Label>
+                    <Select
+                      id="dispute-line"
+                      value={disputeDraft.statement_line_id}
+                      onChange={(event) =>
+                        setDisputeDraft((current) => ({
+                          ...current,
+                          statement_line_id: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">No linked line</option>
+                      {statementLines.map((line) => (
+                        <option key={line.id} value={line.id}>
+                          {formatDate(line.transaction_date)} · {line.description}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="dispute-label">Case label</Label>
+                    <Input
+                      id="dispute-label"
+                      value={disputeDraft.label}
+                      onChange={(event) =>
+                        setDisputeDraft((current) => ({
+                          ...current,
+                          label: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="dispute-amount">Amount</Label>
+                    <Input
+                      id="dispute-amount"
+                      type="number"
+                      inputMode="decimal"
+                      min="0.01"
+                      step="0.01"
+                      value={disputeDraft.amount}
+                      onChange={(event) =>
+                        setDisputeDraft((current) => ({
+                          ...current,
+                          amount: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="dispute-date">Complaint date</Label>
+                    <Input
+                      id="dispute-date"
+                      type="date"
+                      value={disputeDraft.complaint_date}
+                      onChange={(event) =>
+                        setDisputeDraft((current) => ({
+                          ...current,
+                          complaint_date: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="dispute-reference">Issuer reference</Label>
+                    <Input
+                      id="dispute-reference"
+                      value={disputeDraft.reference_number}
+                      onChange={(event) =>
+                        setDisputeDraft((current) => ({
+                          ...current,
+                          reference_number: event.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Button type="submit" disabled={createDispute.isPending}>
+                      Save dispute record
+                    </Button>
+                  </div>
+                  {createDispute.error ? (
+                    <p role="alert" className="text-sm font-bold text-danger sm:col-span-2">
+                      {createDispute.error.message}
+                    </p>
+                  ) : null}
+                </form>
+              </details>
+            </section>
+          </div>
+        </div>
+      ) : null}
+
+      {cardView === 'pay' ? (
+        <div className="space-y-6">
+          <section className="rounded-xl bg-card p-5 sm:p-6">
+            <h2 className="text-lg font-extrabold tracking-[-0.025em]">
+              Payment intentions & manual records
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Plan first. After you actually pay, record the bank-to-card movement in PFIS. Neither
+              action contacts your bank or issuer.
+            </p>
+            <div className="mt-3">
+              {card.planned_payments.length ? (
+                card.planned_payments.map((payment) => (
+                  <div key={payment.id} className="border-b border-border/65 py-2 last:border-b-0">
+                    <LedgerRow
+                      leading={<CreditCard className="h-4 w-4" aria-hidden="true" />}
+                      title={`${payment.status === 'planned' ? 'Planned' : payment.status === 'recorded' ? 'Recorded' : 'Cancelled'} ${formatCurrency(payment.amount, card.currency)}`}
+                      subtitle={
+                        payment.status === 'recorded'
+                          ? `Manual ledger transfer dated ${formatDate(payment.planned_for)} · no bank action`
+                          : `Planned for ${formatDate(payment.planned_for)}`
+                      }
+                      amount={payment.status}
+                      className="border-b-0"
+                    />
+                    {payment.status === 'planned' ? (
+                      <div className="flex flex-col gap-2 px-2 pb-3 sm:flex-row sm:items-center sm:justify-end">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            updatePayment.isPending ||
+                            !(payment.paying_account_id || card.preferred_payment_account_id)
+                          }
+                          onClick={() =>
+                            updatePayment.mutate({
+                              intentId: payment.id,
+                              status: 'recorded',
+                              payingAccountId:
+                                payment.paying_account_id || card.preferred_payment_account_id,
+                            })
+                          }
+                        >
+                          <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                          Record manual transfer
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={updatePayment.isPending}
+                          onClick={() =>
+                            updatePayment.mutate({
+                              intentId: payment.id,
+                              status: 'cancelled',
+                            })
+                          }
+                        >
+                          Cancel intent
+                        </Button>
+                      </div>
+                    ) : null}
+                    {payment.status === 'planned' &&
+                    !(payment.paying_account_id || card.preferred_payment_account_id) ? (
+                      <p className="px-2 pb-3 text-xs leading-5 text-muted-foreground">
+                        Choose and save a preferred paying bank account before recording the
+                        transfer.
+                      </p>
+                    ) : null}
+                  </div>
+                ))
+              ) : (
+                <p className="py-4 text-sm text-muted-foreground">
+                  No payment intentions recorded.
+                </p>
+              )}
+            </div>
+            {updatePayment.error ? (
+              <p role="alert" className="mt-3 text-sm font-bold text-danger">
+                {updatePayment.error.message}
+              </p>
+            ) : null}
+            <details className="mt-4 rounded-lg border border-border/70 p-4">
+              <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
+                Plan a manual payment
+              </summary>
+              <form
+                className="mt-4 grid gap-4 sm:grid-cols-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (Number(paymentDraft.amount) > 0) createPayment.mutate();
+                }}
+              >
                 <div className="space-y-1.5">
-                  <Label htmlFor="calendar-type">Type</Label>
+                  <Label htmlFor="payment-account">Paying account</Label>
                   <Select
-                    id="calendar-type"
-                    value={calendarDraft.event_type}
+                    id="payment-account"
+                    value={
+                      paymentDraft.paying_account_id || card.preferred_payment_account_id || ''
+                    }
                     onChange={(event) =>
-                      setCalendarDraft((current) => ({
+                      setPaymentDraft((current) => ({
                         ...current,
-                        event_type: event.target.value as CardCalendarEvent['event_type'],
+                        paying_account_id: event.target.value,
                       }))
                     }
                   >
-                    <option value="annual_fee">Annual fee</option>
-                    <option value="renewal">Renewal</option>
-                    <option value="fee_reversal">Fee reversal</option>
-                    <option value="milestone">Milestone</option>
+                    <option value="">Not selected yet</option>
+                    {bankAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.institution_name} · {account.masked_number}
+                      </option>
+                    ))}
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="calendar-date">Date</Label>
+                  <Label htmlFor="payment-amount">Intended amount</Label>
                   <Input
-                    id="calendar-date"
-                    type="date"
-                    value={calendarDraft.event_date}
+                    id="payment-amount"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={paymentDraft.amount}
                     onChange={(event) =>
-                      setCalendarDraft((current) => ({
+                      setPaymentDraft((current) => ({
                         ...current,
-                        event_date: event.target.value,
+                        amount: event.target.value,
                       }))
                     }
                     required
                   />
                 </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="submit"
-                  size="sm"
-                  variant="outline"
-                  disabled={saveCalendar.isPending || deleteCalendar.isPending}
-                >
-                  {editingCalendarId ? 'Update reminder' : 'Save reminder'}
-                </Button>
-                {editingCalendarId ? (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={saveCalendar.isPending || deleteCalendar.isPending}
-                      onClick={() => {
-                        setEditingCalendarId(null);
-                        setCalendarDraft((current) => ({ ...current, label: '' }));
-                      }}
-                    >
-                      Cancel edit
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="danger"
-                      disabled={saveCalendar.isPending || deleteCalendar.isPending}
-                      onClick={() => {
-                        const target = card.calendar.find(
-                          (event) => event.id === editingCalendarId,
-                        );
-                        if (target) setCalendarDeleteTarget(target);
-                      }}
-                    >
-                      Delete reminder
-                    </Button>
-                  </>
-                ) : null}
-              </div>
-              {saveCalendar.error || deleteCalendar.error ? (
-                <p role="alert" className="text-sm font-bold text-danger">
-                  {(saveCalendar.error ?? deleteCalendar.error)?.message}
-                </p>
-              ) : null}
-            </form>
-          </details>
-          <Dialog
-            open={Boolean(calendarDeleteTarget)}
-            onClose={() => {
-              if (!deleteCalendar.isPending) setCalendarDeleteTarget(null);
-            }}
-            title="Delete this reminder?"
-            description="This removes the personal reminder only; issuer statement evidence remains unchanged."
-          >
-            <p className="text-sm leading-6 text-muted-foreground">
-              {calendarDeleteTarget
-                ? `${calendarDeleteTarget.label} will no longer appear in the card timeline.`
-                : 'The selected reminder will no longer appear in the card timeline.'}
-            </p>
-            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button
-                data-dialog-initial-focus
-                variant="ghost"
-                onClick={() => setCalendarDeleteTarget(null)}
-                disabled={deleteCalendar.isPending}
-              >
-                Keep reminder
-              </Button>
-              <Button
-                variant="danger"
-                onClick={() => {
-                  if (calendarDeleteTarget) deleteCalendar.mutate(calendarDeleteTarget.id);
-                }}
-                disabled={!calendarDeleteTarget || deleteCalendar.isPending}
-              >
-                {deleteCalendar.isPending ? 'Deleting…' : 'Delete reminder'}
-              </Button>
-            </div>
-          </Dialog>
-        </section>
-
-        <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="card-disputes-title">
-          <div>
-            <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
-              USER-RECORDED CASES
-            </p>
-            <h2
-              id="card-disputes-title"
-              className="mt-1 text-lg font-extrabold tracking-[-0.025em]"
-            >
-              Dispute tracker
-            </h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Track a case you raised with the issuer. PFIS does not submit disputes.
-            </p>
-          </div>
-          <div className="mt-4 divide-y divide-border/65">
-            {(disputes.data ?? []).map((dispute) => (
-              <div key={dispute.id} className="py-4 first:pt-0">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="font-extrabold">{dispute.label}</p>
-                  <span className="money-value text-sm font-extrabold">
-                    {formatCurrency(dispute.amount, card.currency)}
-                  </span>
+                <div className="space-y-1.5">
+                  <Label htmlFor="payment-date">Planned date</Label>
+                  <Input
+                    id="payment-date"
+                    type="date"
+                    value={paymentDraft.planned_for}
+                    onChange={(event) =>
+                      setPaymentDraft((current) => ({
+                        ...current,
+                        planned_for: event.target.value,
+                      }))
+                    }
+                    required
+                  />
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {formatDate(dispute.complaint_date)} · {dispute.status}
-                  {dispute.reference_number ? ` · ${dispute.reference_number}` : ''}
-                </p>
-                {dispute.status !== 'resolved' ? (
-                  <Button
-                    className="mt-2"
-                    size="sm"
-                    variant="outline"
-                    disabled={resolveDispute.isPending}
-                    onClick={() => resolveDispute.mutate(dispute.id)}
-                  >
-                    Record resolved
+                <div className="sm:col-span-3">
+                  <Button type="submit" disabled={createPayment.isPending}>
+                    Save payment intention
                   </Button>
-                ) : null}
-              </div>
-            ))}
-          </div>
-          <details className="mt-4 rounded-lg border border-border/70 p-4">
-            <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
-              Record an issuer dispute
-            </summary>
-            <form
-              className="mt-4 grid gap-4 sm:grid-cols-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (disputeDraft.label.trim() && Number(disputeDraft.amount) > 0) {
-                  createDispute.mutate();
-                }
-              }}
-            >
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="dispute-line">Statement line (optional)</Label>
-                <Select
-                  id="dispute-line"
-                  value={disputeDraft.statement_line_id}
-                  onChange={(event) =>
-                    setDisputeDraft((current) => ({
-                      ...current,
-                      statement_line_id: event.target.value,
-                    }))
-                  }
-                >
-                  <option value="">No linked line</option>
-                  {statementLines.map((line) => (
-                    <option key={line.id} value={line.id}>
-                      {formatDate(line.transaction_date)} · {line.description}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="dispute-label">Case label</Label>
-                <Input
-                  id="dispute-label"
-                  value={disputeDraft.label}
-                  onChange={(event) =>
-                    setDisputeDraft((current) => ({
-                      ...current,
-                      label: event.target.value,
-                    }))
-                  }
-                  required
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="dispute-amount">Amount</Label>
-                <Input
-                  id="dispute-amount"
-                  type="number"
-                  inputMode="decimal"
-                  min="0.01"
-                  step="0.01"
-                  value={disputeDraft.amount}
-                  onChange={(event) =>
-                    setDisputeDraft((current) => ({
-                      ...current,
-                      amount: event.target.value,
-                    }))
-                  }
-                  required
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="dispute-date">Complaint date</Label>
-                <Input
-                  id="dispute-date"
-                  type="date"
-                  value={disputeDraft.complaint_date}
-                  onChange={(event) =>
-                    setDisputeDraft((current) => ({
-                      ...current,
-                      complaint_date: event.target.value,
-                    }))
-                  }
-                  required
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="dispute-reference">Issuer reference</Label>
-                <Input
-                  id="dispute-reference"
-                  value={disputeDraft.reference_number}
-                  onChange={(event) =>
-                    setDisputeDraft((current) => ({
-                      ...current,
-                      reference_number: event.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <Button type="submit" disabled={createDispute.isPending}>
-                  Save dispute record
-                </Button>
-              </div>
-              {createDispute.error ? (
-                <p role="alert" className="text-sm font-bold text-danger sm:col-span-2">
-                  {createDispute.error.message}
-                </p>
-              ) : null}
-            </form>
-          </details>
-        </section>
-      </div>
-
-        </div>
-      ) : null}
-
-      {cardView === 'plan' ? (
-        <div className="space-y-6">
-          <section className="rounded-xl bg-card p-5 sm:p-6">
-        <h2 className="text-lg font-extrabold tracking-[-0.025em]">
-          Payment intentions & manual records
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Plan first. After you actually pay, record the bank-to-card movement in PFIS. Neither
-          action contacts your bank or issuer.
-        </p>
-        <div className="mt-3">
-          {card.planned_payments.length ? (
-            card.planned_payments.map((payment) => (
-              <div key={payment.id} className="border-b border-border/65 py-2 last:border-b-0">
-                <LedgerRow
-                  leading={<CreditCard className="h-4 w-4" aria-hidden="true" />}
-                  title={`${payment.status === 'planned' ? 'Planned' : payment.status === 'recorded' ? 'Recorded' : 'Cancelled'} ${formatCurrency(payment.amount, card.currency)}`}
-                  subtitle={
-                    payment.status === 'recorded'
-                      ? `Manual ledger transfer dated ${formatDate(payment.planned_for)} · no bank action`
-                      : `Planned for ${formatDate(payment.planned_for)}`
-                  }
-                  amount={payment.status}
-                  className="border-b-0"
-                />
-                {payment.status === 'planned' ? (
-                  <div className="flex flex-col gap-2 px-2 pb-3 sm:flex-row sm:items-center sm:justify-end">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={
-                        updatePayment.isPending ||
-                        !(payment.paying_account_id || card.preferred_payment_account_id)
-                      }
-                      onClick={() =>
-                        updatePayment.mutate({
-                          intentId: payment.id,
-                          status: 'recorded',
-                          payingAccountId:
-                            payment.paying_account_id || card.preferred_payment_account_id,
-                        })
-                      }
-                    >
-                      <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                      Record manual transfer
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={updatePayment.isPending}
-                      onClick={() =>
-                        updatePayment.mutate({
-                          intentId: payment.id,
-                          status: 'cancelled',
-                        })
-                      }
-                    >
-                      Cancel intent
-                    </Button>
-                  </div>
-                ) : null}
-                {payment.status === 'planned' &&
-                !(payment.paying_account_id || card.preferred_payment_account_id) ? (
-                  <p className="px-2 pb-3 text-xs leading-5 text-muted-foreground">
-                    Choose and save a preferred paying bank account before recording the transfer.
-                  </p>
-                ) : null}
-              </div>
-            ))
-          ) : (
-            <p className="py-4 text-sm text-muted-foreground">No payment intentions recorded.</p>
-          )}
-        </div>
-        {updatePayment.error ? (
-          <p role="alert" className="mt-3 text-sm font-bold text-danger">
-            {updatePayment.error.message}
-          </p>
-        ) : null}
-        <details className="mt-4 rounded-lg border border-border/70 p-4">
-          <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
-            Plan a manual payment
-          </summary>
-          <form
-            className="mt-4 grid gap-4 sm:grid-cols-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (Number(paymentDraft.amount) > 0) createPayment.mutate();
-            }}
-          >
-            <div className="space-y-1.5">
-              <Label htmlFor="payment-account">Paying account</Label>
-              <Select
-                id="payment-account"
-                value={paymentDraft.paying_account_id || card.preferred_payment_account_id || ''}
-                onChange={(event) =>
-                  setPaymentDraft((current) => ({
-                    ...current,
-                    paying_account_id: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Not selected yet</option>
-                {bankAccounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.institution_name} · {account.masked_number}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="payment-amount">Intended amount</Label>
-              <Input
-                id="payment-amount"
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={paymentDraft.amount}
-                onChange={(event) =>
-                  setPaymentDraft((current) => ({
-                    ...current,
-                    amount: event.target.value,
-                  }))
-                }
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="payment-date">Planned date</Label>
-              <Input
-                id="payment-date"
-                type="date"
-                value={paymentDraft.planned_for}
-                onChange={(event) =>
-                  setPaymentDraft((current) => ({
-                    ...current,
-                    planned_for: event.target.value,
-                  }))
-                }
-                required
-              />
-            </div>
-            <div className="sm:col-span-3">
-              <Button type="submit" disabled={createPayment.isPending}>
-                Save payment intention
-              </Button>
-            </div>
-          </form>
-        </details>
+                </div>
+              </form>
+            </details>
           </section>
         </div>
       ) : null}

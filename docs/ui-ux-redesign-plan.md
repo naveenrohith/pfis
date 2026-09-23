@@ -187,6 +187,18 @@ Shared chart requirements:
 - Keyboard and touch interaction expose the same detail; contrast and non-color cues are checked.
 - Validate resizing and long currency labels. No clipped axes, overlapping lines, hidden event markers, or misleading interpolation.
 
+### Current chart inventory and intended treatment
+
+| Current surface | User question | Redesign treatment |
+|---|---|---|
+| Position → net-worth history (`NetWorthSection`) | How has the recorded position changed? | One currency-labelled historical line, explicit snapshot basis and as-of context, legible dates, and an expandable table; do not imply investment-market valuation. |
+| Insights → daily observed-spend trend (`InsightsSection`) | When did observed debit spend change? | One conclusion-led observed-series chart with period and currency units, sparse date ticks, non-hover summary, and a table of dates/amounts/counts. |
+| Cards → daily path (`CardDailyPathPanel`) | What could happen to utilization before statement close? | Keep the central estimate and event/target/limit cues; render the balance uncertainty range as a band when the matching credit-limit anchor exists. If it does not, state that limitation and keep the exact amount range in the table. |
+| Cards → utilization history (`CardUtilizationHistoryPanel`) | What is issuer evidence versus the current ledger estimate? | Separate issuer statement anchors from the estimated continuation at a marked basis boundary; never draw one unqualified line across the source change. Keep the target guide, summary, and evidence table. |
+| Outlook / budgets / payment scenarios | What changes under a plan or scenario? | Retain direct labelled comparisons and text ranges; do not add decorative charts where a compact before/after comparison answers the question more clearly. |
+
+The repository already has a `ChartFrame` and Recharts/SVG implementations. Reuse the existing stack; make the frame carry the chart question, measure/period/basis, summary, and data alternative, while specialist renderers own marks, units, and uncertainty. Do not add a chart dependency.
+
 ## 9. Delivery sequence and proof gates
 
 The work should proceed in vertical slices. These are sequence estimates of scope, not calendar promises.
@@ -296,6 +308,8 @@ The work should proceed in vertical slices. These are sequence estimates of scop
 ### Formative usability target
 
 Use five moderated sessions as an initial formative round, not as a statistically representative study. For each core journey, target at least four of five participants completing without moderator hints and zero critical misunderstandings about an amount’s basis or whether a forecast is guaranteed. Any miss should produce a concrete revision and a retest of that task.
+
+**Current validation limitation:** the supplied screenshots, code review, and product-owner approval informed this implementation, but no external participant sessions have been conducted. Automated browser and accessibility checks are engineering evidence only; they do not satisfy the five-session target or prove user comprehension. Per the product owner's direction, proceed with implementation and record the moderated study as follow-up rather than claiming it passed.
 
 ## 11. Key implementation files to revisit
 

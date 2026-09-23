@@ -1,10 +1,5 @@
-import {
-  Activity,
-  ArrowDownRight,
-  ArrowUpRight,
-  Minus,
-  ShieldCheck,
-} from 'lucide-react';
+import { Activity, ArrowDownRight, ArrowUpRight, Minus, ShieldCheck } from 'lucide-react';
+import { ChartFrame } from '@/components/system';
 import { formatCurrency, formatDate } from '@/lib/format';
 import type { CardUtilizationHistory, CardUtilizationHistoryPoint } from '@/lib/types';
 
@@ -54,11 +49,17 @@ function trendIcon(trend: CardUtilizationHistory['trend']) {
   return Activity;
 }
 
-function chartCoordinates(points: CardUtilizationHistoryPoint[], scale: number): string {
-  if (points.length === 1) return '50,50';
+function chartCoordinates(
+  points: CardUtilizationHistoryPoint[],
+  scale: number,
+  firstDate: number,
+  lastDate: number,
+): string {
   return points
-    .map((point, index) => {
-      const x = (index / (points.length - 1)) * 100;
+    .map((point) => {
+      const timestamp = Date.parse(`${point.as_of}T00:00:00Z`);
+      const x =
+        firstDate === lastDate ? 50 : ((timestamp - firstDate) / (lastDate - firstDate)) * 100;
       const y = 90 - ((point.utilization_pct ?? 0) / scale) * 76;
       return `${x.toFixed(2)},${Math.max(8, Math.min(90, y)).toFixed(2)}`;
     })
@@ -66,9 +67,10 @@ function chartCoordinates(points: CardUtilizationHistoryPoint[], scale: number):
 }
 
 function latestPoint(history: CardUtilizationHistory): CardUtilizationHistoryPoint | null {
-  const daily = history.daily_points[history.daily_points.length - 1];
-  const statement = history.statement_points[history.statement_points.length - 1];
-  return daily ?? statement ?? null;
+  const points = [...history.statement_points, ...history.daily_points].sort((left, right) =>
+    left.as_of.localeCompare(right.as_of),
+  );
+  return points[points.length - 1] ?? null;
 }
 
 function pointBasis(point: CardUtilizationHistoryPoint): string {
@@ -152,15 +154,23 @@ export function CardUtilizationHistoryPanel({
 
   const copy = trendCopy[history.trend];
   const Icon = trendIcon(history.trend);
-  const chartPoints = [...history.statement_points, ...history.daily_points].filter(
-    (point) => point.utilization_pct != null,
+  const statementPoints = history.statement_points
+    .filter((point) => point.utilization_pct != null)
+    .sort((left, right) => left.as_of.localeCompare(right.as_of));
+  const dailyPoints = history.daily_points
+    .filter((point) => point.utilization_pct != null)
+    .sort((left, right) => left.as_of.localeCompare(right.as_of));
+  const chartPoints = [...statementPoints, ...dailyPoints].sort((left, right) =>
+    left.as_of.localeCompare(right.as_of),
   );
+  const firstDate = Date.parse(`${chartPoints[0].as_of}T00:00:00Z`);
+  const lastDate = Date.parse(`${chartPoints[chartPoints.length - 1].as_of}T00:00:00Z`);
   const maxUtilization = Math.max(
     100,
     Math.ceil(Math.max(...chartPoints.map((point) => point.utilization_pct ?? 0), 0) / 10) * 10,
   );
   const latest = latestPoint(history);
-  const evidencePoints = [...history.statement_points, ...history.daily_points].slice(-8);
+  const evidencePoints = chartPoints;
   const targetY =
     history.utilization_target_pct == null
       ? null
@@ -206,28 +216,17 @@ export function CardUtilizationHistoryPanel({
       </div>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(15rem,0.65fr)] lg:items-start">
-        <div className="rounded-lg border border-border/65 bg-card/75 p-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <div>
-              <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
-                STATEMENT TO TODAY
-              </p>
-              <p className="mt-1 text-sm font-extrabold">{chartLabel}</p>
-            </div>
-            <p className="text-xs text-muted-foreground">Scale: 0–{maxUtilization}%</p>
-          </div>
-          <div className="mt-4 overflow-hidden rounded-md bg-muted/35 px-2 py-3">
-            <svg
-              className="h-40 w-full"
-              viewBox="0 0 100 100"
-              role="img"
-              aria-label={chartLabel}
-              preserveAspectRatio="none"
-            >
+        <div className="min-w-0 rounded-lg border border-border/65 bg-card/75 p-4">
+          <ChartFrame
+            title="Utilization over time"
+            description={`Percent · ${formatDate(chartPoints[0].as_of)} to ${formatDate(chartPoints[chartPoints.length - 1].as_of)} · scale 0–${maxUtilization}%`}
+            summary={`${chartLabel} Issuer-statement values and settled-ledger estimates use distinct lines and are not connected across evidence sources.`}
+          >
+            <svg className="h-40 w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
               <title>Card utilization history</title>
               <desc>
-                {chartLabel} Statement points are issuer evidence; the final daily points are
-                settled-ledger estimates.
+                {chartLabel} Issuer-statement values and settled-ledger estimates use distinct lines
+                and are not connected across evidence sources.
               </desc>
               <line
                 x1="0"
@@ -260,18 +259,37 @@ export function CardUtilizationHistoryPanel({
                   strokeDasharray="2 2"
                 />
               ) : null}
-              <polyline
-                points={chartCoordinates(chartPoints, maxUtilization)}
-                fill="none"
-                stroke="currentColor"
-                className="text-intelligence"
-                strokeWidth="1.8"
-                vectorEffect="non-scaling-stroke"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              {chartPoints.map((point, index) => {
-                const x = chartPoints.length === 1 ? 50 : (index / (chartPoints.length - 1)) * 100;
+              {statementPoints.length > 1 ? (
+                <polyline
+                  points={chartCoordinates(statementPoints, maxUtilization, firstDate, lastDate)}
+                  fill="none"
+                  stroke="currentColor"
+                  className="text-intelligence"
+                  strokeWidth="1.8"
+                  vectorEffect="non-scaling-stroke"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ) : null}
+              {dailyPoints.length > 1 ? (
+                <polyline
+                  points={chartCoordinates(dailyPoints, maxUtilization, firstDate, lastDate)}
+                  fill="none"
+                  stroke="currentColor"
+                  className="text-muted-foreground"
+                  strokeWidth="1.8"
+                  vectorEffect="non-scaling-stroke"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeDasharray="3 2"
+                />
+              ) : null}
+              {chartPoints.map((point) => {
+                const pointDate = Date.parse(`${point.as_of}T00:00:00Z`);
+                const x =
+                  firstDate === lastDate
+                    ? 50
+                    : ((pointDate - firstDate) / (lastDate - firstDate)) * 100;
                 const y = Math.max(
                   8,
                   Math.min(90, 90 - ((point.utilization_pct ?? 0) / maxUtilization) * 76),
@@ -289,14 +307,20 @@ export function CardUtilizationHistoryPanel({
                 );
               })}
             </svg>
-          </div>
+          </ChartFrame>
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-intelligence" aria-hidden="true" />
+              <span
+                className="h-px w-3 border-t-2 border-solid border-intelligence"
+                aria-hidden="true"
+              />
               Issuer statement
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-muted-foreground" aria-hidden="true" />
+              <span
+                className="h-px w-3 border-t-2 border-dashed border-muted-foreground"
+                aria-hidden="true"
+              />
               Settled-ledger estimate
             </span>
             {history.utilization_target_pct != null ? (
@@ -357,11 +381,12 @@ export function CardUtilizationHistoryPanel({
 
       <details className="mt-4 rounded-lg border border-border/65 bg-card/55 p-4">
         <summary className="focus-ring cursor-pointer rounded text-sm font-extrabold">
-          View {evidencePoints.length} recent evidence points
+          View all {evidencePoints.length} plotted evidence point
+          {evidencePoints.length === 1 ? '' : 's'}
         </summary>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[42rem] border-collapse text-left text-sm">
-            <caption className="sr-only">Recent card utilization evidence points</caption>
+            <caption className="sr-only">All plotted card utilization evidence points</caption>
             <thead>
               <tr className="border-b border-border/65 text-xs text-muted-foreground">
                 <th scope="col" className="px-2 py-2 font-bold">

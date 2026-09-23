@@ -12,6 +12,9 @@ function Harness() {
       <button type="button" onClick={() => scrollTo('transactions')}>
         Open transactions
       </button>
+      <button type="button" onClick={() => scrollTo('cards', 'push')}>
+        Open card accounts
+      </button>
       {activeWorkspace === 'activity' && <div id="transactions">Transactions target</div>}
     </>
   );
@@ -36,6 +39,39 @@ describe('DashboardUiProvider navigation', () => {
     expect(screen.getByTestId('section')).toHaveTextContent('transactions');
     expect(window.location.hash).toBe('#transactions');
     await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
+  });
+
+  it('keeps user-opened detail navigation in browser history', () => {
+    window.history.replaceState(null, '', '#obligations');
+    const initialHistoryLength = window.history.length;
+    render(
+      <DashboardUiProvider>
+        <Harness />
+      </DashboardUiProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open card accounts' }));
+
+    expect(window.location.hash).toBe('#cards');
+    expect(window.history.length).toBe(initialHistoryLength + 1);
+  });
+
+  it('restores the active Plan stage when browser Back changes the hash', async () => {
+    window.history.pushState(null, '', '#obligations');
+    window.history.pushState(null, '', '#cards');
+    render(
+      <DashboardUiProvider>
+        <Harness />
+      </DashboardUiProvider>,
+    );
+
+    window.history.back();
+
+    await waitFor(() => {
+      expect(window.location.hash).toBe('#obligations');
+      expect(screen.getByTestId('workspace')).toHaveTextContent('plan');
+      expect(screen.getByTestId('section')).toHaveTextContent('obligations');
+    });
   });
 
   it('restores a compatible workspace from a legacy hash', () => {

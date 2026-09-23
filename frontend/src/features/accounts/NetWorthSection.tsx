@@ -11,6 +11,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { ChartFrame } from '@/components/system';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -37,7 +38,9 @@ import { api } from '@/lib/api';
 import {
   dateInputValueInTimezone,
   formatChartCurrency,
+  formatCompact,
   formatCurrency,
+  formatDate,
   formatTime,
 } from '@/lib/format';
 import type {
@@ -57,6 +60,7 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
   const [identityAccountId, setIdentityAccountId] = useState<string | null>(null);
   const [mappingProviderType, setMappingProviderType] = useState<string | null>(null);
   const currency = user?.currency ?? 'INR';
+  const historyPoints = netWorth.data?.points ?? [];
   const unresolvedAccounts = (accounts.data ?? []).filter(
     (account) => account.is_active && identityStatus(account) !== 'confirmed',
   );
@@ -113,6 +117,31 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
         </Card>
       ) : (
         <>
+          {netWorth.isError && !netWorth.data ? (
+            <section
+              className="mb-4 flex flex-col gap-3 border-l-2 border-warning bg-warning/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+              role="alert"
+              aria-labelledby="net-worth-error-title"
+            >
+              <div>
+                <h3 id="net-worth-error-title" className="text-sm font-extrabold">
+                  Position data is unavailable
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  PFIS could not load the account totals. It will keep them unavailable rather than
+                  treating missing data as zero.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void netWorth.refetch()}
+              >
+                <RefreshCw aria-hidden="true" className="h-4 w-4" /> Retry position
+              </Button>
+            </section>
+          ) : null}
           {unresolvedAccounts.length ? (
             <section
               className="mb-4 border-l-2 border-warning bg-warning/5 px-4 py-3"
@@ -162,17 +191,21 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
           <div className="grid gap-3 sm:grid-cols-3">
             <Metric
               label="Assets"
-              value={formatCurrency(netWorth.data?.assets ?? 0, currency)}
+              value={netWorth.data ? formatCurrency(netWorth.data.assets, currency) : 'Unavailable'}
               icon={<TrendingUp className="text-success" />}
             />
             <Metric
               label="Liabilities"
-              value={formatCurrency(netWorth.data?.liabilities ?? 0, currency)}
+              value={
+                netWorth.data ? formatCurrency(netWorth.data.liabilities, currency) : 'Unavailable'
+              }
               icon={<Scale className="text-warning" />}
             />
             <Metric
               label="Net worth"
-              value={formatCurrency(netWorth.data?.net_worth ?? 0, currency)}
+              value={
+                netWorth.data ? formatCurrency(netWorth.data.net_worth, currency) : 'Unavailable'
+              }
               icon={<Landmark className="text-primary" />}
             />
           </div>
@@ -190,81 +223,120 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
               </p>
               <p className="mt-1 leading-5">
                 {currentPositionStatus === 'needs_review' || currentPositionStatus === 'stale'
-                  ? 'Totals remain on the latest verified snapshot until every account has a fresh, reconciled position.'
-                  : 'Totals include only eligible settled movement after each account’s verified anchor.'}
+                  ? 'Totals remain on the latest recorded snapshot until every account has a fresh, reconciled position.'
+                  : 'Totals include only eligible settled movement after each account’s dated balance observation.'}
               </p>
             </div>
           ) : null}
 
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
-            <Card>
-              <CardContent className="p-5">
-                <h3 className="font-bold">Net-worth history</h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Append-only balance snapshots; no market-price estimates.
-                </p>
-                {(netWorth.data?.points.length ?? 0) === 0 ? (
-                  <div className="mt-4">
-                    <EmptyState
-                      icon={<TrendingUp />}
-                      title="Add your first balance"
-                      description="History begins when an account has a dated balance snapshot."
-                    />
-                  </div>
-                ) : (
-                  <div className="mt-4" role="img" aria-label="Net worth history line chart">
-                    <ResponsiveContainer width="100%" height={260}>
-                      <LineChart data={netWorth.data?.points}>
-                        <XAxis
-                          dataKey="date"
-                          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                        />
-                        <YAxis
-                          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                          tickFormatter={(value) => `${Math.round(value / 1000)}k`}
-                        />
-                        <Tooltip
-                          formatter={(value) => formatChartCurrency(value, currency)}
-                          contentStyle={{
-                            background: 'hsl(var(--card))',
-                            border: '1px solid hsl(var(--border))',
-                            borderRadius: 12,
-                          }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="net_worth"
-                          stroke="hsl(var(--primary))"
-                          strokeWidth={3}
-                          dot={{ r: 3 }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                    <table className="sr-only">
-                      <caption>Net worth history data</caption>
+          <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
+            <section
+              className="min-w-0 border-y border-border/70 py-5"
+              aria-label="Net-worth history"
+            >
+              {historyPoints.length === 0 ? (
+                <>
+                  <h3 className="font-bold">Net-worth history</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {netWorth.isError && !netWorth.data
+                      ? 'History is unavailable until account positions can be loaded.'
+                      : 'Append-only balance snapshots; no market-price estimates.'}
+                  </p>
+                  {!netWorth.isError || netWorth.data ? (
+                    <div className="mt-4">
+                      <EmptyState
+                        icon={<TrendingUp />}
+                        title="Add your first balance"
+                        description="History begins when an account has a dated balance snapshot."
+                      />
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <ChartFrame
+                  title="Net-worth history"
+                  description={`Net worth in ${currency} · ${formatDate(historyPoints[0].date)} to ${formatDate(historyPoints[historyPoints.length - 1].date)} · dated account snapshots`}
+                  summary={`Net worth changed from ${formatCurrency(historyPoints[0].net_worth, currency)} on ${formatDate(historyPoints[0].date)} to ${formatCurrency(historyPoints[historyPoints.length - 1].net_worth, currency)} on ${formatDate(historyPoints[historyPoints.length - 1].date)}. The line connects retained balance snapshots; it does not estimate market values between them.`}
+                  dataTable={
+                    <table className="w-full min-w-[38rem] text-left text-sm">
+                      <caption className="sr-only">Net-worth history values in {currency}</caption>
                       <thead>
-                        <tr>
-                          <th>Date</th>
-                          <th>Assets</th>
-                          <th>Liabilities</th>
-                          <th>Net worth</th>
+                        <tr className="border-b border-border/65 text-xs text-muted-foreground">
+                          <th scope="col" className="px-2 py-2">
+                            Date
+                          </th>
+                          <th scope="col" className="px-2 py-2">
+                            Assets ({currency})
+                          </th>
+                          <th scope="col" className="px-2 py-2">
+                            Liabilities ({currency})
+                          </th>
+                          <th scope="col" className="px-2 py-2">
+                            Net worth ({currency})
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {netWorth.data?.points.map((point) => (
-                          <tr key={point.date}>
-                            <td>{point.date}</td>
-                            <td>{point.assets}</td>
-                            <td>{point.liabilities}</td>
-                            <td>{point.net_worth}</td>
+                        {historyPoints.map((point) => (
+                          <tr key={point.date} className="border-b border-border/45 last:border-0">
+                            <th scope="row" className="whitespace-nowrap px-2 py-2 font-bold">
+                              {formatDate(point.date)}
+                            </th>
+                            <td className="money-value px-2 py-2">
+                              {formatCurrency(point.assets, currency)}
+                            </td>
+                            <td className="money-value px-2 py-2">
+                              {formatCurrency(point.liabilities, currency)}
+                            </td>
+                            <td className="money-value px-2 py-2 font-bold">
+                              {formatCurrency(point.net_worth, currency)}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                  }
+                >
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart
+                      data={historyPoints}
+                      margin={{ left: 8, right: 12, top: 8, bottom: 2 }}
+                    >
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={(value) => formatDate(String(value))}
+                        tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                        tickFormatter={(value) => formatCompact(value)}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <Tooltip
+                        formatter={(value) => formatChartCurrency(value, currency)}
+                        labelFormatter={(value) => formatDate(String(value))}
+                        contentStyle={{
+                          background: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: 12,
+                        }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="net_worth"
+                        name={`Net worth (${currency})`}
+                        stroke="hsl(var(--primary))"
+                        strokeWidth={2.5}
+                        dot={{ r: 3 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </ChartFrame>
+              )}
+            </section>
 
             <Card>
               <CardContent className="grid gap-3 p-5">
@@ -315,7 +387,7 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
                       ) : null}
                       {account.current_balance == null && account.latest_balance != null ? (
                         <span className="block text-[0.68rem] text-muted-foreground">
-                          Verified · {account.balance_as_of ?? 'date unknown'}
+                          Observed · {account.balance_as_of ?? 'date unknown'}
                         </span>
                       ) : null}
                       <div className="flex flex-wrap justify-end gap-1">
@@ -493,7 +565,7 @@ function BalanceProviderNotice({
             ? 'Provider consent is pending'
             : consentExpired
               ? 'Provider consent has expired'
-              : 'Live bank and card refresh is not connected';
+              : 'Automatic bank and card refresh is not available in this deployment';
   const tone =
     status.status === 'ready'
       ? 'border-success/25 bg-success/[0.035]'
@@ -551,7 +623,7 @@ function BalanceProviderNotice({
               {status.refresh_supported
                 ? 'A consented connector can refresh these accounts; verify coverage before treating an amount as current truth.'
                 : consentPending
-                  ? `The ${providerLabel} consent handoff is pending. PFIS will not change a balance until the provider returns verified evidence.`
+                  ? `The ${providerLabel} consent handoff is pending. PFIS will not change a balance until the provider returns a complete, dated observation.`
                   : consentExpired
                     ? `The ${providerLabel} consent has expired. Reconnect before using a provider amount as current truth.`
                     : transportConfigured
@@ -913,7 +985,7 @@ function BalanceDialog({ accountId, onClose }: { accountId: string | null; onClo
       ? providerObserved
         ? `Provider observed ${formatCurrency(position.data.observed_balance, position.data.currency)} on ${position.data.observed_as_of}${position.data.observed_at ? ` · retrieved ${formatTime(position.data.observed_at)}` : ''}; this position is inside its refresh window.`
         : `Observed ${formatCurrency(position.data.observed_balance, position.data.currency)} on ${position.data.observed_as_of}; settled movement is ${formatCurrency(position.data.settled_movement_since_observation ?? 0, position.data.currency)} through ${position.data.estimated_as_of ?? 'today'}.`
-      : 'Record a verified observation before PFIS estimates the current position.';
+      : 'Record a dated balance observation before PFIS estimates the current position.';
   const save = useMutation({
     mutationFn: () => {
       if (!user || !accountId) throw new Error('Choose an account');
@@ -944,10 +1016,10 @@ function BalanceDialog({ accountId, onClose }: { accountId: string | null; onClo
           <section className="rounded-lg bg-muted/55 p-4" aria-labelledby="position-conclusion">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <div>
-                <p className="text-xs font-bold text-muted-foreground">LATEST VERIFIED POSITION</p>
+                <p className="text-xs font-bold text-muted-foreground">LATEST RECORDED POSITION</p>
                 <h3 id="position-conclusion" className="money-value mt-1 text-xl font-extrabold">
                   {position.data.verified_balance == null
-                    ? 'No verified balance'
+                    ? 'No balance recorded'
                     : formatCurrency(position.data.verified_balance, position.data.currency)}
                 </h3>
               </div>
@@ -968,7 +1040,7 @@ function BalanceDialog({ accountId, onClose }: { accountId: string | null; onClo
                 ? providerObserved
                   ? `Provider-observed ${position.data.balance_as_of} from ${position.data.balance_source}; freshness is ${position.data.coverage_status}.`
                   : `Observed ${position.data.balance_as_of} from ${position.data.balance_source}. This is not a live bank balance.`
-                : 'Add a verified snapshot; PFIS will not derive a live balance from partial alerts.'}
+                : 'Add a dated balance observation; PFIS will not derive a current amount from partial alerts.'}
             </p>
             <div
               className="mt-4 border-t border-border/70 pt-4"
@@ -989,7 +1061,7 @@ function BalanceDialog({ accountId, onClose }: { accountId: string | null; onClo
                         ? 'Settled activity rolled forward'
                         : position.data.position_status === 'observed'
                           ? 'Observed anchor'
-                          : 'Needs a verified anchor'}
+                          : 'Needs an observed anchor'}
                   </p>
                 </div>
                 <p className="money-value text-xl font-extrabold">
@@ -1118,7 +1190,7 @@ function BalanceDialog({ accountId, onClose }: { accountId: string | null; onClo
             ) : null}
           </section>
         ) : null}
-        <h3 className="mt-1 font-extrabold">Record a verified balance</h3>
+        <h3 className="mt-1 font-extrabold">Record an observed balance</h3>
         <div className="grid gap-1">
           <Label htmlFor="balance-amount">Balance amount</Label>
           <Input

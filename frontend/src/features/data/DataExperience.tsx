@@ -62,7 +62,7 @@ export function DataExperience() {
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={liveConnected ? 'success' : 'default'}>
               <Wifi aria-hidden="true" className="h-3.5 w-3.5" />{' '}
-              {liveConnected ? 'Live updates' : 'Polling updates'}
+              {liveConnected ? 'Status connected' : 'Periodic status refresh'}
             </Badge>
             <Button variant="outline" onClick={() => setCustomizeOpen(true)}>
               <SlidersHorizontal aria-hidden="true" className="h-4 w-4" /> Preferences
@@ -132,7 +132,10 @@ export function DataExperience() {
                   <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
                     Preferences & privacy
                   </p>
-                  <h2 id="preferences-title" className="mt-1 text-2xl font-extrabold tracking-[-0.035em]">
+                  <h2
+                    id="preferences-title"
+                    className="mt-1 text-2xl font-extrabold tracking-[-0.035em]"
+                  >
                     Tune the workspace and control your data.
                   </h2>
                   <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">

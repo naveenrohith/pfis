@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, ClipboardCheck, Scale } from 'lucide-react';
+import { ClipboardCheck, Scale } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent } from '@/components/ui/Card';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/features/auth/AuthContext';
 import { api } from '@/lib/api';
@@ -87,80 +86,88 @@ export function RecommendationFollowUp() {
     (outcomes.data ?? []).map((outcome: RecommendationOutcome) => [outcome.decision_id, outcome]),
   );
 
+  const pendingCount = accepted.filter((decision) => !outcomesByDecision.has(decision.id)).length;
+
   return (
-    <Card className="mt-4 border-primary/15">
-      <CardContent className="grid gap-4 p-5 sm:p-6">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="flex items-center gap-2 font-bold">
-              <ClipboardCheck aria-hidden="true" className="h-4 w-4 text-primary" /> Action
-              follow-up
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Review accepted guidance once. PFIS keeps your answer beside the measured baseline.
-            </p>
-          </div>
-          <Badge variant="info">Evidence log</Badge>
+    <section className="border-y border-border" aria-labelledby="action-follow-up-title">
+      <div className="flex flex-wrap items-start justify-between gap-3 py-4">
+        <div>
+          <h2 id="action-follow-up-title" className="flex items-center gap-2 text-base font-bold">
+            <ClipboardCheck aria-hidden="true" className="h-4 w-4 text-primary" /> Action follow-up
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Review accepted guidance once. Your answer stays beside its measured baseline.
+          </p>
         </div>
+        <Badge variant={pendingCount ? 'warning' : 'info'}>
+          {pendingCount ? `${pendingCount} to review` : 'Evidence log'}
+        </Badge>
+      </div>
 
-        <div className="grid gap-3">
-          {accepted.map((decision: RecommendationDecision) => {
-            const outcome = outcomesByDecision.get(decision.id);
-            const automaticChange = outcome ? measuredChange(outcome) : null;
-            return (
-              <section key={decision.id} className="rounded-xl border border-border bg-card p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-bold">{decision.title ?? 'Accepted action'}</h3>
-                    {decision.expected_impact && (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {decision.expected_impact}
-                      </p>
-                    )}
-                    {decision.smallest_action && (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        <span className="font-bold text-foreground">Smallest feasible step:</span>{' '}
-                        {decision.smallest_action}
-                      </p>
-                    )}
-                    {decision.resolution && (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        <span className="font-bold text-foreground">
-                          {decision.resolution.label}:
-                        </span>{' '}
-                        {decision.resolution.next_step}
-                      </p>
-                    )}
-                    {(decision.conflicts ?? []).slice(0, 2).map((conflict) => (
-                      <p key={conflict.code} className="mt-2 text-xs text-warning">
-                        <span className="font-bold">{conflict.title}:</span> {conflict.description}
-                      </p>
-                    ))}
-                    {decision.baseline_metric_value != null && (
-                      <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Scale aria-hidden="true" className="h-3.5 w-3.5" /> Baseline:{' '}
-                        {formatMeasurement(
-                          decision.baseline_metric_value,
-                          decision.baseline_metric_unit,
-                        )}
-                      </p>
-                    )}
-                  </div>
-                  {outcome && (
-                    <Badge variant="success">
-                      <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5" />
-                      {OUTCOME_LABELS[outcome.outcome]}
-                    </Badge>
-                  )}
-                </div>
+      <div className="divide-y divide-border">
+        {accepted.map((decision: RecommendationDecision) => {
+          const outcome = outcomesByDecision.get(decision.id);
+          const automaticChange = outcome ? measuredChange(outcome) : null;
+          return (
+            <details key={decision.id} className="group py-1">
+              <summary className="focus-ring flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 rounded-md py-3">
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-bold">
+                    {decision.title ?? 'Accepted action'}
+                  </span>
+                  {decision.expected_impact ? (
+                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                      {decision.expected_impact}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <Badge variant={outcome ? 'success' : 'warning'}>
+                    {outcome ? OUTCOME_LABELS[outcome.outcome] : 'Needs review'}
+                  </Badge>
+                  <span
+                    aria-hidden="true"
+                    className="text-muted-foreground transition-transform group-open:rotate-90"
+                  >
+                    ›
+                  </span>
+                </span>
+              </summary>
 
+              <div className="grid gap-3 pb-4 pl-1 sm:pl-4">
+                {decision.smallest_action ? (
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    <span className="font-bold text-foreground">Smallest feasible step:</span>{' '}
+                    {decision.smallest_action}
+                  </p>
+                ) : null}
+                {decision.resolution ? (
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    <span className="font-bold text-foreground">{decision.resolution.label}:</span>{' '}
+                    {decision.resolution.next_step}
+                  </p>
+                ) : null}
+                {(decision.conflicts ?? []).slice(0, 2).map((conflict) => (
+                  <p key={conflict.code} className="text-xs leading-5 text-warning">
+                    <span className="font-bold">{conflict.title}:</span> {conflict.description}
+                  </p>
+                ))}
+                {decision.baseline_metric_value != null ? (
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Scale aria-hidden="true" className="h-3.5 w-3.5" /> Baseline:{' '}
+                    {formatMeasurement(
+                      decision.baseline_metric_value,
+                      decision.baseline_metric_unit,
+                    )}
+                  </p>
+                ) : null}
                 {outcome ? (
-                  <div className="mt-3 rounded-lg bg-muted/55 px-3 py-2 text-xs text-muted-foreground">
+                  <p className="border-l-2 border-primary/40 pl-3 text-xs leading-5 text-muted-foreground">
                     {automaticChange ??
                       'PFIS recorded your response; no comparable metric was available.'}
-                  </div>
+                  </p>
                 ) : (
-                  <div className="mt-4">
+                  <div className="border-t border-border pt-3">
                     <p className="text-xs font-bold">What happened after you used this action?</p>
                     <div
                       className="mt-2 flex flex-wrap gap-2"
@@ -185,11 +192,11 @@ export function RecommendationFollowUp() {
                     </p>
                   </div>
                 )}
-              </section>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </section>
   );
 }

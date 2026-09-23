@@ -137,11 +137,36 @@ describe('Today Financial Horizon', () => {
 
     renderToday();
 
-    expect(screen.getByText('Financial horizon')).toBeInTheDocument();
+    expect(screen.getByText('Safe to spend')).toBeInTheDocument();
+    expect(screen.getByText('Ready for planning')).toBeInTheDocument();
+    expect(screen.queryByText('Monthly stability')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Show calculation details'));
     expect(screen.getByText('Flexible money')).toBeInTheDocument();
     expect(screen.getByText('Confirmed obligations')).toBeInTheDocument();
     expect(screen.getByText('Approved reserves')).toBeInTheDocument();
     expect(screen.queryByText(/Forecast ·/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the Today brief focused and exposes evidence and actions as URL destinations', () => {
+    renderToday();
+
+    const navigation = screen.getByRole('navigation', { name: 'Today views' });
+    expect(screen.getByRole('link', { name: 'Brief' })).toHaveAttribute('href', '#overview');
+    expect(screen.getByRole('link', { name: 'Why it changed' })).toHaveAttribute(
+      'href',
+      '#guidance',
+    );
+    expect(screen.getByRole('link', { name: 'Actions' })).toHaveAttribute(
+      'href',
+      '#recommendations',
+    );
+    expect(navigation).toContainElement(screen.getByRole('link', { name: 'Brief' }));
+    expect(
+      screen.queryByRole('heading', { name: 'Your action follow-up' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('link', { name: 'Why it changed' }));
+    expect(scrollTo).toHaveBeenCalledWith('guidance');
   });
 
   it('shows a data action and never invents flexible money for incomplete inputs', () => {
@@ -162,9 +187,10 @@ describe('Today Financial Horizon', () => {
 
     renderToday();
 
-    expect(screen.getByText('Refresh the verified bank balance')).toBeInTheDocument();
+    expect(screen.getByText('Refresh the observed bank balance')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Show calculation details'));
     expect(screen.getAllByText('Not calculated')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: /Complete Cash Plan evidence/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Review Safe to spend/i }));
     expect(scrollTo).toHaveBeenCalledWith('cash-plan');
   });
 

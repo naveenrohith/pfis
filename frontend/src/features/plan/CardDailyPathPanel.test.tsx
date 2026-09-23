@@ -77,12 +77,23 @@ const projection: CardStatementProjection = {
 
 describe('CardDailyPathPanel', () => {
   it('renders dated trajectory, event markers, target pressure, and hard-limit runway', () => {
-    render(<CardDailyPathPanel projection={projection} currency="INR" targetPct={40} />);
+    render(
+      <CardDailyPathPanel
+        projection={projection}
+        currency="INR"
+        targetPct={40}
+        creditLimit={100000}
+      />,
+    );
 
     expect(screen.getByText('DAILY PATH TO STATEMENT CLOSE')).toBeInTheDocument();
     expect(
-      screen.getByRole('img', { name: /Daily card path from 11 Aug 2026 through 20 Aug 2026/i }),
+      screen.getByRole('heading', { name: 'Projected utilization by day' }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Daily card path from 11 Aug 2026 through 20 Aug 2026/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Projected range')).toBeInTheDocument();
     expect(screen.getAllByText(/First pressure/)).not.toHaveLength(0);
     expect(screen.getAllByText('Over hard limit')).not.toHaveLength(0);
     expect(screen.getAllByText('Recurring: TRAVELCO')).not.toHaveLength(0);
@@ -92,6 +103,15 @@ describe('CardDailyPathPanel', () => {
     expect(
       screen.getByText(/cannot confirm an issuer balance, available credit, or payment outcome/i),
     ).toBeInTheDocument();
+  });
+
+  it('does not draw a utilization band without a credit-limit anchor', () => {
+    const { container } = render(<CardDailyPathPanel projection={projection} currency="INR" />);
+
+    expect(
+      screen.getByText(/A utilization band needs a credit limit on file/i),
+    ).toBeInTheDocument();
+    expect(container.querySelector('polygon')).not.toBeInTheDocument();
   });
 
   it('does not render a path panel when the projection is unavailable', () => {

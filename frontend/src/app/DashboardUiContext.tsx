@@ -32,7 +32,7 @@ interface DashboardUiContextValue {
   setExplorerSearch: (value: string) => void;
   focusedReviewId: string | null;
   focusReview: (id: string | null) => void;
-  scrollTo: (id: string) => void;
+  scrollTo: (id: string, historyMode?: 'push' | 'replace') => void;
   quickAddOpen: boolean;
   setQuickAddOpen: (open: boolean) => void;
   commandOpen: boolean;
@@ -74,7 +74,7 @@ export function DashboardUiProvider({ children }: { children: React.ReactNode })
     });
   }, []);
 
-  const scrollTo = useCallback((id: string) => {
+  const scrollTo = useCallback((id: string, historyMode: 'push' | 'replace' = 'replace') => {
     const section = dashboardSection(id);
     if (!section) return;
     const workspace = workspaceForSection(section);
@@ -84,7 +84,14 @@ export function DashboardUiProvider({ children }: { children: React.ReactNode })
     setActiveSection(section);
     setPendingSection(section);
     if (window.location.hash !== `#${section}`) {
-      window.history.replaceState(null, '', `#${section}`);
+      const url = new URL(window.location.href);
+      url.hash = section;
+      const nextLocation = `${url.pathname}${url.search}${url.hash}`;
+      if (historyMode === 'push') {
+        window.history.pushState(window.history.state, '', nextLocation);
+      } else {
+        window.history.replaceState(window.history.state, '', nextLocation);
+      }
     }
   }, []);
 
@@ -105,12 +112,16 @@ export function DashboardUiProvider({ children }: { children: React.ReactNode })
   }, [activeWorkspace, pendingSection]);
 
   useEffect(() => {
-    const onHashChange = () => {
+    const onLocationChange = () => {
       const section = sectionFromHash(window.location.hash);
       if (section) scrollTo(section);
     };
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    window.addEventListener('hashchange', onLocationChange);
+    window.addEventListener('popstate', onLocationChange);
+    return () => {
+      window.removeEventListener('hashchange', onLocationChange);
+      window.removeEventListener('popstate', onLocationChange);
+    };
   }, [scrollTo]);
 
   useEffect(() => {

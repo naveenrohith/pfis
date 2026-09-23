@@ -12,9 +12,9 @@ describe('Planning decision trail', () => {
   it('uses a short, ordered path that matches the financial decision', () => {
     expect(PLAN_STAGES.map((stage) => stage.label)).toEqual([
       'Safe to spend',
-      'Verified position',
+      'Position',
       'Commitments',
-      'Outlook & guardrails',
+      'Outlook',
     ]);
     expect(PLAN_STAGES.map((stage) => stage.destination)).toEqual([
       'cash-plan',
@@ -41,19 +41,18 @@ describe('Planning decision trail', () => {
     expect(planViewFromSection('budgets')).toBe('budgets');
   });
 
-  it('keeps Cards visible in the flat Plan navigation', () => {
+  it('keeps the four decision stages visible and maps detail routes into their stage', () => {
     expect(PLAN_NAV_ITEMS.map((item) => item.label)).toEqual([
       'Safe to spend',
       'Position',
-      'Cards',
       'Commitments',
       'Outlook',
-      'Budgets',
     ]);
-    expect(planNavigationForView('cards')).toBe('cards');
-    expect(planNavigationForView('liabilities')).toBe('obligations');
-    expect(planNavigationForView('household')).toBe('obligations');
-    expect(planSectionForNavigation('cards')).toBe('cards');
-    expect(planSectionForNavigation('obligations')).toBe('obligations');
+    expect(planNavigationForView('cards')).toBe('commitments');
+    expect(planNavigationForView('liabilities')).toBe('commitments');
+    expect(planNavigationForView('household')).toBe('commitments');
+    expect(planNavigationForView('budgets')).toBe('outlook');
+    expect(planSectionForNavigation('commitments')).toBe('obligations');
+    expect(planSectionForNavigation('outlook')).toBe('analytics');
   });
 });

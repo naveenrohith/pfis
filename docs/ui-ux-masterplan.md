@@ -43,9 +43,9 @@ PFIS primitives, not instructions to copy catalog blocks into the product.
 
 The existing `POST /accounts/{account_id}/card-observations` route accepts issuer/connector observations and
 requires connector provenance and a complete coverage envelope. The frontend now exposes a typed
-`createCardPositionObservation` client method for that contract, but the visible “Record verified position”
-dialog deliberately uses the existing manual `POST /accounts/{account_id}/balances` route. This keeps a
-user-entered value labelled user-observed instead of incorrectly presenting it as issuer-confirmed. Successful
+`createCardPositionObservation` client method for that contract, but the “Record observed balance” dialog
+deliberately uses the existing manual `POST /accounts/{account_id}/balances` route. This keeps a user-entered
+value labelled user-observed instead of incorrectly presenting it as issuer-confirmed. Successful
 saves alone invalidate the card overview, forecast, due-runway, utilization, and account-position queries.
 
 ### Current gate status
@@ -66,9 +66,9 @@ authorized action.
 
 | Workspace | Sections | User outcome |
 |---|---|---|
-| Today | Financial Horizon, one priority action, up to three supporting signals | Understand the month and choose the next safe action |
+| Today | Brief, “Why it changed,” and Actions follow-up views; one priority action and two supporting signals on the brief | Understand the month, inspect its evidence, then review outcomes separately |
 | Activity | Transactions, Review, Timeline | Inspect the ledger and resolve uncertainty |
-| Plan | Safe to spend, Position, Cards, Commitments, Outlook, Budgets | Move from current position to deliberate financial choices |
+| Plan | Safe to spend, Position, Commitments, Outlook; Cards lives within Commitments and Budgets within Outlook | Move from current position to deliberate financial choices without six competing first-level tabs |
 | Insights | Drivers, Categories, Merchants | Explain what changed and rank the evidence behind it |
 | Data & settings | Connections, Statements, Preferences & privacy, Diagnostics | Control sources, privacy, recovery, and technical health |
 

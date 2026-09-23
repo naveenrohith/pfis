@@ -33,9 +33,9 @@ describe('responsive workspace navigation', () => {
     expect(window.location.hash).toBe('#cash-plan');
   });
 
-  it('opens quick add from the mobile floating action', () => {
+  it('opens quick add from the mobile bottom-bar action', () => {
     renderNavigation();
-    fireEvent.click(screen.getByRole('button', { name: 'Quick add activity' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Quick add activity' })[0]);
     expect(screen.getByTestId('quick-add')).toHaveTextContent('true');
   });
 });

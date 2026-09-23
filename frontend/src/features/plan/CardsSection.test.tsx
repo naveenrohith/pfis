@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CardsSection } from './CardsSection';
 
@@ -188,6 +188,7 @@ vi.mock('@/lib/api', () => ({
 
 describe('CardsSection activity centre', () => {
   it('shows deterministic signals and issuer-action limitations', async () => {
+    window.history.replaceState(null, '', '/#cards');
     cardOverview.mockResolvedValue({
       financial_account_id: 'card-1',
       currency: 'INR',
@@ -415,16 +416,16 @@ describe('CardsSection activity centre', () => {
       </QueryClientProvider>,
     );
 
-    expect(
-      await screen.findByRole('heading', { name: 'Cards' }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Record verified position' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Cards' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('card')).toBe('card-1'),
+    );
+    expect(window.location.hash).toBe('#cards');
+    expect(screen.getByRole('button', { name: 'Record observed balance' })).toBeInTheDocument();
 
     addBalance.mockResolvedValue({ id: 'snapshot-1' });
-    fireEvent.click(screen.getByRole('button', { name: 'Record verified position' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent(
-      'This saves a user-observed balance for planning.',
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Record observed balance' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('This saves a balance you observed');
     fireEvent.change(screen.getByLabelText('Current outstanding'), {
       target: { value: '11500' },
     });
@@ -437,13 +438,16 @@ describe('CardsSection activity centre', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('cardView')).toBe('activity'),
+    );
     expect(await screen.findByText('Activity centre')).toBeInTheDocument();
     const refundTracker = screen.getByRole('region', { name: 'Refund tracker' });
     expect(refundTracker).toHaveTextContent('Refunds in flight');
     expect(refundTracker).toHaveTextContent('₹750');
     expect(refundTracker).toHaveTextContent('oldest 10 Feb 2026');
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Now' }));
     expect(screen.getAllByText('Provider-observed · fresh')).not.toHaveLength(0);
     expect(screen.getByText('NEXT STATEMENT FORECAST')).toBeInTheDocument();
     expect(screen.getByText('DAILY PATH TO STATEMENT CLOSE')).toBeInTheDocument();
@@ -451,8 +455,8 @@ describe('CardsSection activity centre', () => {
     expect(screen.getAllByText('Recurring: STREAMCO')).not.toHaveLength(0);
     expect(screen.getByText('UTILIZATION HISTORY')).toBeInTheDocument();
     expect(screen.getByText('Moving up')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: /Utilization moved from 12.0%/i })).toBeInTheDocument();
-    expect(screen.getByText('View 3 recent evidence points')).toBeInTheDocument();
+    expect(screen.getAllByText(/Utilization moved from 12.0%/i)).toHaveLength(2);
+    expect(screen.getByText('View all 3 plotted evidence points')).toBeInTheDocument();
     expect(screen.getAllByText('16.8%')).not.toHaveLength(0);
     expect(screen.getAllByText('78%')).not.toHaveLength(0);
     expect(screen.getByText(/pace-based estimate, not an issuer amount/i)).toBeInTheDocument();
@@ -480,7 +484,7 @@ describe('CardsSection activity centre', () => {
     );
     expect(screen.getByText('Keep monitoring this billing cycle.')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Evidence & controls' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
     expect(screen.getByText('How this statement arrived at the due')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
@@ -492,13 +496,13 @@ describe('CardsSection activity centre', () => {
       screen.getByText(/PFIS cannot block, reverse, or dispute card activity/i),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Payment plan' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Pay' }));
     expect(screen.getByText('PAYMENT SCENARIOS')).toBeInTheDocument();
     expect(screen.getByText('Minimum due vs total due')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Record manual transfer' })).toBeEnabled();
     expect(screen.getByText(/Neither action contacts your bank or issuer/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Evidence & controls' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
     fireEvent.click(screen.getByRole('button', { name: /Annual fee review/i }));
     fireEvent.click(screen.getByText('Edit fee or milestone reminder'));
     expect(screen.getByRole('button', { name: 'Update reminder' })).toBeEnabled();
@@ -518,5 +522,13 @@ describe('CardsSection activity centre', () => {
         reward_rules: [{ label: 'Dining', rate_pct: 2 }],
       }),
     );
+
+    await act(async () => {
+      window.history.back();
+    });
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('cardView')).toBe('pay'),
+    );
+    expect(screen.getByText('PAYMENT SCENARIOS')).toBeInTheDocument();
   });
 });
