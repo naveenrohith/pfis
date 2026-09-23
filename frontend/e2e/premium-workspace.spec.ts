@@ -202,6 +202,28 @@ test('missing net-worth data stays unavailable instead of displaying zero', asyn
     testInfo.project.name !== 'desktop',
     'One browser project is sufficient to exercise the failed-position state',
   );
+  await page.route('**/api/accounts*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 'e2e-position-account',
+          user_id: 'e2e-user',
+          institution_name: 'Example Bank',
+          account_type: 'bank',
+          balance_kind: 'asset',
+          masked_number: '***1234',
+          currency: 'INR',
+          is_active: true,
+          identity_status: 'confirmed',
+          latest_balance: 1000,
+          balance_as_of: '2026-09-01',
+          created_at: '2026-09-01T00:00:00Z',
+        },
+      ]),
+    }),
+  );
   let positionFailureServed = false;
   await page.route('**/api/net-worth*', (route) => {
     positionFailureServed = true;
