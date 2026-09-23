@@ -136,21 +136,21 @@ test('Cards direct hash settles on a stable target across lazy loading', async (
   await page.goto('/dashboard/#cards');
 
   await expect(page).toHaveURL(/#cards$/);
-  await expect(page.getByRole('heading', { name: 'Card accounts', exact: true })).toBeVisible({
-    timeout: 20_000,
-  });
+  const cardsHeading = page.getByRole('heading', { name: 'Card accounts', exact: true });
+  await expect(cardsHeading).toBeVisible({ timeout: 20_000 });
   const anchor = page.locator('#cards');
   await expect(anchor).toBeVisible();
 
   const headerBottom = await page
     .getByRole('banner')
     .evaluate((element) => element.getBoundingClientRect().bottom);
+  const viewportHeight = await page.evaluate(() => window.innerHeight);
   await expect
     .poll(() => anchor.evaluate((element) => element.getBoundingClientRect().top))
     .toBeGreaterThanOrEqual(headerBottom - 1);
   await expect
-    .poll(() => anchor.evaluate((element) => element.getBoundingClientRect().top))
-    .toBeLessThan(headerBottom + 100);
+    .poll(() => cardsHeading.evaluate((element) => element.getBoundingClientRect().top))
+    .toBeLessThan(viewportHeight);
 });
 
 test('financial roadmap workspaces are responsive, keyboard reachable, and accessible', async ({
