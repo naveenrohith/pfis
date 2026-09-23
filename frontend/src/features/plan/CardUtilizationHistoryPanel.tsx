@@ -163,6 +163,82 @@ export function CardUtilizationHistoryPanel({
   const chartPoints = [...statementPoints, ...dailyPoints].sort((left, right) =>
     left.as_of.localeCompare(right.as_of),
   );
+  if (chartPoints.length === 0) {
+    const retainedPoints = [...history.statement_points, ...history.daily_points].sort(
+      (left, right) => left.as_of.localeCompare(right.as_of),
+    );
+
+    return (
+      <section
+        className="rounded-xl border border-border/70 bg-card p-5 sm:p-6"
+        aria-labelledby="utilization-history-title"
+      >
+        <div className="flex items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+            <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
+              UTILIZATION HISTORY
+            </p>
+            <h2 id="utilization-history-title" className="mt-1 text-lg font-extrabold">
+              Utilization can’t be plotted yet
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+              PFIS has {retainedPoints.length} dated source records, but none has both a recorded
+              balance and a positive credit limit. Utilization remains unavailable. Review the
+              card’s source evidence; PFIS has not inferred a percentage.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 overflow-x-auto rounded-lg border border-border/65">
+          <table
+            className="w-full min-w-[34rem] text-left text-sm"
+            aria-label="Retained card records without plottable utilization"
+          >
+            <thead className="bg-muted/55 text-xs text-muted-foreground">
+              <tr>
+                <th scope="col" className="px-3 py-2 font-semibold">
+                  Date
+                </th>
+                <th scope="col" className="px-3 py-2 font-semibold">
+                  Evidence
+                </th>
+                <th scope="col" className="px-3 py-2 font-semibold">
+                  Balance
+                </th>
+                <th scope="col" className="px-3 py-2 font-semibold">
+                  Credit limit
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/60">
+              {retainedPoints.map((point) => (
+                <tr key={`${point.as_of}-${point.basis}-${point.statement_id ?? 'no-statement'}`}>
+                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                    {formatDate(point.as_of)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2">{pointBasis(point)}</td>
+                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                    {point.balance == null
+                      ? 'Not available'
+                      : formatCurrency(point.balance, currency)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                    {point.credit_limit == null || point.credit_limit <= 0
+                      ? 'No usable limit'
+                      : formatCurrency(point.credit_limit, currency)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+
   const firstDate = Date.parse(`${chartPoints[0].as_of}T00:00:00Z`);
   const lastDate = Date.parse(`${chartPoints[chartPoints.length - 1].as_of}T00:00:00Z`);
   const maxUtilization = Math.max(

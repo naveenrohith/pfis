@@ -92,4 +92,24 @@ describe('RecommendationFollowUp', () => {
     expect(screen.getByText('2 records measured improvement')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'It helped' })).not.toBeInTheDocument();
   });
+
+  it('does not show outcome choices when saved outcomes cannot be verified', async () => {
+    mocks.guidanceOutcomes.mockRejectedValueOnce(new Error('temporarily unavailable'));
+    renderFollowUp();
+
+    expect(await screen.findByText('Outcome history is unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'It helped' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry outcome history' }));
+    expect(await screen.findByRole('button', { name: 'It helped' })).toBeInTheDocument();
+  });
+
+  it('offers a retry instead of disappearing when decisions cannot be loaded', async () => {
+    mocks.guidanceDecisions.mockRejectedValueOnce(new Error('temporarily unavailable'));
+    renderFollowUp();
+
+    expect(await screen.findByText('Action history is unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry action history' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'It helped' })).not.toBeInTheDocument();
+  });
 });

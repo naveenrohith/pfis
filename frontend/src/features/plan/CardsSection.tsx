@@ -799,10 +799,7 @@ function EmiEvidenceRow({ plan, currency }: { plan: CardEmiPlan; currency: strin
   );
 }
 
-export function CardsSection({
-  anchorId,
-  hideIntro = false,
-}: { anchorId?: string; hideIntro?: boolean } = {}) {
+export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}) {
   const { user } = useAuth();
   const financialToday = dateInputValueInTimezone(user?.timezone ?? 'Asia/Kolkata');
   const queryClient = useQueryClient();
@@ -1082,7 +1079,7 @@ export function CardsSection({
       : 'Import a statement or record an observed card balance before PFIS estimates current outstanding.';
 
   return (
-    <div id={anchorId} className="scroll-mt-[10.5rem] space-y-6 lg:scroll-mt-[11.5rem]">
+    <div className="space-y-6">
       {!hideIntro ? (
         <PageIntro
           eyebrow="Cards"

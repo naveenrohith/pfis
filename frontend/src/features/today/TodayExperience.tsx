@@ -128,9 +128,11 @@ export function TodayExperience() {
       })
       .map((decision: RecommendationDecision) => decision.recommendation_id),
   );
-  const primaryAction = data?.recommendations.find(
-    (recommendation) => !hiddenRecommendationIds.has(recommendation.id),
-  );
+  const primaryAction = decisions.isError
+    ? undefined
+    : data?.recommendations.find(
+        (recommendation) => !hiddenRecommendationIds.has(recommendation.id),
+      );
   const actionConflicts = primaryAction?.conflicts ?? [];
   const actionGoals = primaryAction?.goal_links ?? [];
   const actionResolution = primaryAction?.resolution;
@@ -261,73 +263,101 @@ export function TodayExperience() {
               />
             </FinancialHero>
 
-            <ActionSurface
-              icon={<Sparkles className="h-4 w-4" />}
-              title={primaryAction?.title ?? 'Explore the drivers behind this month'}
-              description={
-                primaryAction?.description ??
-                'PFIS has no urgent action for this period. Review the evidence and keep your data current.'
-              }
-              actionLabel={primaryAction?.action_label ?? 'Open insights'}
-              onAction={() => scrollTo(actionTarget)}
-              secondary={
-                primaryAction?.expected_impact ||
-                (primaryAction?.reason_codes?.length
-                  ? `Based on ${primaryAction.reason_codes.length} signals`
-                  : 'Based on your selected month')
-              }
-              footer={
-                primaryAction && !decisions.isLoading ? (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled={
-                        updateRecommendation.isPending || actionResolution?.status === 'blocked'
-                      }
-                      onClick={() =>
-                        updateRecommendation.mutate({
-                          recommendationId: primaryAction.id,
-                          state: 'accepted',
-                        })
-                      }
-                    >
-                      <Check aria-hidden="true" className="h-3.5 w-3.5" /> Use this action
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-background hover:bg-background/10"
-                      disabled={updateRecommendation.isPending}
-                      aria-label={`Snooze ${primaryAction.title} for 7 days`}
-                      onClick={() =>
-                        updateRecommendation.mutate({
-                          recommendationId: primaryAction.id,
-                          state: 'snoozed',
-                        })
-                      }
-                    >
-                      <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-background hover:bg-background/10"
-                      disabled={updateRecommendation.isPending}
-                      aria-label={`Mark ${primaryAction.title} as not relevant`}
-                      onClick={() =>
-                        updateRecommendation.mutate({
-                          recommendationId: primaryAction.id,
-                          state: 'not_relevant',
-                        })
-                      }
-                    >
-                      <X aria-hidden="true" className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ) : undefined
-              }
-            />
+            {decisions.isError ? (
+              <section
+                className="flex flex-col justify-center gap-3 border-l-2 border-warning bg-warning/5 px-4 py-5"
+                role="alert"
+                aria-labelledby="action-status-error-title"
+              >
+                <div>
+                  <p className="text-xs font-bold text-muted-foreground">Recommended next</p>
+                  <h2 id="action-status-error-title" className="mt-1 text-base font-extrabold">
+                    Action status is unavailable
+                  </h2>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    PFIS could not check which recommendations you have already handled. Retry
+                    before taking another action so it does not repeat one.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void decisions.refetch()}
+                  className="self-start"
+                >
+                  <RefreshCw aria-hidden="true" className="h-4 w-4" /> Retry action status
+                </Button>
+              </section>
+            ) : (
+              <ActionSurface
+                icon={<Sparkles className="h-4 w-4" />}
+                title={primaryAction?.title ?? 'Explore the drivers behind this month'}
+                description={
+                  primaryAction?.description ??
+                  'PFIS has no urgent action for this period. Review the evidence and keep your data current.'
+                }
+                actionLabel={primaryAction?.action_label ?? 'Open insights'}
+                onAction={() => scrollTo(actionTarget)}
+                secondary={
+                  primaryAction?.expected_impact ||
+                  (primaryAction?.reason_codes?.length
+                    ? `Based on ${primaryAction.reason_codes.length} signals`
+                    : 'Based on your selected month')
+                }
+                footer={
+                  primaryAction && !decisions.isLoading ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={
+                          updateRecommendation.isPending || actionResolution?.status === 'blocked'
+                        }
+                        onClick={() =>
+                          updateRecommendation.mutate({
+                            recommendationId: primaryAction.id,
+                            state: 'accepted',
+                          })
+                        }
+                      >
+                        <Check aria-hidden="true" className="h-3.5 w-3.5" /> Use this action
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-background hover:bg-background/10"
+                        disabled={updateRecommendation.isPending}
+                        aria-label={`Snooze ${primaryAction.title} for 7 days`}
+                        onClick={() =>
+                          updateRecommendation.mutate({
+                            recommendationId: primaryAction.id,
+                            state: 'snoozed',
+                          })
+                        }
+                      >
+                        <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-background hover:bg-background/10"
+                        disabled={updateRecommendation.isPending}
+                        aria-label={`Mark ${primaryAction.title} as not relevant`}
+                        onClick={() =>
+                          updateRecommendation.mutate({
+                            recommendationId: primaryAction.id,
+                            state: 'not_relevant',
+                          })
+                        }
+                      >
+                        <X aria-hidden="true" className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ) : undefined
+                }
+              />
+            )}
           </div>
 
           {primaryAction &&
@@ -443,7 +473,24 @@ export function TodayExperience() {
               appears.
             </p>
           </div>
-          {evidence.length ? (
+          {lowData ? (
+            <InsightSurface
+              icon={<CircleAlert className="h-4 w-4" aria-hidden="true" />}
+              title="Too little activity to assess a trend"
+              description="PFIS found fewer than three transactions in this period, so it can’t determine whether a movement is unusual yet. Review the source activity as more records arrive."
+              tone="neutral"
+              meta={
+                <Button
+                  type="button"
+                  variant="link"
+                  className="min-h-11 px-0"
+                  onClick={() => scrollTo('transactions')}
+                >
+                  Review activity <ArrowRight aria-hidden="true" className="h-4 w-4" />
+                </Button>
+              }
+            />
+          ) : evidence.length ? (
             <div className="divide-y divide-border border-y border-border">
               {evidence.map((item, index) => (
                 <InsightSurface
@@ -514,6 +561,17 @@ export function TodayExperience() {
           </h2>
           {decisions.isLoading ? (
             <Skeleton className="h-28" />
+          ) : decisions.isError ? (
+            <EmptyState
+              icon={<CircleAlert className="h-5 w-5" aria-hidden="true" />}
+              title="Action history is unavailable"
+              description="PFIS couldn’t check which accepted actions need follow-up. Retry to load the history; no empty state has been inferred."
+              action={
+                <Button type="button" onClick={() => void decisions.refetch()}>
+                  <RefreshCw aria-hidden="true" className="h-4 w-4" /> Retry action history
+                </Button>
+              }
+            />
           ) : (decisions.data ?? []).some(
               (decision: RecommendationDecision) => decision.state === 'accepted',
             ) ? (

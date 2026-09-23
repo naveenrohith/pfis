@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardCheck, Scale } from 'lucide-react';
+import { ClipboardCheck, RefreshCw, Scale } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
@@ -46,6 +46,38 @@ function measuredChange(outcome: RecommendationOutcome) {
   return `${formatMeasurement(Math.abs(outcome.automatic_impact_value), outcome.metric_unit)} measured ${direction}`;
 }
 
+function FollowUpErrorState({
+  title,
+  description,
+  retryLabel,
+  onRetry,
+}: {
+  title: string;
+  description: string;
+  retryLabel: string;
+  onRetry: () => void;
+}) {
+  return (
+    <section
+      className="border-l-2 border-warning bg-warning/5 px-4 py-4"
+      role="alert"
+      aria-labelledby="action-follow-up-error-title"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 id="action-follow-up-error-title" className="text-sm font-extrabold">
+            {title}
+          </h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
+        </div>
+        <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+          <RefreshCw aria-hidden="true" className="h-4 w-4" /> {retryLabel}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 export function RecommendationFollowUp() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -81,7 +113,30 @@ export function RecommendationFollowUp() {
   const accepted = (decisions.data ?? []).filter(
     (decision: RecommendationDecision) => decision.state === 'accepted',
   );
-  if (!user || decisions.isLoading || outcomes.isLoading || accepted.length === 0) return null;
+  if (!user) return null;
+  if (decisions.isError) {
+    return (
+      <FollowUpErrorState
+        title="Action history is unavailable"
+        description="PFIS couldn’t load which actions you accepted. Retry to check the history before continuing."
+        retryLabel="Retry action history"
+        onRetry={() => void decisions.refetch()}
+      />
+    );
+  }
+  if (decisions.isLoading || outcomes.isLoading) return null;
+  if (accepted.length === 0) return null;
+  if (outcomes.isError) {
+    return (
+      <FollowUpErrorState
+        title="Outcome history is unavailable"
+        description="PFIS couldn’t verify whether you already recorded a final response. No response choices are shown until the history loads."
+        retryLabel="Retry outcome history"
+        onRetry={() => void outcomes.refetch()}
+      />
+    );
+  }
+
   const outcomesByDecision = new Map(
     (outcomes.data ?? []).map((outcome: RecommendationOutcome) => [outcome.decision_id, outcome]),
   );

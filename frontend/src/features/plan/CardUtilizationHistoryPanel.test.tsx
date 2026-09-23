@@ -128,6 +128,47 @@ describe('CardUtilizationHistoryPanel', () => {
     );
   });
 
+  it('retains dated evidence when no point has plottable utilization', () => {
+    const unplottableHistory: CardUtilizationHistory = {
+      ...history,
+      statement_points: [
+        {
+          ...history.statement_points[0],
+          credit_limit: null,
+          utilization_pct: null,
+          status: 'unavailable',
+        },
+      ],
+      daily_points: [
+        {
+          ...history.daily_points[0],
+          credit_limit: 0,
+          utilization_pct: null,
+          status: 'unavailable',
+        },
+      ],
+      trend: 'unavailable',
+      trend_basis: 'unavailable',
+      trend_delta_pct: null,
+    };
+
+    render(<CardUtilizationHistoryPanel history={unplottableHistory} currency="INR" />);
+
+    expect(
+      screen.getByRole('heading', { name: 'Utilization can’t be plotted yet' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/none has both a recorded balance and a positive credit limit/i),
+    ).toBeInTheDocument();
+
+    const table = screen.getByRole('table', {
+      name: 'Retained card records without plottable utilization',
+    });
+    expect(within(table).getByText('Issuer statement')).toBeInTheDocument();
+    expect(within(table).getByText('Settled-ledger estimate')).toBeInTheDocument();
+    expect(within(table).getAllByText('No usable limit')).toHaveLength(2);
+  });
+
   it('gives the user a next step when history is empty or unavailable', () => {
     const { rerender } = render(<CardUtilizationHistoryPanel currency="INR" />);
 

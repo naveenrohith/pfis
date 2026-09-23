@@ -102,13 +102,41 @@ export function DashboardUiProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!pendingSection) return;
-    const frame = window.requestAnimationFrame(() => {
-      document
-        .getElementById(pendingSection)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    let frame = 0;
+    let timeout: number | undefined;
+    let observer: MutationObserver | undefined;
+
+    const scrollWhenReady = () => {
+      const target = document.getElementById(pendingSection);
+      if (!target) return false;
+
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      observer?.disconnect();
+      if (timeout !== undefined) window.clearTimeout(timeout);
       setPendingSection(null);
+      return true;
+    };
+
+    frame = window.requestAnimationFrame(() => {
+      if (scrollWhenReady()) return;
+
+      observer = new MutationObserver(() => {
+        if (scrollWhenReady()) observer?.disconnect();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      if (scrollWhenReady()) return;
+
+      timeout = window.setTimeout(() => {
+        observer?.disconnect();
+        setPendingSection(null);
+      }, 15_000);
     });
-    return () => window.cancelAnimationFrame(frame);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      if (timeout !== undefined) window.clearTimeout(timeout);
+    };
   }, [activeWorkspace, pendingSection]);
 
   useEffect(() => {

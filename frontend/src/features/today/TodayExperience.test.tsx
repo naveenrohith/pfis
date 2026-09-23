@@ -3,42 +3,52 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TodayExperience } from './TodayExperience';
 
-const { cashPlanState, scrollTo, recommendations, decisions, setGuidanceState } = vi.hoisted(
-  () => ({
-    cashPlanState: {
-      data: undefined as
-        | {
-            primary_financial_account_id: string;
-            currency: string;
-            verified_balance: number | null;
-            balance_as_of: string | null;
-            next_income_date: string | null;
-            confirmed_commitments: [];
-            commitment_total: number;
-            approved_reserve_total: number;
-            flexible_money: number | null;
-            daily_allowance: number | null;
-            readiness:
-              'ready' | 'needs_verified_balance' | 'needs_fresh_balance' | 'needs_next_income';
-            assumptions: string[];
-          }
-        | undefined,
-      isLoading: false,
-    },
-    scrollTo: vi.fn(),
-    recommendations: [] as Array<{
-      id: string;
-      title: string;
-      description: string;
-      action_label: string;
-      target: string;
-      expected_impact: string;
-      reason_codes: string[];
-    }>,
-    decisions: [] as Array<Record<string, unknown>>,
-    setGuidanceState: vi.fn(),
-  }),
-);
+const {
+  cashPlanState,
+  scrollTo,
+  recommendations,
+  decisions,
+  setGuidanceState,
+  todayUi,
+  dataSufficiency,
+  decisionQueryFails,
+} = vi.hoisted(() => ({
+  cashPlanState: {
+    data: undefined as
+      | {
+          primary_financial_account_id: string;
+          currency: string;
+          verified_balance: number | null;
+          balance_as_of: string | null;
+          next_income_date: string | null;
+          confirmed_commitments: [];
+          commitment_total: number;
+          approved_reserve_total: number;
+          flexible_money: number | null;
+          daily_allowance: number | null;
+          readiness:
+            'ready' | 'needs_verified_balance' | 'needs_fresh_balance' | 'needs_next_income';
+          assumptions: string[];
+        }
+      | undefined,
+    isLoading: false,
+  },
+  scrollTo: vi.fn(),
+  recommendations: [] as Array<{
+    id: string;
+    title: string;
+    description: string;
+    action_label: string;
+    target: string;
+    expected_impact: string;
+    reason_codes: string[];
+  }>,
+  decisions: [] as Array<Record<string, unknown>>,
+  setGuidanceState: vi.fn(),
+  todayUi: { activeSection: 'overview' as 'overview' | 'guidance' | 'recommendations' },
+  dataSufficiency: { value: 'high' as 'low' | 'medium' | 'high' },
+  decisionQueryFails: { value: false },
+}));
 
 vi.mock('@/features/auth/AuthContext', () => ({
   useAuth: () => ({
@@ -47,7 +57,7 @@ vi.mock('@/features/auth/AuthContext', () => ({
 }));
 
 vi.mock('@/app/DashboardUiContext', () => ({
-  useDashboardUi: () => ({ scrollTo }),
+  useDashboardUi: () => ({ scrollTo, activeSection: todayUi.activeSection }),
 }));
 
 vi.mock('@/features/workspace/WorkspaceContext', () => ({
@@ -61,7 +71,11 @@ vi.mock('@/components/ui/Toast', () => ({
 vi.mock('@/lib/api', () => ({
   api: {
     setGuidanceState,
-    guidanceDecisions: vi.fn(() => Promise.resolve(decisions)),
+    guidanceDecisions: vi.fn(() =>
+      decisionQueryFails.value
+        ? Promise.reject(new Error('Action history is temporarily unavailable'))
+        : Promise.resolve(decisions),
+    ),
     guidanceOutcomes: vi.fn().mockResolvedValue([]),
     recordGuidanceOutcome: vi.fn(),
   },
@@ -87,7 +101,7 @@ vi.mock('@/features/workspace/queries', () => ({
       financial_health: {
         monthly_stability: 75,
         recurring_burden: 10,
-        data_sufficiency: 'high',
+        data_sufficiency: dataSufficiency.value,
         data_confidence: 90,
       },
       month_comparison: null,
@@ -102,6 +116,9 @@ vi.mock('@/features/workspace/queries', () => ({
 describe('Today Financial Horizon', () => {
   beforeEach(() => {
     scrollTo.mockClear();
+    todayUi.activeSection = 'overview';
+    dataSufficiency.value = 'high';
+    decisionQueryFails.value = false;
     recommendations.splice(0);
     decisions.splice(0);
     setGuidanceState.mockReset();
@@ -243,5 +260,50 @@ describe('Today Financial Horizon', () => {
       await screen.findByRole('heading', { name: 'Explore the drivers behind this month' }),
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use this action' })).not.toBeInTheDocument();
+  });
+
+  it('does not claim there is no unusual movement when the period has low evidence', () => {
+    todayUi.activeSection = 'guidance';
+    dataSufficiency.value = 'low';
+
+    renderToday();
+
+    expect(screen.getByText('Too little activity to assess a trend')).toBeInTheDocument();
+    expect(screen.queryByText('No unusual movement needs attention')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Review activity' }));
+    expect(scrollTo).toHaveBeenCalledWith('transactions');
+  });
+
+  it('shows a retry state instead of an empty action history when decisions fail to load', async () => {
+    todayUi.activeSection = 'recommendations';
+    decisionQueryFails.value = true;
+
+    renderToday();
+
+    expect(await screen.findByText('Action history is unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('No action outcomes to review')).not.toBeInTheDocument();
+
+    decisionQueryFails.value = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry action history' }));
+    expect(await screen.findByText('No action outcomes to review')).toBeInTheDocument();
+  });
+
+  it('does not offer a new recommendation while previously handled actions cannot be checked', async () => {
+    recommendations.push({
+      id: 'review-1',
+      title: 'Review uncertain activity',
+      description: 'Confirm one uncertain record.',
+      action_label: 'Open review queue',
+      target: 'review',
+      expected_impact: 'Improve the reliability of financial totals.',
+      reason_codes: ['review'],
+    });
+    decisionQueryFails.value = true;
+
+    renderToday();
+
+    expect(await screen.findByText('Action status is unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use this action' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry action status' })).toBeInTheDocument();
   });
 });

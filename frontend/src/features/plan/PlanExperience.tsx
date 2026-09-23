@@ -130,7 +130,7 @@ export function PlanExperience() {
       ) : null}
 
       <div
-        id={view === 'cards' ? 'plan-cards' : view}
+        id={view === 'cards' ? 'cards' : view}
         className="animate-fade-in scroll-mt-[8rem] lg:scroll-mt-[9rem]"
       >
         <Suspense fallback={<PlanSkeleton label={pageCopy.title} />}>
@@ -141,7 +141,7 @@ export function PlanExperience() {
             </>
           ) : null}
           {view === 'networth' ? <NetWorthSection embedded /> : null}
-          {view === 'cards' ? <CardsSection anchorId="cards" hideIntro /> : null}
+          {view === 'cards' ? <CardsSection hideIntro /> : null}
           {view === 'liabilities' ? <FinancialPositionSection view="liabilities" /> : null}
           {view === 'obligations' ? (
             <>
