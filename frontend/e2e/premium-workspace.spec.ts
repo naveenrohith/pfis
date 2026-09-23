@@ -202,17 +202,20 @@ test('missing net-worth data stays unavailable instead of displaying zero', asyn
     testInfo.project.name !== 'desktop',
     'One browser project is sufficient to exercise the failed-position state',
   );
-  await page.route('**/api/net-worth?**', (route) =>
-    route.fulfill({
+  let positionFailureServed = false;
+  await page.route('**/api/net-worth*', (route) => {
+    positionFailureServed = true;
+    return route.fulfill({
       status: 503,
       contentType: 'application/json',
       body: JSON.stringify({ detail: 'Temporary position failure' }),
-    }),
-  );
+    });
+  });
   await openDemoWorkspace(page);
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
   await page.getByRole('tab', { name: 'Position', exact: true }).click();
+  await expect.poll(() => positionFailureServed).toBe(true);
   await expect(page.getByRole('alert')).toContainText('Position data is unavailable');
   await expect(page.getByText('Unavailable', { exact: true })).toHaveCount(3);
   await expect(page.locator('main')).not.toContainText('Add your first balance');
