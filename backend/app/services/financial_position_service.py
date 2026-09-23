@@ -110,6 +110,10 @@ from app.services.card_statement_projection_service import (
 )
 from app.services.classification import ClassificationType, classify_source_record
 from app.services.deposit_statement_persistence import persist_deposit_statement
+from app.services.financial_change_capture import (
+    TRANSACTION_CHANGE_DOMAINS,
+    queue_financial_change,
+)
 from app.services.financial_clock import user_financial_today
 from app.services.generic_credit_card_statement_extractor import (
     EXTRACTOR_VERSION as GENERIC_CREDIT_CARD_EXTRACTOR_VERSION,
@@ -4134,6 +4138,7 @@ class FinancialPositionService:
             await self.db.flush()
             await capture_transaction_snapshot(self.db, statement_transaction, deleted=True)
             await self.db.execute(delete(Transaction).where(Transaction.id == old_id))
+            await queue_financial_change(self.db, user_id, TRANSACTION_CHANGE_DOMAINS)
             if match_kind == "fuel_surcharge":
                 candidate.amount = line.amount
 

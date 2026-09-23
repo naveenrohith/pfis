@@ -11,12 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  ActionSurface,
-  FinancialHero,
-  InsightSurface,
-  PageIntro,
-} from '@/components/system';
+import { ActionSurface, FinancialHero, InsightSurface, PageIntro } from '@/components/system';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState, Skeleton } from '@/components/ui/Skeleton';
@@ -46,7 +41,7 @@ export function TodayExperience() {
     queryFn: () => api.guidanceDecisions(user!.id),
     enabled: Boolean(user),
   });
-  const { liveConnected, running } = useSync();
+  const { running, updateChannelLabel, updateChannelVariant } = useSync();
   const updateRecommendation = useMutation({
     mutationFn: ({
       recommendationId,
@@ -168,14 +163,18 @@ export function TodayExperience() {
         }
         description={summary}
         action={
-          <Badge variant={liveConnected ? 'success' : 'outline'}>
+          <Badge variant={updateChannelVariant}>
             <span
               className={cn(
                 'h-1.5 w-1.5 rounded-full',
-                liveConnected ? 'bg-success' : 'bg-muted-foreground',
+                updateChannelVariant === 'success'
+                  ? 'bg-success'
+                  : updateChannelVariant === 'warning'
+                    ? 'bg-warning'
+                    : 'bg-muted-foreground',
               )}
             />
-            {running ? 'Syncing' : liveConnected ? 'Live' : 'Saved snapshot'}
+            {running ? 'Syncing' : updateChannelLabel}
           </Badge>
         }
       />

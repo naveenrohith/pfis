@@ -486,7 +486,7 @@ ledger transaction.
 | `POST` | `/api/users/` | `UserCreate` | — | `201` | `409` | `UserResponse` |
 | `GET` | `/api/users/` | — | — | `200` | — | `list[UserResponse]` (current user if authed, else all) |
 | `GET` | `/api/users/{user_id}` | — | `user_id` | `200` | `404` | `UserResponse` |
-| `PATCH` | `/api/users/{user_id}` | `UserUpdate{name?, timezone?, raw_email_retention_days?}` | `user_id` | `200` | `403,404,422` | Updated `UserResponse`; changed retention enqueues an owned durable sweep |
+| `PATCH` | `/api/users/{user_id}` | `UserUpdate{name?, timezone?, raw_email_retention_days?}` | `user_id` | `200` | `403,404,422` | Updated `UserResponse`; changed timezone emits a durable view-change event; changed retention enqueues an owned durable sweep |
 | `DELETE` | `/api/users/{user_id}` | `AccountDeletionRequest{confirmation}` | `user_id` | `200` | `403,422` | `AccountDeletionResponse`; recent browser authentication and exact `DELETE <email>` phrase required; rate 3/hour |
 
 `UserResponse.timezone` is a validated IANA timezone. It defines the user's
@@ -562,10 +562,31 @@ remote result and the user should review Google Account permissions.
 | `GET` | `/api/ws/sync` | `user_id`, `token?` | WebSocket | Sync events scoped by browser session cookie; query bearer tokens are local/compatibility-only and rejected in production |
 
 Sync events include `sync_started`, `gmail_checked`, `emails_stored`,
-`pipeline_started`, `transactions_updated`, `sync_completed`, and `sync_failed`.
+`pipeline_started`, `transactions_updated`, `financial_state_updated`,
+`sync_completed`, and `sync_failed`.
 In local compatibility mode, an optional query token must identify the same user
 as `user_id`. Production requires an allowed origin and the revocable browser
 session cookie; bearer tokens are not accepted in WebSocket URLs.
+
+## Cross-domain change replay
+
+| Method | Path | Query | Success | Errors | Returns |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/sync/changes` | `user_id`, `after_sequence` (default `0`), `limit` (default `250`, max `500`) | `200` | `401,403,422` | Ordered user-scoped invalidation page and current sequence |
+
+The authenticated identity must match `user_id`; the response never includes
+source financial values. `events` contain `event_id`, `sequence`,
+`event_type=financial_state_updated`, changed `domains`, and `created_at`.
+`current_sequence` is the user's durable high-water mark, `has_more` indicates
+another page, and `oldest_available_sequence` reports the retained boundary.
+When the requested cursor is older than the 90-day journal window or is ahead
+of the current sequence (for example, after a database restore), the endpoint
+returns `reset_required=true` and the current high-water mark; the client must
+invalidate that user's cached views before resuming from it.
+
+The WebSocket `financial_state_updated` event carries only the event ID,
+sequence, and domain tags and is a low-latency hint. Clients must use this replay
+endpoint as the source of truth after reconnects or missed socket events.
 
 ## Pipeline
 

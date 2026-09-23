@@ -24,6 +24,7 @@ from app.services.balance_provider_connection_service import BalanceProviderConn
 from app.services.balance_sync_service import BalanceSyncService
 from app.services.connectors.balance_registry import balance_connector_registry
 from app.services.connectors.errors import classify_connector_exception
+from app.services.financial_change_service import prune_financial_change_events
 from app.services.gmail.sync_service import demo_sync_gmail_emails, sync_gmail_emails
 from app.services.parser.pipeline import process_raw_emails, retry_parse_failures
 from app.services.retention_service import redact_expired_raw_email_content
@@ -256,11 +257,14 @@ async def _handle_raw_email_retention(
     db: AsyncSession, user_id: str, payload: dict[str, Any]
 ) -> dict[str, Any]:
     batch_size = min(max(int(payload.get("batch_size", 500)), 1), 2000)
-    return await redact_expired_raw_email_content(
+    result = await redact_expired_raw_email_content(
         db,
         user_id=user_id or None,
         batch_size=batch_size,
     )
+    pruned_events = await prune_financial_change_events(db)
+    await db.commit()
+    return {**result, "financial_change_events_pruned": pruned_events}
 
 
 async def _handle_balance_refresh(

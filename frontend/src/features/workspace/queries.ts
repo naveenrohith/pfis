@@ -95,7 +95,7 @@ export const queryKeys = {
   pipelineFailures: (u: string, resolved: boolean) => ['pipelineFailures', u, resolved] as const,
   productCapabilities: ['productCapabilities'] as const,
   operationalHealth: ['operationalHealth'] as const,
-  job: (jobId: string) => ['job', jobId] as const,
+  job: (u: string, jobId: string) => ['job', u, jobId] as const,
 };
 
 function useUserId(): string {
@@ -539,10 +539,11 @@ export function useEnqueueBalanceRefresh() {
 }
 
 export function useJob(jobId?: string) {
+  const userId = useUserId();
   return useQuery({
-    queryKey: queryKeys.job(jobId ?? ''),
+    queryKey: queryKeys.job(userId, jobId ?? ''),
     queryFn: () => api.job(jobId!),
-    enabled: !!jobId,
+    enabled: !!userId && !!jobId,
     refetchInterval: 3_000,
     refetchOnWindowFocus: true,
     retry: false,

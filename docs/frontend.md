@@ -13,6 +13,10 @@ closed. Backend API changes need to support only the typed React client.
 - Source lives in `frontend/src` (feature-based folders under `features/`).
 - Reuse the typed API client in `src/lib/api.ts`; do not add frontend-only data
   paths or duplicate aggregation that belongs in backend services.
+- Durable financial events use the central domain-to-query policy in
+  `features/workspace/financialChangeQueries.ts`. Invalidation is scoped to the
+  current user's query keys; unknown event domains fail closed to that user's
+  full refresh.
 - Keep API calls aligned with `docs/api-reference.md`.
 - Preserve accessibility: live regions for toasts, keyboard-dismissible dialogs,
   labelled controls, and visible focus states.

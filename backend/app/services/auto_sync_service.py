@@ -14,6 +14,7 @@ from app.database import AsyncSessionLocal
 from app.models.email import GmailAccount
 from app.services.connectors.base import ConnectorErrorType
 from app.services.connectors.errors import classify_connector_exception, public_connector_error
+from app.services.financial_change_capture import queue_financial_change
 from app.services.gmail.sync_service import sync_gmail_emails_incremental
 from app.services.parser.pipeline import process_raw_emails
 from app.services.sync_events import sync_event_manager
@@ -199,6 +200,8 @@ async def _run_account_sync(gmail_account_id: str) -> None:
                 with db.no_autoflush:
                     account_update_result = await db.execute(account_update)
                 account_update_applied = account_update_result.rowcount == 1
+                if account_update_applied:
+                    await queue_financial_change(db, account.user_id, {"data"})
                 await db.commit()
             if account and account_update_applied:
                 await sync_event_manager.broadcast(

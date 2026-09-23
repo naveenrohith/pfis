@@ -57,7 +57,7 @@ export function InboxSection({ embedded = false }: { embedded?: boolean } = {}) 
   const emails = useEmails();
   const syncStatus = useSyncStatus();
   const autoSync = useAutoSyncStatus();
-  const { running, liveConnected, runSync, gmailConnectUrl } = useSync();
+  const { running, updateChannelLabel, updateChannelVariant, runSync, gmailConnectUrl } = useSync();
   const { scrollTo } = useDashboardUi();
   const [notice, setNotice] = useState<GmailNotice | null>(null);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
@@ -150,9 +150,7 @@ export function InboxSection({ embedded = false }: { embedded?: boolean } = {}) 
           action={
             <div className="flex items-center gap-2">
               <Badge variant={statusVariant}>{latest ? `Latest: ${latest}` : 'No sync yet'}</Badge>
-              <Badge variant={liveConnected ? 'success' : 'default'}>
-                {liveConnected ? 'Live updates' : 'Polling updates'}
-              </Badge>
+              <Badge variant={updateChannelVariant}>{updateChannelLabel}</Badge>
               {(needsReauthorization || disconnected) && gmailConnectUrl ? (
                 <ButtonLink variant="outline" size="sm" href={gmailConnectUrl}>
                   <Link2 aria-hidden="true" className="mr-1 h-3.5 w-3.5" />

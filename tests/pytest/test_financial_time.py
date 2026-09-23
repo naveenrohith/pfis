@@ -59,7 +59,7 @@ async def test_stored_user_timezone_controls_the_financial_day(
 
 async def test_timezone_update_is_validated_and_user_scoped(client):
     owner, owner_token = await register_user(client, "timezone-owner")
-    other, _ = await register_user(client, "timezone-other")
+    other, other_token = await register_user(client, "timezone-other")
 
     updated = await client.patch(
         f"/api/users/{owner['id']}",
@@ -86,9 +86,37 @@ async def test_timezone_update_is_validated_and_user_scoped(client):
         json={"timezone": "UTC"},
         headers=auth_headers(owner_token),
     )
+    replay = await client.get(
+        "/api/sync/changes",
+        params={"user_id": owner["id"], "after_sequence": 0},
+        headers=auth_headers(owner_token),
+    )
+    other_replay = await client.get(
+        "/api/sync/changes",
+        params={"user_id": other["id"], "after_sequence": 0},
+        headers=auth_headers(other_token),
+    )
+    unchanged_timezone = await client.patch(
+        f"/api/users/{owner['id']}",
+        json={"timezone": "America/New_York"},
+        headers=auth_headers(owner_token),
+    )
+    replay_after_noop = await client.get(
+        "/api/sync/changes",
+        params={"user_id": owner["id"], "after_sequence": 0},
+        headers=auth_headers(owner_token),
+    )
 
     updated.raise_for_status()
+    replay.raise_for_status()
+    other_replay.raise_for_status()
+    unchanged_timezone.raise_for_status()
+    replay_after_noop.raise_for_status()
     assert updated.json()["timezone"] == "America/New_York"
+    assert replay.json()["current_sequence"] == 1
+    assert replay.json()["events"][0]["domains"] == ["activity", "guidance", "planning", "today"]
+    assert other_replay.json()["current_sequence"] == 0
+    assert replay_after_noop.json()["current_sequence"] == 1
     assert invalid.status_code == 422
     assert null_name.status_code == 422
     assert null_timezone.status_code == 422

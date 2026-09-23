@@ -94,6 +94,8 @@ PORTABLE_EXPORT_EXCLUDED_TABLES = {
     "auth_sessions": "Session and CSRF hashes are security credentials, not portable records.",
     "oauth_states": "OAuth state, verifier, nonce, and browser-token hashes are transient secrets.",
     "merchants": "The global merchant seed library is product reference data, not user-owned data.",
+    "financial_change_cursors": "Operational replay position is metadata, not portable financial data.",
+    "financial_change_events": "Operational invalidation hints are metadata, not portable financial data.",
 }
 
 PORTABLE_EXPORT_EXCLUDED_COLUMNS = {

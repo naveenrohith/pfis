@@ -174,6 +174,7 @@ async def test_split_ownership_validation_and_success(monkeypatch):
     db = _Db([_Result(scalars=["category-1"])])
     service = TransactionService(db)
     monkeypatch.setattr(service, "get_transaction_by_id", lambda _id: _async_value(txn))
+    monkeypatch.setattr(transaction_module, "queue_financial_change", _async_noop)
     data = TransactionSplitReplace.model_validate(
         {
             "splits": [
@@ -235,6 +236,7 @@ async def test_delete_success_and_rollback(monkeypatch):
     db = _Db([_Result(scalar=txn)])
     service = TransactionService(db)
     monkeypatch.setattr(transaction_module, "capture_transaction_snapshot", _async_noop)
+    monkeypatch.setattr(transaction_module, "queue_financial_change", _async_noop)
     monkeypatch.setattr(service, "_invalidate_monthly_summary", lambda *_args: _async_value(None))
     assert await service.delete_transaction(txn.id) is True
     assert db.committed is True
