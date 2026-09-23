@@ -35,7 +35,7 @@ export function OverviewSection() {
   const { user } = useAuth();
   const workspace = useWorkspaceSnapshot();
   const transactions = useTransactions();
-  const { running, status, liveConnected } = useSync();
+  const { running, status, updateChannelLabel, updateChannelVariant } = useSync();
   const { scrollTo } = useDashboardUi();
   const preferences = useDashboardPreferences();
   const queryClient = useQueryClient();
@@ -165,11 +165,9 @@ export function OverviewSection() {
         description="Start with your position, clear anything affecting accuracy, then take the highest-impact next action."
         action={
           <>
-            <Badge variant={liveConnected ? 'success' : 'default'}>
-              {liveConnected ? 'Live data' : 'Saved snapshot'}
-            </Badge>
+            <Badge variant={updateChannelVariant}>{updateChannelLabel}</Badge>
             <Badge variant={statusTone}>
-              {running ? 'Syncing' : status === 'idle' ? 'Current' : status}
+              {running ? 'Syncing' : status === 'idle' ? 'Idle' : status}
             </Badge>
           </>
         }

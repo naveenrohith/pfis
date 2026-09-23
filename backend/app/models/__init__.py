@@ -14,6 +14,7 @@ from app.models.anomaly import AnomalyAdjudication
 from app.models.auth import AuthIdentity, AuthSession
 from app.models.category import Category, Merchant, UserMerchantRule
 from app.models.email import GmailAccount, RawEmail
+from app.models.financial_change import FinancialChangeCursor, FinancialChangeEvent
 from app.models.financial_position import (
     AccountBalanceReconciliation,
     CardCalendarEvent,
@@ -86,6 +87,8 @@ __all__ = [
     "UserMerchantRule",
     "RawEmail",
     "GmailAccount",
+    "FinancialChangeCursor",
+    "FinancialChangeEvent",
     "StatementImport",
     "StatementAnalysisReview",
     "CreditCardStatement",

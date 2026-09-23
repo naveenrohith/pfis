@@ -63,6 +63,15 @@ production same-host origins must use HTTPS. Session ownership remains mandatory
 query tokens remain rejected in production, per-user connection limits apply,
 and client heartbeats remain size limited.
 
+The durable change-replay endpoint resolves the authenticated user scope and
+returns only that user's ordered event metadata. WebSocket change hints contain
+no transaction, balance, statement, or account values; every API process filters
+delivery by the event's `user_id`. The browser stores only a versioned,
+user-keyed replay cursor in `sessionStorage` (never an auth token), and a
+`BroadcastChannel` hint is accepted only for the same user before making an
+authenticated replay request. Journal retention is 90 days; pruning removes
+only invalidation metadata, not source financial records.
+
 - Escape server-controlled values before HTML insertion.
 - Do not inject raw email content into dashboard HTML.
 - Avoid unsafe `innerHTML` unless the inserted fields are explicitly escaped.

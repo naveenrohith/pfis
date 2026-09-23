@@ -61,6 +61,7 @@ from app.api.routes import (
     preferences,
     reports,
     roadmap,
+    sync,
     transactions,
     users,
     ws,
@@ -72,7 +73,9 @@ from app.database import AsyncSessionLocal, close_db, init_db
 from app.observability import install_request_id_logging, request_id_ctx, request_metrics
 from app.rate_limit import limiter
 from app.security import validate_session_csrf
+from app.services import financial_change_capture as _financial_change_capture  # noqa: F401
 from app.services.auto_sync_service import start_auto_sync_scheduler, stop_auto_sync_scheduler
+from app.services.financial_change_service import financial_change_tailer
 from app.services.job_service import (
     recover_interrupted_jobs,
     start_job_worker,
@@ -118,6 +121,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Recovered %s interrupted background job lease(s)", recovered_jobs)
 
     base_url = _startup_base_url()
+    await financial_change_tailer.start()
     start_job_worker()
     start_auto_sync_scheduler()
     start_retention_scheduler()
@@ -127,6 +131,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    await financial_change_tailer.stop()
     await stop_retention_scheduler()
     await stop_auto_sync_scheduler()
     await stop_job_worker()
@@ -341,6 +346,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(ws.router, prefix="/api")
+app.include_router(sync.router, prefix="/api")
 app.include_router(transactions.router, prefix="/api")
 app.include_router(categories.router, prefix="/api")
 

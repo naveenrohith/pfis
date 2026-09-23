@@ -160,6 +160,16 @@ def test_alembic_head_matches_orm_and_database_constraints():
                                 item["name"]
                                 for item in inspector.get_unique_constraints("gmail_accounts")
                             },
+                            "financial_change_unique": {
+                                item["name"]
+                                for item in inspector.get_unique_constraints(
+                                    "financial_change_events"
+                                )
+                            },
+                            "financial_change_indexes": {
+                                item["name"]
+                                for item in inspector.get_indexes("financial_change_events")
+                            },
                             "operational_indexes": {
                                 item["name"]
                                 for table in ("raw_emails", "sync_runs", "pipeline_events")
@@ -182,7 +192,7 @@ def test_alembic_head_matches_orm_and_database_constraints():
         for table in Base.metadata.sorted_tables
     }
     assert schema["columns"] == orm_columns
-    assert schema["revision"] == "056_gmail_connection_fences"
+    assert schema["revision"] == "057_financial_change_journal"
     assert "uq_user_merchant_rule_descriptor" in schema["merchant_unique"]
     assert {
         "ix_user_merchant_rules_user_id",
@@ -193,6 +203,14 @@ def test_alembic_head_matches_orm_and_database_constraints():
         "uq_gmail_accounts_user",
         "uq_gmail_accounts_google_account",
     } <= schema["gmail_unique"]
+    assert {
+        "uq_financial_change_event_id",
+        "uq_financial_change_user_sequence",
+    } <= schema["financial_change_unique"]
+    assert {
+        "ix_financial_change_events_user_id",
+        "ix_financial_change_events_created_at",
+    } <= schema["financial_change_indexes"]
     assert {
         "ix_raw_emails_user_received",
         "ix_sync_runs_user_started",

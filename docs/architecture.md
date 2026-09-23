@@ -126,6 +126,53 @@ Connector
 - Connector implementations fetch source records only; the ingestion coordinator owns sync orchestration, audit records, retry handling, and domain events.
 - Security helpers own JWT decoding, optional auth, user-scope resolution, and resource ownership checks.
 
+## Cross-domain financial change propagation
+
+Authoritative ORM writes to transaction, account, statement, card, planning,
+guidance, and ingestion source tables append one user-scoped invalidation event
+inside the same PostgreSQL transaction. The explicit table-to-domain allowlist
+is in `financial_change_capture.py`; Core/bulk mutations use its async helper.
+Because `User` is keyed by `id` rather than `user_id`, a changed financial
+timezone is explicitly journaled by the profile route for activity, Today,
+planning, and guidance consumers. Learned merchant-rule changes invalidate both
+activity and data views.
+Derived read models such as monthly summaries and forecasts do not recursively
+emit events. Payloads contain only an opaque event ID, per-user sequence, event
+type, domain tags, and timestamp—never balances, transactions, or statement text.
+
+`FinancialChangeCursor` allocates each user's monotonic sequence, while
+`FinancialChangeEvent` retains replay metadata for 90 days. A transaction-scoped
+PostgreSQL advisory lock preserves the global identity order used by worker
+tailers. Every API process polls committed rows and relays them to its own local
+WebSocket connections; `GET /api/sync/changes` is the durable recovery path for
+reconnects, process restarts, and missed socket hints. No external message broker
+is required.
+
+The React shell stores only the per-user replay cursor in versioned
+`sessionStorage`, replays on socket connection, network recovery, tab visibility,
+and at a 15-second fallback interval, then invalidates matching current-user
+React Query roots. `BroadcastChannel` messages are hints between tabs; each tab
+still fetches its own ordered journal. An expired or future cursor requires a
+user-scoped full query invalidation before resuming. This reports change-channel
+connectivity, not freshness from Gmail, HDFC, a bank, or a credit bureau.
+
+### Migration rollout and recovery
+
+Migration `057_financial_change_journal` is additive: it creates only the
+per-user cursor and metadata-event tables. Apply it before starting the updated
+API; the previous application version can continue to run while those unused
+tables exist. If application rollback is needed, roll back the API and frontend
+first and leave the additive schema in place. Run the migration downgrade only
+after the old application is active and only when intentionally discarding
+replay metadata; it does not alter ledger, statement, balance, or planning
+source rows.
+
+For database recovery, restore a consistent database snapshot rather than
+reconstructing journal rows by hand. Clients whose saved sequence is ahead of a
+restored user cursor receive `reset_required` and invalidate that user's views.
+Verify the Alembic head and authenticated replay before returning the updated
+API to service. This change has not been deployed to production.
+
 ## Extension Points
 
 - New bank format: add or update a parser and registry mapping.
@@ -171,8 +218,10 @@ snapshot, never a partial alert-derived “live” balance.
 ## Frontend Direction
 
 The React shell reconnects the user-scoped sync WebSocket with bounded
-exponential backoff and a heartbeat. Financial queries invalidate after sync,
-when connectivity returns, and when a tab becomes visible. Code-split route
+exponential backoff and a heartbeat. Durable change replay invalidates dependent
+views after commits, on reconnect, when connectivity returns, and when a tab
+becomes visible; a short journal poll is the fallback. Update-channel status is
+presented separately from upstream source freshness. Code-split route
 and nested feature failures caused by a newly deployed hashed bundle trigger
 one guarded shell reload per chunk; a workspace error boundary prevents an
 unexplained blank page or reload loop.

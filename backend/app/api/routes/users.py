@@ -28,6 +28,7 @@ from app.services.account_deletion_service import (
     delete_owned_account,
     has_recent_authentication,
 )
+from app.services.financial_change_capture import queue_financial_change
 from app.services.job_service import create_job, schedule_job
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -106,8 +107,15 @@ async def update_user(
         "raw_email_retention_days" in updates
         and updates["raw_email_retention_days"] != user.raw_email_retention_days
     )
+    timezone_changed = "timezone" in updates and updates["timezone"] != user.timezone
     for field, value in updates.items():
         setattr(user, field, value)
+    if timezone_changed:
+        await queue_financial_change(
+            db,
+            user.id,
+            ("activity", "today", "planning", "guidance"),
+        )
     await db.commit()
     await db.refresh(user)
     if retention_changed:
