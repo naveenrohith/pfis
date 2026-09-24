@@ -32,7 +32,11 @@ describe('format helpers', () => {
   it('keeps chart axes explicit about currency and concise about dates', () => {
     expect(formatChartAxisCurrency(43_362, 'INR')).toContain('₹');
     expect(formatChartAxisCurrency('not-a-number', 'INR')).toBe('');
-    expect(formatChartDate('2026-08-11')).toMatch(/11 Aug/);
+    const chartDate = formatChartDate('2026-08-11');
+    const sampleDate = new Date('2026-08-11T12:00:00');
+    expect(chartDate).toContain(new Intl.DateTimeFormat(undefined, { month: 'short' }).format(sampleDate));
+    expect(chartDate).toContain(new Intl.NumberFormat().format(11));
+    expect(chartDate).not.toContain('2026');
     expect(formatChartDate('not-a-date')).toBe('not-a-date');
   });
 
