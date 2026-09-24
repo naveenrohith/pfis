@@ -580,12 +580,12 @@ export function useCashPlan() {
   });
 }
 
-export function useAccountBalanceForecast(accountId?: string, horizonDays = 30) {
+export function useAccountBalanceForecast(accountId?: string, horizonDays = 30, enabled = true) {
   const userId = useUserId();
   return useQuery({
     queryKey: queryKeys.balanceForecast(userId, accountId ?? '', horizonDays),
     queryFn: () => api.accountBalanceForecast(userId, accountId!, horizonDays),
-    enabled: !!userId && !!accountId,
+    enabled: !!userId && !!accountId && enabled,
     ...financialQueryPolicy,
   });
 }

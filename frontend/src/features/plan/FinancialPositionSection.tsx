@@ -289,13 +289,13 @@ function CashPlanSetup({ plan, accounts }: { plan?: CashPlan; accounts: Financia
         </div>
       ) : null}
       <form
-        className="mt-6 grid gap-5"
+        className="mt-5 grid gap-x-8 gap-y-4 md:grid-cols-2"
         onSubmit={(event) => {
           event.preventDefault();
           if (accountId && incomeDate && !needsBalance) save.mutate();
         }}
       >
-        <div className="grid gap-2 border-b border-border/70 pb-5 sm:grid-cols-[1.5rem_minmax(0,1fr)]">
+        <div className="grid gap-2 border-b border-border/70 pb-4 sm:grid-cols-[1.5rem_minmax(0,1fr)] md:col-span-2">
           <CheckCircle2 className="mt-7 h-5 w-5 text-success" aria-hidden="true" />
           <Field label="1. Primary bank account" htmlFor="cash-plan-account">
             <Select
@@ -312,7 +312,7 @@ function CashPlanSetup({ plan, accounts }: { plan?: CashPlan; accounts: Financia
           </Field>
         </div>
 
-        <div className="grid gap-3 border-b border-border/70 pb-5 sm:grid-cols-[1.5rem_minmax(0,1fr)]">
+        <div className="grid gap-3 border-b border-border/70 pb-4 sm:grid-cols-[1.5rem_minmax(0,1fr)]">
           <CheckCircle2
             className={`mt-0.5 h-5 w-5 ${needsBalance ? 'text-muted-foreground' : 'text-success'}`}
             aria-hidden="true"
@@ -330,7 +330,7 @@ function CashPlanSetup({ plan, accounts }: { plan?: CashPlan; accounts: Financia
               {!needsBalance ? <Badge variant="success">Current</Badge> : null}
             </div>
             {needsBalance ? (
-              <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto] sm:items-end">
+              <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem] sm:items-end">
                 <Field label="Observed amount" htmlFor="cash-plan-balance">
                   <Input
                     id="cash-plan-balance"
@@ -354,6 +354,7 @@ function CashPlanSetup({ plan, accounts }: { plan?: CashPlan; accounts: Financia
                 <Button
                   type="button"
                   variant="outline"
+                  className="sm:col-span-2 sm:justify-self-start"
                   onClick={() => saveBalance.mutate()}
                   disabled={
                     !accountId ||
@@ -373,7 +374,7 @@ function CashPlanSetup({ plan, accounts }: { plan?: CashPlan; accounts: Financia
           </div>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-[1.5rem_minmax(0,1fr)]">
+        <div className="grid gap-2 border-b border-border/70 pb-4 sm:grid-cols-[1.5rem_minmax(0,1fr)]">
           <CheckCircle2
             className={`mt-7 h-5 w-5 ${incomeDate ? 'text-success' : 'text-muted-foreground'}`}
             aria-hidden="true"
@@ -389,7 +390,7 @@ function CashPlanSetup({ plan, accounts }: { plan?: CashPlan; accounts: Financia
             />
           </Field>
         </div>
-        <div className="flex flex-wrap gap-2 pl-0 sm:pl-9">
+        <div className="flex flex-wrap gap-2 pl-0 sm:pl-9 md:col-span-2">
           <Button type="submit" disabled={save.isPending || !incomeDate || needsBalance}>
             Calculate flexible money
           </Button>

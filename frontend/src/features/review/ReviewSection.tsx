@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, CheckCircle2, FileCheck2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -57,6 +57,7 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkCategory, setBulkCategory] = useState('');
   const [bulkType, setBulkType] = useState('');
+  const detailHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const invalidate = async () => {
     await Promise.all([
@@ -90,10 +91,26 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
     () => transactions.data?.find((t) => t.id === focusedReviewId) ?? null,
     [transactions.data, focusedReviewId],
   );
+  const focusedTransactionId = focused?.id;
 
-  const pendingCount =
-    (transactions.data ?? []).filter((t) => !t.reviewed_flag).length +
-    (statementReview.data?.length ?? 0);
+  const transactionPendingCount = (transactions.data ?? []).filter((t) => !t.reviewed_flag).length;
+  const supplementalPendingCount =
+    (statementReview.data?.length ?? 0) + (transferCandidates.data?.length ?? 0);
+  const pendingCount = transactionPendingCount + supplementalPendingCount;
+  const supplementalQueuesLoading = statementReview.isLoading || transferCandidates.isLoading;
+
+  useEffect(() => {
+    if (!focusedReviewId || focusedTransactionId !== focusedReviewId) return;
+
+    const heading = detailHeadingRef.current;
+    if (!heading) return;
+
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView({
+      behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      block: 'start',
+    });
+  }, [focusedReviewId, focusedTransactionId]);
 
   const bulkMutation = useMutation({
     mutationFn: () => {
@@ -150,24 +167,32 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
           <div>
             <p className="text-xs font-bold text-muted-foreground">Focused review</p>
             <h2 className="mt-1 text-2xl font-extrabold tracking-[-0.035em]">
-              {pendingCount > 0 ? 'Resolve uncertain activity' : 'Everything is ready'}
+              {transactions.isLoading || supplementalQueuesLoading
+                ? 'Checking review queues'
+                : transactionPendingCount > 0
+                  ? 'Resolve uncertain activity'
+                  : supplementalPendingCount > 0
+                    ? 'Other review items need attention'
+                    : 'Everything is ready'}
             </h2>
           </div>
-          <Badge variant={pendingCount > 0 ? 'warning' : 'success'}>
-            {pendingCount > 0 ? `${pendingCount} pending` : 'Queue clear'}
+          <Badge
+            variant={
+              transactions.isLoading || supplementalQueuesLoading
+                ? 'info'
+                : pendingCount > 0
+                  ? 'warning'
+                  : 'success'
+            }
+          >
+            {transactions.isLoading || supplementalQueuesLoading
+              ? 'Checking…'
+              : pendingCount > 0
+                ? `${pendingCount} pending`
+                : 'Queue clear'}
           </Badge>
         </div>
       ) : null}
-
-      <StatementEvidenceQueue
-        items={statementReview.data ?? []}
-        isLoading={statementReview.isLoading}
-        bankAccounts={(accounts.data ?? []).filter((account) => account.account_type === 'bank')}
-      />
-      <TransferMatchQueue
-        candidates={transferCandidates.data ?? []}
-        isLoading={transferCandidates.isLoading}
-      />
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Queue */}
@@ -239,15 +264,30 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
                   <Skeleton key={i} className="h-14" />
                 ))}
               </div>
+            ) : items.length === 0 && supplementalQueuesLoading ? (
+              <p
+                role="status"
+                className="rounded-lg bg-muted/30 px-4 py-6 text-sm text-muted-foreground"
+              >
+                Checking for statement and transfer items…
+              </p>
             ) : items.length === 0 ? (
               <EmptyState
                 icon={<CheckCircle2 />}
-                title="Everything is ready"
-                description="PFIS found no uncertain transactions in this period. You can return here whenever a new item needs confirmation."
+                title={
+                  supplementalPendingCount > 0 ? 'No transactions need review' : 'Everything is ready'
+                }
+                description={
+                  supplementalPendingCount > 0
+                    ? 'Other evidence still needs attention below.'
+                    : 'PFIS found no uncertain transactions in this period. You can return here whenever a new item needs confirmation.'
+                }
                 action={
-                  <Button variant="outline" onClick={() => scrollTo('transactions')}>
-                    Browse the ledger
-                  </Button>
+                  supplementalPendingCount === 0 ? (
+                    <Button variant="outline" onClick={() => scrollTo('transactions')}>
+                      Browse the ledger
+                    </Button>
+                  ) : undefined
                 }
               />
             ) : (
@@ -270,16 +310,36 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
 
         {/* Detail */}
         {items.length > 0 ? (
-          <ReviewDetail
-            transaction={focused}
-            categories={categories.data ?? []}
-            accounts={accounts.data ?? []}
-            currency={currency}
-            onSaved={() => invalidate()}
-            onNext={nextPending}
-          />
+          <div className="min-w-0">
+            <h2
+              ref={detailHeadingRef}
+              id="review-detail-heading"
+              tabIndex={-1}
+              className="focus-ring mb-3 scroll-mt-[10.5rem] rounded text-lg font-extrabold lg:scroll-mt-[11.5rem]"
+            >
+              Transaction detail
+            </h2>
+            <ReviewDetail
+              transaction={focused}
+              categories={categories.data ?? []}
+              accounts={accounts.data ?? []}
+              currency={currency}
+              onSaved={() => invalidate()}
+              onNext={nextPending}
+            />
+          </div>
         ) : null}
       </div>
+
+      <StatementEvidenceQueue
+        items={statementReview.data ?? []}
+        isLoading={statementReview.isLoading}
+        bankAccounts={(accounts.data ?? []).filter((account) => account.account_type === 'bank')}
+      />
+      <TransferMatchQueue
+        candidates={transferCandidates.data ?? []}
+        isLoading={transferCandidates.isLoading}
+      />
     </div>
   );
 }

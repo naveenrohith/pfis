@@ -7,7 +7,6 @@ import { Button, ButtonLink } from '@/components/ui/Button';
 import { Tabs } from '@/components/ui/Tabs';
 import { useSync } from '@/features/workspace/SyncContext';
 import { useAutoSyncStatus, useSyncStatus } from '@/features/workspace/queries';
-import { ApiError } from '@/lib/api';
 import { lazyWithRetry } from '@/lib/lazyWithRetry';
 import { AccountDeletionSettings } from './AccountDeletionSettings';
 import { DataExportSettings } from './DataExportSettings';
@@ -49,8 +48,11 @@ export function DataExperience() {
     activeSection === 'pipeline' || activeSection === 'statements' || activeSection === 'settings'
       ? activeSection
       : 'inbox';
-  const requiresReconnect = autoSync.data?.status === 'paused' && Boolean(autoSync.data.error);
-  const disconnected = autoSync.error instanceof ApiError && autoSync.error.status === 404;
+  const hasReliableAutoSyncStatus = autoSync.isSuccess;
+  const requiresReconnect =
+    hasReliableAutoSyncStatus && autoSync.data?.status === 'paused' && Boolean(autoSync.data.error);
+  const disconnected = hasReliableAutoSyncStatus && autoSync.data === null;
+  const needsConnectionAction = requiresReconnect || disconnected;
 
   return (
     <div className="space-y-6">
@@ -66,11 +68,16 @@ export function DataExperience() {
             <Button variant="outline" onClick={() => setCustomizeOpen(true)}>
               <SlidersHorizontal aria-hidden="true" className="h-4 w-4" /> Preferences
             </Button>
-            {(requiresReconnect || disconnected) && gmailConnectUrl ? (
+            {needsConnectionAction && gmailConnectUrl ? (
               <ButtonLink href={gmailConnectUrl}>
                 <Link2 aria-hidden="true" className="h-4 w-4" />
                 {requiresReconnect ? 'Reconnect Gmail' : 'Connect Gmail'}
               </ButtonLink>
+            ) : needsConnectionAction ? (
+              <Button variant="outline" onClick={() => scrollTo('inbox')}>
+                <Link2 aria-hidden="true" className="h-4 w-4" />
+                Open Connections
+              </Button>
             ) : (
               <Button onClick={runSync} disabled={running || autoSync.isLoading}>
                 <RefreshCw

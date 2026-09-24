@@ -6,11 +6,18 @@ import {
   Landmark,
   Plus,
   RefreshCw,
-  Scale,
   ShieldCheck,
   TrendingUp,
 } from 'lucide-react';
-import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { ChartFrame } from '@/components/system';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -37,8 +44,9 @@ import {
 import { api } from '@/lib/api';
 import {
   dateInputValueInTimezone,
+  formatChartAxisCurrency,
   formatChartCurrency,
-  formatCompact,
+  formatChartDate,
   formatCurrency,
   formatDate,
   formatTime,
@@ -188,27 +196,32 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
             accounts={accounts.data ?? []}
             onClose={() => setMappingProviderType(null)}
           />
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Metric
-              label="Assets"
-              value={netWorth.data ? formatCurrency(netWorth.data.assets, currency) : 'Unavailable'}
-              icon={<TrendingUp className="text-success" />}
-            />
-            <Metric
-              label="Liabilities"
-              value={
-                netWorth.data ? formatCurrency(netWorth.data.liabilities, currency) : 'Unavailable'
-              }
-              icon={<Scale className="text-warning" />}
-            />
-            <Metric
-              label="Net worth"
-              value={
-                netWorth.data ? formatCurrency(netWorth.data.net_worth, currency) : 'Unavailable'
-              }
-              icon={<Landmark className="text-primary" />}
-            />
-          </div>
+          <dl
+            data-testid="position-summary"
+            aria-label="Account position summary"
+            className="mt-4 grid grid-cols-2 border-y border-border/70 sm:grid-cols-3 sm:divide-x sm:divide-border"
+          >
+            <div className="col-span-2 py-4 pr-4 sm:col-span-1 sm:pr-5">
+              <dt className="text-xs font-semibold text-muted-foreground">Net worth</dt>
+              <dd className="money-value mt-1 text-3xl font-extrabold tracking-[-0.05em]">
+                {netWorth.data ? formatCurrency(netWorth.data.net_worth, currency) : 'Unavailable'}
+              </dd>
+            </div>
+            <div className="border-t border-border/70 py-3 pr-4 sm:border-l sm:border-t-0 sm:px-5">
+              <dt className="text-xs font-semibold text-muted-foreground">Assets</dt>
+              <dd className="money-value mt-1 text-lg font-bold">
+                {netWorth.data ? formatCurrency(netWorth.data.assets, currency) : 'Unavailable'}
+              </dd>
+            </div>
+            <div className="border-t border-border/70 py-3 sm:border-l sm:px-5 sm:py-4">
+              <dt className="text-xs font-semibold text-muted-foreground">Liabilities</dt>
+              <dd className="money-value mt-1 text-lg font-bold">
+                {netWorth.data
+                  ? formatCurrency(netWorth.data.liabilities, currency)
+                  : 'Unavailable'}
+              </dd>
+            </div>
+          </dl>
           {currentPositionLabel ? (
             <div
               className="mt-4 border-l-2 border-primary/50 pl-4 text-xs text-muted-foreground"
@@ -302,16 +315,17 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
                       data={historyPoints}
                       margin={{ left: 8, right: 12, top: 8, bottom: 2 }}
                     >
+                      <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
                       <XAxis
                         dataKey="date"
-                        tickFormatter={(value) => formatDate(String(value))}
+                        tickFormatter={formatChartDate}
                         tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
                         axisLine={false}
                         tickLine={false}
                       />
                       <YAxis
                         tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                        tickFormatter={(value) => formatCompact(value)}
+                        tickFormatter={(value) => formatChartAxisCurrency(value, currency)}
                         axisLine={false}
                         tickLine={false}
                       />
@@ -331,6 +345,7 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
                         stroke="hsl(var(--primary))"
                         strokeWidth={2.5}
                         dot={{ r: 3 }}
+                        isAnimationActive={false}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -342,7 +357,10 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
               <CardContent className="grid gap-3 p-5">
                 <h3 className="font-bold">Your accounts</h3>
                 {(accounts.data ?? []).map((account) => (
-                  <div key={account.id} className="dashboard-row flex w-full items-center gap-3">
+                  <div
+                    key={account.id}
+                    className="dashboard-row grid w-full grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:gap-3"
+                  >
                     <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
                       <Building2 className="h-4 w-4 text-primary" />
                     </span>
@@ -354,7 +372,7 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
                         {account.account_type} · {account.masked_number}
                       </span>
                     </span>
-                    <span className="text-right" aria-live="polite">
+                    <span className="min-w-0 text-right" aria-live="polite">
                       <span className="block text-sm font-bold">
                         {account.current_balance != null
                           ? formatCurrency(account.current_balance, account.currency)
@@ -402,6 +420,7 @@ export function NetWorthSection({ embedded = false }: { embedded?: boolean } = {
                     <Button
                       size="sm"
                       variant={identityStatus(account) !== 'confirmed' ? 'outline' : 'ghost'}
+                      className="col-span-3 justify-self-end sm:ml-auto sm:col-span-1"
                       onClick={() =>
                         identityStatus(account) !== 'confirmed'
                           ? setIdentityAccountId(account.id)
@@ -460,22 +479,6 @@ function accountPositionLabel(
     default:
       return `${noun[0].toUpperCase()}${noun.slice(1)} position`;
   }
-}
-
-function Metric({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
-  return (
-    <Card>
-      <CardContent className="flex items-center justify-between p-5">
-        <div>
-          <p className="text-xs font-semibold text-muted-foreground">{label}</p>
-          <p className="mt-2 text-2xl font-extrabold">{value}</p>
-        </div>
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted [&_svg]:h-5 [&_svg]:w-5">
-          {icon}
-        </span>
-      </CardContent>
-    </Card>
-  );
 }
 
 function BalanceProviderNotice({

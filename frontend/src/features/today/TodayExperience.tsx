@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ActionSurface, FinancialHero, InsightSurface, PageIntro } from '@/components/system';
+import { FinancialHero, InsightSurface, PageIntro } from '@/components/system';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState, Skeleton } from '@/components/ui/Skeleton';
@@ -141,6 +141,8 @@ export function TodayExperience() {
   const evidence = (data?.insights ?? []).slice(0, 2);
   const lowData = financialHealth?.data_sufficiency === 'low';
   const transactionCount = snapshot?.transaction_count ?? 0;
+  const safeToSpendReviewNeeded =
+    !cashPlan.isLoading && (cashPlan.isError || cashPlan.data?.readiness !== 'ready');
 
   const { headline, summary } = buildTodayBriefCopy({
     transactionCount,
@@ -169,19 +171,32 @@ export function TodayExperience() {
               : 'Review accepted actions and record what happened. Each outcome is final.'
         }
         action={
-          <Badge variant={updateChannelVariant}>
-            <span
-              className={cn(
-                'h-1.5 w-1.5 rounded-full',
-                updateChannelVariant === 'success'
-                  ? 'bg-success'
-                  : updateChannelVariant === 'warning'
-                    ? 'bg-warning'
-                    : 'bg-muted-foreground',
-              )}
-            />
-            {running ? 'Syncing' : updateChannelLabel}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={updateChannelVariant}>
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  updateChannelVariant === 'success'
+                    ? 'bg-success'
+                    : updateChannelVariant === 'warning'
+                      ? 'bg-warning'
+                      : 'bg-muted-foreground',
+                )}
+              />
+              {running ? 'Syncing' : updateChannelLabel}
+            </Badge>
+            {currentView === 'overview' && safeToSpendReviewNeeded ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="lg:hidden"
+                onClick={() => scrollTo('cash-plan')}
+              >
+                Review Safe to spend <ArrowRight aria-hidden="true" className="h-4 w-4" />
+              </Button>
+            ) : null}
+          </div>
         }
       />
 
@@ -294,71 +309,83 @@ export function TodayExperience() {
                 </Button>
               </section>
             ) : (
-              <ActionSurface
+              <InsightSurface
                 icon={<Sparkles className="h-4 w-4" />}
+                eyebrow={primaryAction ? 'Recommended next' : 'No urgent action'}
                 title={primaryAction?.title ?? 'Explore the drivers behind this month'}
                 description={
                   primaryAction?.description ??
                   'PFIS has no urgent action for this period. Review the evidence and keep your data current.'
                 }
-                actionLabel={primaryAction?.action_label ?? 'Open insights'}
-                onAction={() => scrollTo(actionTarget)}
-                secondary={
-                  primaryAction?.expected_impact ||
-                  (primaryAction?.reason_codes?.length
-                    ? `Based on ${primaryAction.reason_codes.length} signals`
-                    : 'Based on your selected month')
-                }
-                footer={
-                  primaryAction && !decisions.isLoading ? (
-                    <div className="flex flex-wrap gap-2">
+                tone={primaryAction ? 'intelligence' : 'neutral'}
+                className="h-full"
+                meta={
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-wrap items-center gap-3">
                       <Button
-                        variant="secondary"
+                        type="button"
                         size="sm"
-                        disabled={
-                          updateRecommendation.isPending || actionResolution?.status === 'blocked'
-                        }
-                        onClick={() =>
-                          updateRecommendation.mutate({
-                            recommendationId: primaryAction.id,
-                            state: 'accepted',
-                          })
-                        }
+                        variant="outline"
+                        onClick={() => scrollTo(actionTarget)}
                       >
-                        <Check aria-hidden="true" className="h-3.5 w-3.5" /> Use this action
+                        {primaryAction?.action_label ?? 'Open insights'}
+                        <ArrowRight className="h-4 w-4" aria-hidden="true" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-background hover:bg-background/10"
-                        disabled={updateRecommendation.isPending}
-                        aria-label={`Snooze ${primaryAction.title} for 7 days`}
-                        onClick={() =>
-                          updateRecommendation.mutate({
-                            recommendationId: primaryAction.id,
-                            state: 'snoozed',
-                          })
-                        }
-                      >
-                        <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-background hover:bg-background/10"
-                        disabled={updateRecommendation.isPending}
-                        aria-label={`Mark ${primaryAction.title} as not relevant`}
-                        onClick={() =>
-                          updateRecommendation.mutate({
-                            recommendationId: primaryAction.id,
-                            state: 'not_relevant',
-                          })
-                        }
-                      >
-                        <X aria-hidden="true" className="h-3.5 w-3.5" />
-                      </Button>
+                      <span>
+                        {primaryAction?.expected_impact ||
+                          (primaryAction?.reason_codes?.length
+                            ? `Based on ${primaryAction.reason_codes.length} signals`
+                            : 'Based on your selected month')}
+                      </span>
                     </div>
-                  ) : undefined
+                    {primaryAction && !decisions.isLoading ? (
+                      <div className="flex flex-wrap items-center gap-2 border-t border-border/65 pt-3">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={
+                            updateRecommendation.isPending || actionResolution?.status === 'blocked'
+                          }
+                          onClick={() =>
+                            updateRecommendation.mutate({
+                              recommendationId: primaryAction.id,
+                              state: 'accepted',
+                            })
+                          }
+                        >
+                          <Check aria-hidden="true" className="h-3.5 w-3.5" /> Use this action
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          disabled={updateRecommendation.isPending}
+                          aria-label={`Snooze ${primaryAction.title} for 7 days`}
+                          onClick={() =>
+                            updateRecommendation.mutate({
+                              recommendationId: primaryAction.id,
+                              state: 'snoozed',
+                            })
+                          }
+                        >
+                          <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          disabled={updateRecommendation.isPending}
+                          aria-label={`Mark ${primaryAction.title} as not relevant`}
+                          onClick={() =>
+                            updateRecommendation.mutate({
+                              recommendationId: primaryAction.id,
+                              state: 'not_relevant',
+                            })
+                          }
+                        >
+                          <X aria-hidden="true" className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
                 }
               />
             )}
@@ -664,7 +691,12 @@ function FinancialHorizon({
       </div>
 
       {!ready ? (
-        <Button className="mt-5" size="sm" variant="outline" onClick={onComplete}>
+        <Button
+          className="mt-5 hidden lg:inline-flex"
+          size="sm"
+          variant="outline"
+          onClick={onComplete}
+        >
           Review Safe to spend <ArrowRight className="h-4 w-4" />
         </Button>
       ) : null}

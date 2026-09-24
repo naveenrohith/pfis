@@ -110,6 +110,12 @@
     scroll-behavior: smooth;
   }
 
+  @media (max-width: 767px) {
+    html {
+      scroll-padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+    }
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     font-family:

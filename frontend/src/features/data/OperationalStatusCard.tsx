@@ -5,13 +5,13 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { useOperationalHealth } from '@/features/workspace/queries';
 import type { OperationalHealthStatus } from '@/lib/types';
 
-type RecoveryTarget = 'inbox' | 'pipeline' | 'statements' | 'settings';
+type RecoveryTarget = 'inbox' | 'pipeline' | 'statements' | 'settings' | 'transactions';
 
 interface OperationalIssue {
   code: string;
   copy: string;
-  target: RecoveryTarget;
-  targetLabel: string;
+  target?: RecoveryTarget;
+  targetLabel?: string;
 }
 
 const statusCopy: Record<OperationalHealthStatus, string> = {
@@ -40,9 +40,7 @@ const statusClassName: Record<OperationalHealthStatus, string> = {
 
 const serviceIssues: Record<string, Omit<OperationalIssue, 'code'>> = {
   ledger_currency_needs_repair: {
-    copy: 'A ledger integrity check needs repair before balances can be trusted.',
-    target: 'settings',
-    targetLabel: 'Open preferences',
+    copy: "PFIS found stored records whose currency does not match their owner's ledger currency. This deployment requires operator repair; self-service repair is not available.",
   },
   unresolved_parse_failures: {
     copy: 'Some imported records still need parser recovery.',
@@ -177,14 +175,18 @@ function IssueGroup({
             className="flex flex-col gap-2 border-t border-border/60 pt-2 first:border-t-0 first:pt-0 sm:flex-row sm:items-center sm:justify-between"
           >
             <p className="text-sm leading-5 text-muted-foreground">{issue.copy}</p>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-auto shrink-0 justify-start px-0 py-1 text-xs sm:justify-center"
-              onClick={() => onNavigate(issue.target)}
-            >
-              {issue.targetLabel}
-            </Button>
+            {issue.target && issue.targetLabel ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto shrink-0 justify-start px-0 py-1 text-xs sm:justify-center"
+                onClick={() => {
+                  if (issue.target) onNavigate(issue.target);
+                }}
+              >
+                {issue.targetLabel}
+              </Button>
+            ) : null}
           </li>
         ))}
       </ul>
