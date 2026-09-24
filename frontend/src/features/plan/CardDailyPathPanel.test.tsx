@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { CardDailyPathPanel } from './CardDailyPathPanel';
+import { formatChartDate } from '@/lib/format';
 import type { CardStatementProjection } from '@/lib/types';
 
 const projection: CardStatementProjection = {
@@ -77,7 +78,7 @@ const projection: CardStatementProjection = {
 
 describe('CardDailyPathPanel', () => {
   it('renders dated trajectory, event markers, target pressure, and hard-limit runway', () => {
-    render(
+    const { container } = render(
       <CardDailyPathPanel
         projection={projection}
         currency="INR"
@@ -103,6 +104,17 @@ describe('CardDailyPathPanel', () => {
     expect(
       screen.getByText(/cannot confirm an issuer balance, available credit, or payment outcome/i),
     ).toBeInTheDocument();
+    const chartLabels = Array.from(container.querySelectorAll('svg text')).map((label) =>
+      label.textContent?.trim(),
+    );
+    expect(chartLabels).toEqual(
+      expect.arrayContaining([
+        '0%',
+        '110%',
+        `Today · ${formatChartDate('2026-08-11')}`,
+        `Close · ${formatChartDate('2026-08-20')}`,
+      ]),
+    );
   });
 
   it('does not draw a utilization band without a credit-limit anchor', () => {

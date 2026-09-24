@@ -207,7 +207,13 @@ describe('Today Financial Horizon', () => {
     expect(screen.getByText('Refresh the observed bank balance')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Show calculation details'));
     expect(screen.getAllByText('Not calculated')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: /Review Safe to spend/i }));
+    const safeToSpendActions = screen.getAllByRole('button', {
+      name: /Review Safe to spend/i,
+    });
+    expect(safeToSpendActions).toHaveLength(2);
+    expect(safeToSpendActions[0]).toHaveClass('lg:hidden');
+    expect(safeToSpendActions[1]).toHaveClass('hidden', 'lg:inline-flex');
+    fireEvent.click(safeToSpendActions[0]);
     expect(scrollTo).toHaveBeenCalledWith('cash-plan');
   });
 

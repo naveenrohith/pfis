@@ -202,10 +202,12 @@ function CardStatementProjectionPanel({
   projection,
   currency,
   targetPct,
+  compact = false,
 }: {
   projection: CardStatementProjection;
   currency: string;
   targetPct?: number | null;
+  compact?: boolean;
 }) {
   if (projection.status !== 'available') {
     const copy = projectionStatusCopy[projection.status];
@@ -251,6 +253,69 @@ function CardStatementProjectionPanel({
       : projection.target_status === 'at_risk'
         ? 'The central path stays below target, but the upper uncertainty band crosses it before close.'
         : 'The central path does not cross this target before the projected close.';
+
+  if (compact) {
+    return (
+      <section
+        className="border-y border-intelligence/25 py-5"
+        aria-labelledby="next-statement-forecast"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-extrabold tracking-[0.08em] text-muted-foreground">
+              NEXT STATEMENT FORECAST
+            </p>
+            <h2
+              id="next-statement-forecast"
+              className="money-value mt-1 text-2xl font-extrabold tracking-[-0.035em] sm:text-3xl"
+            >
+              {projection.projected_balance == null
+                ? 'Projection unavailable'
+                : formatCurrency(projection.projected_balance, currency)}
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              Estimated close{' '}
+              {projection.projected_statement_date
+                ? formatDate(projection.projected_statement_date)
+                : 'for the next statement'}
+              . Pace-based estimate, not an issuer amount.
+            </p>
+          </div>
+          <span className={`text-sm font-extrabold ${targetCopy.tone}`}>{targetCopy.label}</span>
+        </div>
+        <dl className="mt-4 grid gap-3 border-t border-border/65 pt-4 sm:grid-cols-3 sm:divide-x sm:divide-border/65">
+          <div className="sm:pr-4">
+            <dt className="text-xs font-bold text-muted-foreground">Estimated range</dt>
+            <dd className="money-value mt-1 text-sm font-extrabold">
+              {projection.range_low == null || projection.range_high == null
+                ? 'Unavailable'
+                : `${formatCurrency(projection.range_low, currency)}–${formatCurrency(projection.range_high, currency)}`}
+            </dd>
+          </div>
+          <div className="sm:px-4">
+            <dt className="text-xs font-bold text-muted-foreground">Projected utilization</dt>
+            <dd className="money-value mt-1 text-sm font-extrabold">
+              {projection.projected_utilization_pct == null
+                ? 'Unavailable'
+                : `${projection.projected_utilization_pct.toFixed(1)}%`}
+            </dd>
+          </div>
+          <div className="sm:pl-4">
+            <dt className="text-xs font-bold text-muted-foreground">Confidence</dt>
+            <dd className="money-value mt-1 text-sm font-extrabold">
+              {Math.round(projection.confidence * 100)}%
+            </dd>
+          </div>
+        </dl>
+        <p className="mt-4 text-sm font-bold leading-6">
+          {projectionActionCopy[projection.next_state]}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Calibration, dated events, and the day-by-day path are in Evidence.
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -859,7 +924,7 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
     amount: '',
     planned_for: financialToday,
   });
-  const balanceForecast = useAccountBalanceForecast(cardId, 30);
+  const balanceForecast = useAccountBalanceForecast(cardId, 30, cardView === 'evidence');
   const dueRunway = useCardDueRunway(cardId);
   const utilizationHistory = useCardUtilizationHistory(cardId);
   const portfolioUpcoming = useCardPortfolioUpcomingState(cards.length > 1);
@@ -1375,12 +1440,6 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
                 {card.estimated_utilization_pct != null ? 'Estimated' : 'At statement date'}
               </p>
             </div>
-            <div>
-              <dt className="text-xs font-bold text-muted-foreground">Payment runway</dt>
-              <dd className="mt-1 text-sm font-extrabold">
-                {dueRunway.data ? dueRunwayStatusLabel(dueRunway.data.status) : 'Checking…'}
-              </dd>
-            </div>
           </dl>
         </div>
       </FinancialHero>
@@ -1398,35 +1457,18 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
       />
 
       {cardView === 'now' ? (
-        <div className="space-y-6">
-          <BalancePathPanel forecast={balanceForecast.data} isLoading={balanceForecast.isLoading} />
-
-          <CardStatementProjectionPanel
-            projection={card.next_statement_projection}
-            currency={card.currency}
-            targetPct={card.utilization_target_pct}
-          />
-
-          <CardDailyPathPanel
-            projection={card.next_statement_projection}
-            currency={card.currency}
-            targetPct={card.utilization_target_pct}
-            creditLimit={card.provider_credit_limit ?? card.credit_limit}
-          />
-
-          <CardUtilizationHistoryPanel
-            history={utilizationHistory.data}
-            currency={card.currency}
-            isLoading={utilizationHistory.isLoading}
-            error={utilizationHistory.error}
-          />
-
-          <CardDueRunwayPanel runway={dueRunway.data} isLoading={dueRunway.isLoading} />
-        </div>
+        <CardStatementProjectionPanel
+          projection={card.next_statement_projection}
+          currency={card.currency}
+          targetPct={card.utilization_target_pct}
+          compact
+        />
       ) : null}
 
       {cardView === 'pay' ? (
         <div className="space-y-6">
+          <CardDueRunwayPanel runway={dueRunway.data} isLoading={dueRunway.isLoading} />
+
           <CardPortfolioUpcomingPanel
             portfolio={portfolioUpcoming.data}
             currency={card.currency}
@@ -1449,6 +1491,31 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
 
       {cardView === 'evidence' ? (
         <div className="space-y-6">
+          <BalancePathPanel
+            forecast={balanceForecast.data}
+            isLoading={balanceForecast.isLoading}
+          />
+
+          <CardStatementProjectionPanel
+            projection={card.next_statement_projection}
+            currency={card.currency}
+            targetPct={card.utilization_target_pct}
+          />
+
+          <CardDailyPathPanel
+            projection={card.next_statement_projection}
+            currency={card.currency}
+            targetPct={card.utilization_target_pct}
+            creditLimit={card.credit_limit}
+          />
+
+          <CardUtilizationHistoryPanel
+            history={utilizationHistory.data}
+            currency={card.currency}
+            isLoading={utilizationHistory.isLoading}
+            error={utilizationHistory.error}
+          />
+
           <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="statement-anatomy">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>

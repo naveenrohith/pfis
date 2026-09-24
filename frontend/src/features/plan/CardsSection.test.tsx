@@ -2,13 +2,55 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CardsSection } from './CardsSection';
+import type { AccountBalanceForecast } from '@/lib/types';
 
-const { addBalance, cardDisputes, cardOverview, saveCardPreferences } = vi.hoisted(() => ({
+const { addBalance, balanceForecast, cardDisputes, cardOverview, saveCardPreferences } = vi.hoisted(
+  () => ({
   addBalance: vi.fn(),
+  balanceForecast: vi.fn(),
   cardDisputes: vi.fn(),
   cardOverview: vi.fn(),
   saveCardPreferences: vi.fn(),
-}));
+  }),
+);
+
+const accountForecastFixture: AccountBalanceForecast = {
+  financial_account_id: 'card-1',
+  account_type: 'credit_card',
+  institution_name: 'HDFC',
+  masked_number: '••••9913',
+  currency: 'INR',
+  balance_kind: 'liability',
+  status: 'needs_anchor',
+  horizon_start: '2026-02-12',
+  horizon_end: '2026-03-14',
+  horizon_days: 30,
+  starting_balance: null,
+  starting_balance_as_of: null,
+  starting_balance_basis: null,
+  expected_ending_balance: null,
+  expected_change: null,
+  lowest_expected_balance: null,
+  lowest_expected_date: null,
+  first_shortfall_date: null,
+  scheduled_increase_total: 0,
+  scheduled_decrease_total: 0,
+  baseline_increase_total: 0,
+  baseline_decrease_total: 0,
+  event_count: 0,
+  historical_days: 0,
+  historical_activity_count: 0,
+  coverage_status: 'unknown',
+  position_status: 'needs_observation',
+  position_confidence: 0,
+  confidence: 0,
+  data_sufficiency: 'low',
+  position_reason_codes: ['needs_observed_balance'],
+  assumptions: [],
+  evidence: [],
+  points: [],
+  ruleset_version: 'e2e-account-balance-forecast-1',
+};
 
 vi.mock('@/features/auth/AuthContext', () => ({
   useAuth: () => ({
@@ -28,10 +70,7 @@ vi.mock('@/features/workspace/queries', () => ({
       },
     ],
   }),
-  useAccountBalanceForecast: () => ({
-    isLoading: false,
-    data: undefined,
-  }),
+  useAccountBalanceForecast: balanceForecast,
   useCardDueRunway: () => ({
     isLoading: false,
     data: {
@@ -189,6 +228,11 @@ vi.mock('@/lib/api', () => ({
 describe('CardsSection activity centre', () => {
   it('shows deterministic signals and issuer-action limitations', async () => {
     window.history.replaceState(null, '', '/#cards');
+    balanceForecast.mockReturnValue({
+      isLoading: false,
+      data: accountForecastFixture,
+      error: null,
+    });
     cardOverview.mockResolvedValue({
       financial_account_id: 'card-1',
       currency: 'INR',
@@ -204,6 +248,7 @@ describe('CardsSection activity centre', () => {
       purchases_debits: 13000,
       finance_charges: 0,
       credit_limit: 100000,
+      provider_credit_limit: 200000,
       available_credit_limit: 87000,
       available_cash_limit: 40000,
       observed_balance: 11000,
@@ -450,16 +495,38 @@ describe('CardsSection activity centre', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Now' }));
     expect(screen.getAllByText('Provider-observed · fresh')).not.toHaveLength(0);
     expect(screen.getByText('NEXT STATEMENT FORECAST')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Where this outstanding could land' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Calibration, dated events, and the day-by-day path are in Evidence.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('DAILY PATH TO STATEMENT CLOSE')).not.toBeInTheDocument();
+    expect(screen.queryByText('UTILIZATION HISTORY')).not.toBeInTheDocument();
+    expect(screen.queryByText('PAYMENT RUNWAY')).not.toBeInTheDocument();
+    expect(screen.getAllByText('16.8%')).not.toHaveLength(0);
+    expect(screen.getAllByText('78%')).not.toHaveLength(0);
+    expect(screen.getByText('Keep monitoring this billing cycle.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+    expect(balanceForecast).toHaveBeenCalledWith('card-1', 30, true);
+    expect(
+      screen.getByRole('heading', { name: 'Where this outstanding could land' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Needs observed anchor')).toBeInTheDocument();
+    expect(screen.getByText(/Record a dated balance or connect an observation/)).toBeInTheDocument();
+    expect(screen.getByText('How this statement arrived at the due')).toBeInTheDocument();
     expect(screen.getByText('DAILY PATH TO STATEMENT CLOSE')).toBeInTheDocument();
+    const dailyPathBand = document.querySelector(
+      '[aria-labelledby="card-daily-path-title"] polygon',
+    );
+    expect(dailyPathBand?.getAttribute('points')).toContain('310.00,113.11');
     expect(screen.getByText('View 3 day-by-day evidence points')).toBeInTheDocument();
     expect(screen.getAllByText('Recurring: STREAMCO')).not.toHaveLength(0);
     expect(screen.getByText('UTILIZATION HISTORY')).toBeInTheDocument();
     expect(screen.getByText('Moving up')).toBeInTheDocument();
     expect(screen.getAllByText(/Utilization moved from 12.0%/i)).toHaveLength(2);
     expect(screen.getByText('View all 3 plotted evidence points')).toBeInTheDocument();
-    expect(screen.getAllByText('16.8%')).not.toHaveLength(0);
-    expect(screen.getAllByText('78%')).not.toHaveLength(0);
-    expect(screen.getByText(/pace-based estimate, not an issuer amount/i)).toBeInTheDocument();
     expect(screen.getByLabelText('Forecast calibration')).toHaveTextContent(
       'Calibrated against 2 prior settled card cycles.',
     );
@@ -482,10 +549,6 @@ describe('CardsSection activity centre', () => {
     expect(screen.getByLabelText('Utilization target runway')).toHaveTextContent(
       '₹13,200 projected headroom at close against your 30.0% target.',
     );
-    expect(screen.getByText('Keep monitoring this billing cycle.')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
-    expect(screen.getByText('How this statement arrived at the due')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
     expect(screen.getByText('Latest statement ledger')).toBeInTheDocument();
@@ -497,6 +560,7 @@ describe('CardsSection activity centre', () => {
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Pay' }));
+    expect(screen.getByText('PAYMENT RUNWAY')).toBeInTheDocument();
     expect(screen.getByText('PAYMENT SCENARIOS')).toBeInTheDocument();
     expect(screen.getByText('Minimum due vs total due')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Record manual transfer' })).toBeEnabled();

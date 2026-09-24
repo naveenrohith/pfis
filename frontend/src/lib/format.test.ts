@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   calendarDayDifference,
   dateInputValueInTimezone,
+  formatChartAxisCurrency,
   formatChartCurrency,
+  formatChartDate,
   formatCurrency,
   formatDate,
   formatCompact,
@@ -25,6 +27,13 @@ describe('format helpers', () => {
     expect(formatChartCurrency(1234, 'INR')).toContain('1,234');
     expect(formatChartCurrency('1234', 'INR')).toContain('1,234');
     expect(formatChartCurrency(undefined, 'INR')).toContain('0');
+  });
+
+  it('keeps chart axes explicit about currency and concise about dates', () => {
+    expect(formatChartAxisCurrency(43_362, 'INR')).toContain('₹');
+    expect(formatChartAxisCurrency('not-a-number', 'INR')).toBe('');
+    expect(formatChartDate('2026-08-11')).toMatch(/11 Aug/);
+    expect(formatChartDate('not-a-date')).toBe('not-a-date');
   });
 
   it('signs amounts by type', () => {

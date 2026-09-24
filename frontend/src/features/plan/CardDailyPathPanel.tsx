@@ -1,6 +1,6 @@
 import { Activity, AlertTriangle, CalendarRange, ShieldCheck } from 'lucide-react';
 import { ChartFrame } from '@/components/system';
-import { formatCurrency, formatDate } from '@/lib/format';
+import { formatChartDate, formatCurrency, formatDate } from '@/lib/format';
 import type { CardStatementProjection, CardStatementProjectionPoint } from '@/lib/types';
 
 const targetStatusCopy: Record<
@@ -23,12 +23,20 @@ const limitStatusCopy: Record<
   unavailable: { label: 'Hard limit unavailable', tone: 'text-muted-foreground' },
 };
 
+const PLOT_LEFT = 42;
+const PLOT_RIGHT = 310;
+const PLOT_TOP = 18;
+const PLOT_BOTTOM = 136;
+
 function pointY(utilization: number, scale: number): number {
-  return Math.max(8, Math.min(90, 90 - (utilization / scale) * 76));
+  const bounded = Math.max(0, Math.min(scale, utilization));
+  return PLOT_BOTTOM - (bounded / scale) * (PLOT_BOTTOM - PLOT_TOP);
 }
 
 function pointX(index: number, count: number): number {
-  return count === 1 ? 50 : (index / (count - 1)) * 100;
+  return count === 1
+    ? (PLOT_LEFT + PLOT_RIGHT) / 2
+    : PLOT_LEFT + (index / (count - 1)) * (PLOT_RIGHT - PLOT_LEFT);
 }
 
 function pointStatus<T extends keyof CardStatementProjectionPoint>(
@@ -87,7 +95,9 @@ export function CardDailyPathPanel({
           ),
         ),
         0,
-      ) / 10,
+      ) /
+        10 -
+        1e-9,
     ) * 10,
   );
   const chartPoints = points
@@ -159,13 +169,39 @@ export function CardDailyPathPanel({
             description={`Percent of the credit limit on file · ${formatDate(first.date)} to ${formatDate(close.date)} · scale 0–${maxUtilization}%`}
             summary={`${chartLabel} ${hasLimitAnchor ? 'The shaded band shows the low-to-high projected balance range as utilization of the credit limit on file.' : 'The utilization range is not plotted because no credit limit anchor is available.'}`}
           >
-            <svg className="h-40 w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <svg className="h-40 w-full" viewBox="0 0 320 182" preserveAspectRatio="none">
               <title>Daily card utilization trajectory</title>
               <desc>
                 The solid line is the central PFIS estimate. A shaded region shows the low-to-high
                 projected balance range when a credit limit anchor is available. Dashed guides show
                 the configured target and 100 percent hard limit.
               </desc>
+              {[0, maxUtilization / 2, maxUtilization].map((tick) => {
+                const y = pointY(tick, maxUtilization);
+                return (
+                  <g key={tick}>
+                    <line
+                      x1={PLOT_LEFT}
+                      y1={y}
+                      x2={PLOT_RIGHT}
+                      y2={y}
+                      stroke="currentColor"
+                      className="text-border/75"
+                      strokeWidth="0.7"
+                    />
+                    <text
+                      x={PLOT_LEFT - 7}
+                      y={y + 3}
+                      textAnchor="end"
+                      fontSize="10"
+                      fill="currentColor"
+                      className="text-muted-foreground"
+                    >
+                      {Math.round(tick)}%
+                    </text>
+                  </g>
+                );
+              })}
               {uncertaintyBand ? (
                 <polygon
                   points={uncertaintyBand}
@@ -175,9 +211,9 @@ export function CardDailyPathPanel({
                 />
               ) : null}
               <line
-                x1="0"
+                x1={PLOT_LEFT}
                 y1={limitY}
-                x2="100"
+                x2={PLOT_RIGHT}
                 y2={limitY}
                 stroke="currentColor"
                 className="text-danger/55"
@@ -186,9 +222,9 @@ export function CardDailyPathPanel({
               />
               {targetY != null ? (
                 <line
-                  x1="0"
+                  x1={PLOT_LEFT}
                   y1={targetY}
-                  x2="100"
+                  x2={PLOT_RIGHT}
                   y2={targetY}
                   stroke="currentColor"
                   className="text-warning"
@@ -216,6 +252,30 @@ export function CardDailyPathPanel({
                   className={point.event_labels.length ? 'text-warning' : 'text-intelligence'}
                 />
               ))}
+              <text
+                x={PLOT_LEFT}
+                y="166"
+                textAnchor="start"
+                fontSize="10"
+                fill="currentColor"
+                className="text-muted-foreground"
+              >
+                {points.length === 1
+                  ? formatChartDate(first.date)
+                  : `Today · ${formatChartDate(first.date)}`}
+              </text>
+              {points.length > 1 ? (
+                <text
+                  x={PLOT_RIGHT}
+                  y="166"
+                  textAnchor="end"
+                  fontSize="10"
+                  fill="currentColor"
+                  className="text-muted-foreground"
+                >
+                  Close · {formatChartDate(close.date)}
+                </text>
+              ) : null}
             </svg>
           </ChartFrame>
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">

@@ -126,7 +126,7 @@ performance, privacy, and maintenance review before adoption. Never copy a block
 ## Delivery Tracker
 
 - [x] Quiet-ledger shell phase: slim rail, concise header, and stable five-destination navigation.
-- [x] Flat Plan phase: Cards is a first-class destination with compatible legacy section helpers.
+- [x] Contextual Plan phase: Cards remains a detail workspace within Commitments, with compatible legacy section helpers; the four primary stages stay Safe to spend, Position, Commitments, and Outlook.
 - [x] Cards phase: decision-led first viewport, progressive disclosure, typed connector client, and user-observed position dialog.
 - [x] Financial workspaces phase: Today, Activity, Insights, and Data & settings hierarchy aligned to the quiet-ledger model.
 - [x] Integrated overhaul gate: full lint, test, build, bundle, e2e, accessibility, responsive, visual, and release-like performance checks.

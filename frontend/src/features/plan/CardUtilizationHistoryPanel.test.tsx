@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { CardUtilizationHistoryPanel } from './CardUtilizationHistoryPanel';
+import { formatChartDate } from '@/lib/format';
 import type { CardUtilizationHistory } from '@/lib/types';
 
 const history: CardUtilizationHistory = {
@@ -125,6 +126,17 @@ describe('CardUtilizationHistoryPanel', () => {
     expect(container.querySelector('polyline.text-muted-foreground')).toHaveAttribute(
       'stroke-dasharray',
       '3 2',
+    );
+    const chartLabels = Array.from(container.querySelectorAll('svg text')).map((label) =>
+      label.textContent?.trim(),
+    );
+    expect(chartLabels).toEqual(
+      expect.arrayContaining([
+        '0%',
+        '100%',
+        formatChartDate('2026-06-01'),
+        formatChartDate('2026-08-12'),
+      ]),
     );
   });
 

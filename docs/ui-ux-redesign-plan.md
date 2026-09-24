@@ -1,8 +1,16 @@
 # PFIS UI/UX Redesign Plan
 
-**Status:** Approved implementation plan; implementation in progress.
-**Branch:** `codex/ui-ux-redesign`, created from the clean `main` HEAD (`0662ed3`).
+**Status:** Approved plan; the initial workspace redesign and reliability slice are merged in PR #4. This follow-up implements the screenshot-led Today, Plan setup/Position/Cards, Insights, and chart-readability slice, plus targeted Activity/Review and Data diagnostics workflow fixes found during the deeper audit. Broader information-architecture changes for Activity and Data & settings remain separate follow-up.
+**Branches:** Initial work on `codex/ui-ux-redesign`; this follow-up starts from merged main on `codex/ui-ux-pages` (`6b5eee4`).
 **Scope:** Frontend experience and presentation. This document does not authorize changes to financial calculations, stored data, backend contracts, or provider behavior.
+
+## Status audit — 24 September 2026
+
+Already present on merged `main`: the five-destination shell; four-stage Plan navigation with contextual Cards and Budgets routes; Today Brief, Evidence, and Actions views; URL-backed card detail state; accessible chart summaries/data alternatives; source-separated utilization evidence; a rendered card-trajectory uncertainty band; and fail-closed evidence/error states.
+
+This follow-up is gap-based, not a replay of completed phases. Its primary code scope is mobile navigation clearance and focus behavior, the dense safe-to-spend setup, a dominant net-worth summary, repeated/high-density content in Cards and Insights, and chart labels/axes on the supplied Plan and Insights surfaces. The deeper audit also identified two narrow workflow defects: disconnected Data status could surface a sync action that could not work, and transaction review placed supplementary work ahead of its primary queue on mobile. This follow-up corrects those status/action and queue/focus issues, without claiming a broad Activity or Data IA redesign. Keep all existing destinations, financial capabilities, hashes, card URL state, API values, and the four-stage Plan model. Reuse PFIS primitives, Recharts, and specialist SVG charts; no new dependency is approved or needed.
+
+The five moderated usability sessions and card-sort validation have not been run. The product owner approved proceeding with implementation while documenting that gap. Engineering and accessibility checks are not evidence of user comprehension, and no comprehension target is claimed as passed.
 
 ## 1. Objective
 
@@ -17,8 +25,8 @@ The supplied screenshots and read-only code review point to five connected cause
 1. **Feature accumulation:** each new analysis or evidence capability is appended to an existing page, so a screen increasingly resembles a catalog of features.
 2. **No single owner for a financial fact:** the same card due, balance, or forecast is repeated in a hero, summary strip, tab, chart, and evidence block without each appearance clearly serving a different task.
 3. **Backend state is too visible:** states such as `needs_anchor`, `observed_partial`, confidence, coverage, and ruleset version appear beside user decisions instead of being translated into a clear explanation and recovery action.
-4. **Navigation has accumulated layers:** workspace navigation, Plan tabs, card tabs, local disclosures, and long scrolling content can all appear in one journey. Plan’s visible six destinations also conflict with its existing four-stage model.
-5. **Charts have no enforced shared grammar:** shared `ChartFrame` exists, but current charts also use independent Recharts and SVG implementations. The card daily-path copy promises an uncertainty band that the rendered graph does not currently show.
+4. **Detail navigation still competes with content:** the four-stage Plan model and contextual routes are now in place, but detail breadcrumbs, local views, disclosures, and long scrolls can still compete for attention. Preserve the four-stage model and existing URL state while reducing unnecessary simultaneous controls.
+5. **Chart framing is uneven:** shared `ChartFrame`, text/data alternatives, and a card-path uncertainty band are present, but specialist Recharts/SVG views still differ in visible units, date ticks, source-boundary cues, and behavior with sparse series or long currency labels.
 
 These causes compound. Reducing borders or changing a component library alone will not resolve duplicate facts, uncertain page ownership, or conflicting chart semantics.
 
@@ -55,7 +63,7 @@ Retain the five global destinations. Simplify local navigation around user tasks
 | **Insights** | What patterns explain the change? | One conclusion and its supporting trend or ranked drivers | Category, merchant, anomaly, calibration, and forecast detail |
 | **Data & settings** | Is my data connected and usable? | Source health and the next required repair | Connections, statements/imports, privacy, preferences, diagnostics, technical evidence |
 
-The recommended Plan navigation aligns the existing four-stage model in `PlanModel.ts`: Safe to spend, Position, Commitments, and Outlook. Cards becomes a contextual account-detail workspace reachable from Position and Commitments; Budgets becomes a control within Outlook. Validate the wording and discoverability with a lightweight card sort and task test before implementation. Do not promote Cards to a global destination. `#cards` and `#budgets` remain direct entry points; `#cards` opens Plan → Commitments → the selected card detail, and `#budgets` opens Plan → Outlook → Budgets. Every other legacy hash must retain the exact current target from `workspaceNavigation.ts` unless a reviewed decision documents a user-evidenced remapping.
+The implemented Plan navigation aligns the existing four-stage model in `PlanModel.ts`: Safe to spend, Position, Commitments, and Outlook. Cards is a contextual account-detail workspace reachable from Position and Commitments; Budgets is a control within Outlook. The requested card-sort/task validation remains outstanding, so keep this approved model stable and do not claim discoverability was user-validated. Do not promote Cards to a global destination. `#cards` and `#budgets` remain direct entry points; `#cards` opens Plan → Commitments → the selected card detail, and `#budgets` opens Plan → Outlook → Budgets. Every other legacy hash must retain the exact current target from `workspaceNavigation.ts` unless a reviewed decision documents a user-evidenced remapping.
 
 When a card is open, use a clear breadcrumb/back context instead of showing the Plan stage tabs and a second full tab bar simultaneously. Proposed card task views are **Now**, **Pay**, **Activity**, and **Evidence**. Keep the selected card and local view in URL state so direct links and browser back/forward restore the view.
 
@@ -120,6 +128,7 @@ Terminology corrections to include in the first semantic-safety slice:
 - Each row should answer: what, how much, when, source/basis, and what action is available.
 - Preserve separate statement due, current outstanding, estimated position, and payment runway. Do not aggregate across currencies or incomplete card coverage as if totals were complete.
 - For a selected card, show a compact decision summary once, then one primary trajectory and the next action. Put issuer calculation, source records, event history, utilization details, and alternate payment scenarios in separate purposeful views or evidence detail.
+- Keep the 30-day account outstanding path distinct from the next-statement spending-pace path. If the former leaves the default decision view, retain it under Evidence with its missing-anchor/review states intact.
 - Use the card-local task views **Now**, **Pay**, **Activity**, and **Evidence** as prototype candidates. Keep card selection and active view URL-addressable and make browser back/forward restore them.
 - Never label a statement due as current outstanding, or a user-entered observation as issuer-verified. If the source or coverage is incomplete, state that next to the affected decision.
 - Review whether portfolio-level and per-card panels can share a single event/commitment model without hiding per-account context.
@@ -152,6 +161,7 @@ Terminology corrections to include in the first semantic-safety slice:
 - Group statement import, connections, privacy/preferences, and diagnostics by the user task.
 - Keep parser, ruleset, coverage, and recovery evidence accessible here without making it the language of the daily financial experience.
 - Avoid presenting operational counts or readiness percentages without explaining what decision they support.
+- Treat deployment-wide ledger-currency health as operator status, not a user-specific repair instruction. Until authenticated, record-level remediation exists, explain that self-service repair is unavailable and do not route people to unrelated transaction editing.
 
 ## 7. Shared visual and interaction system
 

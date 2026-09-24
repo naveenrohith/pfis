@@ -69,7 +69,7 @@ function DashboardWorkspace() {
         Skip to workspace content
       </a>
       <SectionNav />
-      <div className="min-w-0 pb-24 md:pb-0">
+      <div className="min-w-0 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-0">
         <Header />
         <main
           id="workspace-content"

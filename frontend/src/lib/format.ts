@@ -14,6 +14,25 @@ export function formatChartCurrency(value: unknown, currency = 'INR'): string {
   return formatCurrency(Number.isFinite(numeric) ? numeric : 0, currency);
 }
 
+export function formatChartAxisCurrency(value: unknown, currency = 'INR'): string {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  const numeric = typeof candidate === 'number' ? candidate : Number(candidate);
+  if (!Number.isFinite(numeric)) return '';
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency,
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(numeric);
+}
+
+export function formatChartDate(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const date = new Date(`${value.slice(0, 10)}T12:00:00`);
+  if (!Number.isFinite(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(date);
+}
+
 export function formatCompact(value: number | null | undefined): string {
   const n = value ?? 0;
   if (Math.abs(n) >= 10_000_000) return `${(n / 10_000_000).toFixed(1)}Cr`;

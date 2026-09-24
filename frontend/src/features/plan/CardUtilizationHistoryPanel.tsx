@@ -1,6 +1,6 @@
 import { Activity, ArrowDownRight, ArrowUpRight, Minus, ShieldCheck } from 'lucide-react';
 import { ChartFrame } from '@/components/system';
-import { formatCurrency, formatDate } from '@/lib/format';
+import { formatChartDate, formatCurrency, formatDate } from '@/lib/format';
 import type { CardUtilizationHistory, CardUtilizationHistoryPoint } from '@/lib/types';
 
 const trendCopy: Record<
@@ -49,6 +49,22 @@ function trendIcon(trend: CardUtilizationHistory['trend']) {
   return Activity;
 }
 
+const PLOT_LEFT = 42;
+const PLOT_RIGHT = 310;
+const PLOT_TOP = 18;
+const PLOT_BOTTOM = 136;
+
+function chartY(utilization: number, scale: number): number {
+  const bounded = Math.max(0, Math.min(scale, utilization));
+  return PLOT_BOTTOM - (bounded / scale) * (PLOT_BOTTOM - PLOT_TOP);
+}
+
+function chartX(timestamp: number, firstDate: number, lastDate: number): number {
+  return firstDate === lastDate
+    ? (PLOT_LEFT + PLOT_RIGHT) / 2
+    : PLOT_LEFT + ((timestamp - firstDate) / (lastDate - firstDate)) * (PLOT_RIGHT - PLOT_LEFT);
+}
+
 function chartCoordinates(
   points: CardUtilizationHistoryPoint[],
   scale: number,
@@ -58,10 +74,7 @@ function chartCoordinates(
   return points
     .map((point) => {
       const timestamp = Date.parse(`${point.as_of}T00:00:00Z`);
-      const x =
-        firstDate === lastDate ? 50 : ((timestamp - firstDate) / (lastDate - firstDate)) * 100;
-      const y = 90 - ((point.utilization_pct ?? 0) / scale) * 76;
-      return `${x.toFixed(2)},${Math.max(8, Math.min(90, y)).toFixed(2)}`;
+      return `${chartX(timestamp, firstDate, lastDate).toFixed(2)},${chartY(point.utilization_pct ?? 0, scale).toFixed(2)}`;
     })
     .join(' ');
 }
@@ -243,14 +256,15 @@ export function CardUtilizationHistoryPanel({
   const lastDate = Date.parse(`${chartPoints[chartPoints.length - 1].as_of}T00:00:00Z`);
   const maxUtilization = Math.max(
     100,
-    Math.ceil(Math.max(...chartPoints.map((point) => point.utilization_pct ?? 0), 0) / 10) * 10,
+    Math.ceil(Math.max(...chartPoints.map((point) => point.utilization_pct ?? 0), 0) / 10 - 1e-9) *
+      10,
   );
   const latest = latestPoint(history);
   const evidencePoints = chartPoints;
   const targetY =
     history.utilization_target_pct == null
       ? null
-      : 90 - (history.utilization_target_pct / maxUtilization) * 76;
+      : chartY(history.utilization_target_pct, maxUtilization);
   const chartLabel =
     chartPoints.length > 1
       ? `Utilization moved from ${pointValue(chartPoints[0])} on ${formatDate(chartPoints[0].as_of)} to ${pointValue(chartPoints[chartPoints.length - 1])} on ${formatDate(chartPoints[chartPoints.length - 1].as_of)}.`
@@ -298,37 +312,53 @@ export function CardUtilizationHistoryPanel({
             description={`Percent · ${formatDate(chartPoints[0].as_of)} to ${formatDate(chartPoints[chartPoints.length - 1].as_of)} · scale 0–${maxUtilization}%`}
             summary={`${chartLabel} Issuer-statement values and settled-ledger estimates use distinct lines and are not connected across evidence sources.`}
           >
-            <svg className="h-40 w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <svg className="h-40 w-full" viewBox="0 0 320 182" preserveAspectRatio="none">
               <title>Card utilization history</title>
               <desc>
                 {chartLabel} Issuer-statement values and settled-ledger estimates use distinct lines
                 and are not connected across evidence sources.
               </desc>
+              {[0, maxUtilization / 2, maxUtilization].map((tick) => {
+                const y = chartY(tick, maxUtilization);
+                return (
+                  <g key={tick}>
+                    <line
+                      x1={PLOT_LEFT}
+                      y1={y}
+                      x2={PLOT_RIGHT}
+                      y2={y}
+                      stroke="currentColor"
+                      className="text-border/75"
+                      strokeWidth="0.7"
+                    />
+                    <text
+                      x={PLOT_LEFT - 7}
+                      y={y + 3}
+                      textAnchor="end"
+                      fontSize="10"
+                      fill="currentColor"
+                      className="text-muted-foreground"
+                    >
+                      {Math.round(tick)}%
+                    </text>
+                  </g>
+                );
+              })}
               <line
-                x1="0"
-                y1="90"
-                x2="100"
-                y2="90"
+                x1={PLOT_LEFT}
+                y1={PLOT_BOTTOM}
+                x2={PLOT_RIGHT}
+                y2={PLOT_BOTTOM}
                 stroke="currentColor"
                 className="text-border"
                 strokeWidth="0.6"
               />
-              <line
-                x1="0"
-                y1="14"
-                x2="100"
-                y2="14"
-                stroke="currentColor"
-                className="text-border/60"
-                strokeWidth="0.6"
-                strokeDasharray="1.5 2"
-              />
               {targetY != null ? (
                 <line
-                  x1="0"
-                  y1={Math.max(8, Math.min(90, targetY))}
-                  x2="100"
-                  y2={Math.max(8, Math.min(90, targetY))}
+                  x1={PLOT_LEFT}
+                  y1={targetY}
+                  x2={PLOT_RIGHT}
+                  y2={targetY}
                   stroke="currentColor"
                   className="text-warning"
                   strokeWidth="0.8"
@@ -362,14 +392,8 @@ export function CardUtilizationHistoryPanel({
               ) : null}
               {chartPoints.map((point) => {
                 const pointDate = Date.parse(`${point.as_of}T00:00:00Z`);
-                const x =
-                  firstDate === lastDate
-                    ? 50
-                    : ((pointDate - firstDate) / (lastDate - firstDate)) * 100;
-                const y = Math.max(
-                  8,
-                  Math.min(90, 90 - ((point.utilization_pct ?? 0) / maxUtilization) * 76),
-                );
+                const x = chartX(pointDate, firstDate, lastDate);
+                const y = chartY(point.utilization_pct ?? 0, maxUtilization);
                 const isStatement = point.basis === 'issuer_statement';
                 return (
                   <circle
@@ -382,6 +406,28 @@ export function CardUtilizationHistoryPanel({
                   />
                 );
               })}
+              <text
+                x={PLOT_LEFT}
+                y="166"
+                textAnchor="start"
+                fontSize="10"
+                fill="currentColor"
+                className="text-muted-foreground"
+              >
+                {formatChartDate(chartPoints[0].as_of)}
+              </text>
+              {chartPoints.length > 1 ? (
+                <text
+                  x={PLOT_RIGHT}
+                  y="166"
+                  textAnchor="end"
+                  fontSize="10"
+                  fill="currentColor"
+                  className="text-muted-foreground"
+                >
+                  {formatChartDate(chartPoints[chartPoints.length - 1].as_of)}
+                </text>
+              ) : null}
             </svg>
           </ChartFrame>
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">

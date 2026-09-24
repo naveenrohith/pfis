@@ -21,6 +21,7 @@ import { ChartFrame } from '@/components/system';
 import { Button } from '@/components/ui/Button';
 import { EmptyState, Skeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/features/auth/AuthContext';
+import { useWorkspace } from '@/features/workspace/WorkspaceContext';
 import {
   useAdjudicateAnomaly,
   useAdjudicateAnomalySample,
@@ -30,11 +31,18 @@ import {
   useSummary,
   useWorkspaceSnapshot,
 } from '@/features/workspace/queries';
-import { formatChartCurrency, formatCompact, formatCurrency, formatDate } from '@/lib/format';
+import {
+  formatChartAxisCurrency,
+  formatChartCurrency,
+  formatChartDate,
+  formatCurrency,
+  formatDate,
+} from '@/lib/format';
 
 export function InsightsSection(_props: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const { setCategoryDrill, scrollTo } = useDashboardUi();
+  const { month, year } = useWorkspace();
   const summary = useSummary();
   const insights = useInsights();
   const adjudicateAnomaly = useAdjudicateAnomaly();
@@ -56,28 +64,39 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
   const recurring = insights.data?.recurring_payments ?? [];
   const anomalies = insights.data?.anomalies ?? [];
   const samples = anomalySamples.data ?? [];
-  const trend = insights.data?.daily_trend ?? [];
+  const trend = (insights.data?.daily_trend ?? []).map((point) => {
+    if (!Number.isInteger(point.day) || point.day == null || point.day < 1) return point;
+    const date = new Date(year, month - 1, point.day);
+    if (date.getMonth() !== month - 1) return point;
+    return {
+      ...point,
+      date: `${year}-${String(month).padStart(2, '0')}-${String(point.day).padStart(2, '0')}`,
+    };
+  });
+  const hasDailySpendEvidence = trend.some((point) => point.total > 0);
   const topCategory = categories[0];
   const spendChange = comparison?.spend_change_pct;
   const conclusion = buildConclusion(topCategory?.name, spendChange);
-  const maxCategory = Math.max(...categories.map((item) => item.total), 1);
+  const categoryDeltas = new Map(
+    (comparison?.category_deltas ?? []).map((delta) => [delta.category, delta]),
+  );
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-border/70 bg-card">
-      <header className="grid gap-7 border-b border-border/70 px-5 py-7 sm:px-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+    <article className="min-w-0">
+      <header className="grid gap-4 border-b border-border/70 pb-5 sm:gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div className="max-w-3xl">
           <p className="text-xs font-extrabold tracking-[0.12em] text-intelligence">
             MONTHLY INVESTIGATION
           </p>
-          <h2 className="mt-3 text-pretty text-3xl font-extrabold tracking-[-0.045em] sm:text-4xl">
+          <h2 className="mt-2 text-pretty text-2xl font-extrabold tracking-[-0.04em] sm:text-3xl">
             {conclusion}
           </h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
             Every conclusion below leads back to observed ledger evidence. Forecasts and recurring
             candidates remain labelled; they are not treated as facts.
           </p>
         </div>
-        <div className="max-w-sm text-sm leading-6 text-muted-foreground">
+        <div className="text-sm leading-6 text-muted-foreground lg:max-w-xs">
           <p>
             <span className="font-extrabold text-foreground">
               {formatCurrency(spend, currency)} observed spend
@@ -93,13 +112,13 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
       </header>
 
       <div className="grid lg:grid-cols-[minmax(0,1.55fr)_minmax(18rem,0.75fr)]">
-        <section className="min-w-0 px-5 py-7 sm:px-8 lg:border-r lg:border-border/70">
+        <section className="min-w-0 py-6 lg:pr-8">
           <SectionHeading
             index="01"
             title="Where the movement happened"
             description="Daily observed debit spend. Peaks are investigation points, not balance changes."
           />
-          {trend.length ? (
+          {hasDailySpendEvidence ? (
             <div className="mt-6">
               <ChartFrame
                 title="Observed spend by day"
@@ -147,7 +166,7 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
                       <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
                       <XAxis
                         dataKey="date"
-                        tickFormatter={(value) => formatDate(String(value))}
+                        tickFormatter={formatChartDate}
                         tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
                         interval="preserveStartEnd"
                         axisLine={false}
@@ -155,12 +174,13 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
                       />
                       <YAxis
                         tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                        tickFormatter={(value) => formatCompact(value)}
+                        tickFormatter={(value) => formatChartAxisCurrency(value, currency)}
                         axisLine={false}
                         tickLine={false}
                       />
                       <Tooltip
                         formatter={(value) => formatChartCurrency(value, currency)}
+                        labelFormatter={(value) => formatDate(String(value))}
                         contentStyle={{
                           background: 'hsl(var(--card))',
                           border: '1px solid hsl(var(--border))',
@@ -176,6 +196,7 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
                         strokeWidth={3}
                         dot={false}
                         activeDot={{ r: 5 }}
+                        isAnimationActive={false}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -185,8 +206,8 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
           ) : (
             <EmptyState
               icon={<CalendarRange />}
-              title="No daily evidence yet"
-              description="Add or sync a few activities and PFIS will turn them into a traceable timeline."
+              title="No debit activity this month"
+              description="There is nothing to plot for this period yet. Add or sync debit activity to build a traceable daily timeline."
               action={
                 <Button variant="outline" onClick={() => scrollTo('transactions')}>
                   Open activity <ArrowRight className="h-4 w-4" />
@@ -196,92 +217,60 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
           )}
         </section>
 
-        <aside className="px-5 py-7 sm:px-8" aria-labelledby="evidence-spine-title">
+        <aside
+          className="border-t border-border/70 py-6 lg:border-l lg:border-t-0 lg:pl-8"
+          aria-labelledby="drivers-title"
+        >
           <SectionHeading
-            index="EVIDENCE"
-            title="Why it changed"
-            description="The shortest path from the monthly conclusion to its supporting records."
-            id="evidence-spine-title"
+            index="02"
+            title="Largest measured drivers"
+            description="Select a category to inspect its ledger records and confirm what shaped the month."
+            id="drivers-title"
           />
-          <ol className="relative mt-6 space-y-0 before:absolute before:bottom-5 before:left-[0.68rem] before:top-5 before:w-px before:bg-border">
-            {(comparison?.category_deltas ?? []).slice(0, 4).map((delta) => (
-              <li
-                key={delta.category}
-                className="relative grid grid-cols-[1.4rem_minmax(0,1fr)] gap-3 py-3"
-              >
-                <span className="relative z-10 mt-1 h-5 w-5 rounded-full border-4 border-card bg-intelligence" />
-                <div>
-                  <p className="font-bold">{delta.category}</p>
-                  <p className="mt-0.5 text-sm leading-5 text-muted-foreground">
-                    {formatCurrency(delta.current, currency)}
-                    {delta.change_pct == null
-                      ? ' with no prior baseline'
-                      : ` · ${formatChange(delta.change_pct)} from prior month`}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ol>
-          <Button
-            variant="outline"
-            className="mt-5 w-full"
-            onClick={() => scrollTo('transactions')}
-          >
-            Inspect ledger evidence <ArrowRight className="h-4 w-4" />
-          </Button>
+          {categories.length ? (
+            <ol className="mt-4 divide-y divide-border/65">
+              {categories.slice(0, 5).map((category, index) => {
+                const delta = categoryDeltas.get(category.name);
+                return (
+                  <li key={category.name}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCategoryDrill({ categoryId: category.name, label: category.name });
+                        scrollTo('transactions');
+                      }}
+                      className="focus-ring grid min-h-14 w-full grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded py-2 text-left"
+                    >
+                      <span className="text-xs font-extrabold text-muted-foreground">
+                        {String(index + 1).padStart(2, '0')}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate font-bold">{category.name}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {category.count} entries
+                          {delta?.change_pct == null
+                            ? ' · no prior baseline'
+                            : ` · ${formatChange(delta.change_pct)} vs prior month`}
+                        </span>
+                      </span>
+                      <span className="money-value pl-1 text-right text-sm font-extrabold">
+                        {formatCurrency(category.total, currency)}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <p className="mt-4 text-sm text-muted-foreground">
+              Drivers will appear after PFIS has observed classified activity.
+            </p>
+          )}
         </aside>
       </div>
 
-      <section className="border-t border-border/70 px-5 py-7 sm:px-8">
-        <SectionHeading
-          index="02"
-          title="Ranked drivers"
-          description="Start with the largest measured contributor, then open its ledger evidence."
-        />
-        <div className="mt-6 divide-y divide-border/65">
-          {categories.length ? (
-            categories.slice(0, 8).map((category, index) => (
-              <button
-                type="button"
-                key={category.name}
-                onClick={() => {
-                  setCategoryDrill({ categoryId: category.name, label: category.name });
-                  scrollTo('transactions');
-                }}
-                className="focus-ring grid min-h-14 w-full grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded text-left"
-              >
-                <span className="text-sm font-extrabold text-muted-foreground">
-                  {String(index + 1).padStart(2, '0')}
-                </span>
-                <span className="min-w-0">
-                  <span className="flex items-baseline justify-between gap-4">
-                    <span className="truncate font-bold">{category.name}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {category.count} entries
-                    </span>
-                  </span>
-                  <span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-muted">
-                    <span
-                      className="block h-full rounded-full bg-intelligence"
-                      style={{ width: `${(category.total / maxCategory) * 100}%` }}
-                    />
-                  </span>
-                </span>
-                <span className="money-value pl-2 text-sm font-extrabold">
-                  {formatCurrency(category.total, currency)}
-                </span>
-              </button>
-            ))
-          ) : (
-            <div className="rounded-xl bg-muted/45 px-4 py-5 text-sm text-muted-foreground">
-              Ranked drivers will appear after PFIS has observed classified activity.
-            </div>
-          )}
-        </div>
-      </section>
-
       {anomalies.length ? (
-        <section className="border-t border-border/70 px-5 py-7 sm:px-8">
+        <section className="border-t border-border/70 py-7">
           <SectionHeading
             index="03"
             title="Departures from your rhythm"
@@ -394,7 +383,7 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
       ) : null}
 
       {samples.length ? (
-        <section className="border-t border-border/70 px-5 py-7 sm:px-8">
+        <section className="border-t border-border/70 py-7">
           <SectionHeading
             index="04"
             title="Calibration sample"
@@ -494,7 +483,7 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
       </div>
 
       {(workspace.data?.review_summary?.pending_count ?? 0) > 0 ? (
-        <footer className="bg-warning/7 flex flex-col gap-3 border-t border-warning/25 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+        <footer className="bg-warning/7 flex flex-col gap-3 border-t border-warning/25 py-5 sm:flex-row sm:items-center sm:justify-between">
           <p className="flex items-start gap-2 text-sm leading-6">
             <CircleAlert className="mt-1 h-4 w-4 shrink-0 text-warning" />
             <span>
@@ -549,7 +538,7 @@ function EvidenceList({
   className?: string;
 }) {
   return (
-    <section className={`px-5 py-7 sm:px-8 ${className}`}>
+    <section className={`py-7 ${className}`}>
       <h3 className="flex items-center gap-2 text-lg font-extrabold">
         <span className="text-intelligence">{icon}</span> {title}
       </h3>
