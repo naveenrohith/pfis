@@ -43,6 +43,14 @@ class _Result:
         return self
 
 
+class _Savepoint:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+
 class _Db:
     def __init__(self, results=()):
         self.results = list(results)
@@ -66,6 +74,9 @@ class _Db:
 
     def add_all(self, items):
         self.added.extend(items)
+
+    def begin_nested(self):
+        return _Savepoint()
 
     async def flush(self):
         return None
