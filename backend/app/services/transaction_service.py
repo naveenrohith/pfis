@@ -1551,13 +1551,18 @@ class TransactionService:
             "category_breakdown": categories,
             "top_merchants": merchants,
         }
-        self.db.add(
-            MonthlySummary(
-                user_id=user_id,
-                month=month,
-                year=year,
-                payload_json=json.dumps(summary),
-            )
-        )
+        try:
+            async with self.db.begin_nested():
+                self.db.add(
+                    MonthlySummary(
+                        user_id=user_id,
+                        month=month,
+                        year=year,
+                        payload_json=json.dumps(summary),
+                    )
+                )
+        except IntegrityError:
+            # A concurrent request cached the same period first; its payload is equivalent.
+            pass
         await self.db.commit()
         return summary

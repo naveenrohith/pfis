@@ -11,28 +11,30 @@ import {
 describe('Planning decision trail', () => {
   it('uses a short, ordered path that matches the financial decision', () => {
     expect(PLAN_STAGES.map((stage) => stage.label)).toEqual([
-      'Safe to spend',
-      'Position',
-      'Commitments',
-      'Outlook',
+      'Can I spend?',
+      'Where do I stand?',
+      'What’s coming?',
+      'What could change?',
+      'Protect & plan',
     ]);
     expect(PLAN_STAGES.map((stage) => stage.destination)).toEqual([
       'cash-plan',
       'networth',
       'obligations',
       'analytics',
+      'budgets',
     ]);
   });
 
   it('keeps every deep-linked Plan surface inside the right stage', () => {
-    expect(planStageForView('cash-plan')).toBe('available');
-    expect(planStageForView('networth')).toBe('position');
-    expect(planStageForView('cards')).toBe('commitments');
-    expect(planStageForView('liabilities')).toBe('commitments');
-    expect(planStageForView('obligations')).toBe('commitments');
-    expect(planStageForView('household')).toBe('commitments');
-    expect(planStageForView('analytics')).toBe('outlook');
-    expect(planStageForView('budgets')).toBe('outlook');
+    expect(planStageForView('cash-plan')).toBe('spend');
+    expect(planStageForView('networth')).toBe('stand');
+    expect(planStageForView('cards')).toBe('coming');
+    expect(planStageForView('liabilities')).toBe('coming');
+    expect(planStageForView('obligations')).toBe('coming');
+    expect(planStageForView('household')).toBe('protect');
+    expect(planStageForView('analytics')).toBe('change');
+    expect(planStageForView('budgets')).toBe('protect');
   });
 
   it('falls back to the safe-to-spend entry for non-Plan sections', () => {
@@ -41,18 +43,20 @@ describe('Planning decision trail', () => {
     expect(planViewFromSection('budgets')).toBe('budgets');
   });
 
-  it('keeps the four decision stages visible and maps detail routes into their stage', () => {
+  it('keeps the five decision steps visible and maps detail routes into their stage', () => {
     expect(PLAN_NAV_ITEMS.map((item) => item.label)).toEqual([
-      'Safe to spend',
-      'Position',
-      'Commitments',
-      'Outlook',
+      'Can I spend?',
+      'Where do I stand?',
+      'What’s coming?',
+      'What could change?',
+      'Protect & plan',
     ]);
-    expect(planNavigationForView('cards')).toBe('commitments');
-    expect(planNavigationForView('liabilities')).toBe('commitments');
-    expect(planNavigationForView('household')).toBe('commitments');
-    expect(planNavigationForView('budgets')).toBe('outlook');
-    expect(planSectionForNavigation('commitments')).toBe('obligations');
-    expect(planSectionForNavigation('outlook')).toBe('analytics');
+    expect(planNavigationForView('cards')).toBe('coming');
+    expect(planNavigationForView('liabilities')).toBe('coming');
+    expect(planNavigationForView('household')).toBe('protect');
+    expect(planNavigationForView('budgets')).toBe('protect');
+    expect(planSectionForNavigation('coming')).toBe('obligations');
+    expect(planSectionForNavigation('change')).toBe('analytics');
+    expect(planSectionForNavigation('protect')).toBe('budgets');
   });
 });

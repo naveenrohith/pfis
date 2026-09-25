@@ -8,46 +8,59 @@ export type PlanView =
   | 'obligations'
   | 'household';
 
-export type PlanStageId = 'available' | 'position' | 'commitments' | 'outlook';
+export type PlanStageId = 'spend' | 'stand' | 'coming' | 'change' | 'protect';
 
 export type PlanNavigationId = PlanStageId;
 
 export const PLAN_STAGES = [
   {
-    id: 'available',
-    label: 'Safe to spend',
+    id: 'spend',
+    label: 'Can I spend?',
+    shortLabel: 'Spend',
     destination: 'cash-plan',
-    description: 'What is safe before the next income',
+    description: 'Safe-to-spend readiness before the next income',
   },
   {
-    id: 'position',
-    label: 'Position',
+    id: 'stand',
+    label: 'Where do I stand?',
+    shortLabel: 'Stand',
     destination: 'networth',
-    description: 'What is actually yours today',
+    description: 'Verified and provisional position',
   },
   {
-    id: 'commitments',
-    label: 'Commitments',
+    id: 'coming',
+    label: 'What’s coming?',
+    shortLabel: 'Coming',
     destination: 'obligations',
-    description: 'What must be paid or reviewed',
+    description: 'Commitments, card dues, and liabilities already in motion',
   },
   {
-    id: 'outlook',
-    label: 'Outlook',
+    id: 'change',
+    label: 'What could change?',
+    shortLabel: 'Change',
     destination: 'analytics',
-    description: 'What one change could improve',
+    description: 'Forecast, outlook, and drift signals',
+  },
+  {
+    id: 'protect',
+    label: 'Protect & plan',
+    shortLabel: 'Protect',
+    destination: 'budgets',
+    description: 'Reserves, goals, scenarios, payoff, and household plans',
   },
 ] as const satisfies ReadonlyArray<{
   id: PlanStageId;
   label: string;
+  shortLabel: string;
   destination: PlanView;
   description: string;
 }>;
 
-export const PLAN_NAV_ITEMS = PLAN_STAGES.map(({ id, label }) => ({
+export const PLAN_NAV_ITEMS = PLAN_STAGES.map(({ id, label, shortLabel }) => ({
   id,
   label,
-})) satisfies ReadonlyArray<{ id: PlanNavigationId; label: string }>;
+  shortLabel,
+})) satisfies ReadonlyArray<{ id: PlanNavigationId; label: string; shortLabel: string }>;
 
 const PLAN_VIEWS: readonly PlanView[] = [
   'analytics',
@@ -73,10 +86,11 @@ export function planSectionForNavigation(navigation: PlanNavigationId): PlanView
 }
 
 export function planStageForView(view: PlanView): PlanStageId {
-  if (view === 'cash-plan') return 'available';
-  if (view === 'networth') return 'position';
-  if (view === 'analytics' || view === 'budgets') return 'outlook';
-  return 'commitments';
+  if (view === 'cash-plan') return 'spend';
+  if (view === 'networth') return 'stand';
+  if (view === 'analytics') return 'change';
+  if (view === 'budgets' || view === 'household') return 'protect';
+  return 'coming';
 }
 
 export function stageForId(stage: PlanStageId) {

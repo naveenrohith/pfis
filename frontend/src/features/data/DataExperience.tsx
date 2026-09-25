@@ -12,7 +12,9 @@ import { AccountDeletionSettings } from './AccountDeletionSettings';
 import { DataExportSettings } from './DataExportSettings';
 import { FinancialDaySettings } from './FinancialDaySettings';
 import { IntelligenceReadinessPanel } from './IntelligenceReadinessPanel';
+import { NeedsAttentionCenter } from './NeedsAttentionCenter';
 import { OperationalStatusCard } from './OperationalStatusCard';
+import { PreferencePolicySettings } from './PreferencePolicySettings';
 import { RawEmailRetentionSettings } from './RawEmailRetentionSettings';
 import { ProductBoundaryCard } from './ProductBoundaryCard';
 import { TemporalHistoryBackfillSettings } from './TemporalHistoryBackfillSettings';
@@ -108,6 +110,13 @@ export function DataExperience() {
         </div>
       </WorkspaceContextBar>
 
+      <NeedsAttentionCenter
+        running={running}
+        gmailConnectUrl={gmailConnectUrl}
+        runSync={runSync}
+        onNavigate={scrollTo}
+      />
+
       <div id={view} className="animate-fade-in scroll-mt-[10.5rem] lg:scroll-mt-[11.5rem]">
         <Suspense fallback={<DataSkeleton label={view} />}>
           {view === 'inbox' ? <InboxSection embedded /> : null}
@@ -153,6 +162,7 @@ export function DataExperience() {
                   <FinancialDaySettings />
                   <RawEmailRetentionSettings />
                 </div>
+                <PreferencePolicySettings />
               </section>
               <section aria-labelledby="privacy-title" className="space-y-4">
                 <div>

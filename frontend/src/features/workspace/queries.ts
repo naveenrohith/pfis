@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, api } from '@/lib/api';
+import { ApiError, activityLedgerApi, api } from '@/lib/api';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
 import { dateInputValueInTimezone } from '@/lib/format';
+import type { ActivityTransactionFilters } from '@/lib/types';
 
 const FINANCIAL_STALE_TIME_MS = 5 * 60 * 1000;
 const OPERATIONAL_REFETCH_INTERVAL_MS = 60_000;
@@ -27,6 +28,9 @@ export const queryKeys = {
   categories: ['categories'] as const,
   summary: (u: string, m: number, y: number) => ['summary', u, m, y] as const,
   transactions: (u: string, m: number, y: number) => ['transactions', u, m, y] as const,
+  activityTransactions: (u: string, filters: ActivityTransactionFilters) =>
+    ['transactions', u, filters.month ?? 'all', filters.year ?? 'all', filters] as const,
+  cashPocketBalance: (u: string, accountId: string) => ['cashPocketBalance', u, accountId] as const,
   transferMatchCandidates: (u: string, accountId?: string) =>
     ['transferMatchCandidates', u, accountId ?? 'all'] as const,
   emails: (u: string) => ['emails', u] as const,
@@ -125,13 +129,29 @@ export function useSummary() {
   });
 }
 
-export function useTransactions() {
+export function useTransactions(filters?: ActivityTransactionFilters) {
   const userId = useUserId();
   const { month, year } = useWorkspace();
+  const effectiveFilters = { month, year, limit: 200, ...filters };
   return useQuery({
-    queryKey: queryKeys.transactions(userId, month, year),
-    queryFn: () => api.transactions(userId, { month, year, limit: 200 }),
+    queryKey: filters
+      ? queryKeys.activityTransactions(userId, effectiveFilters)
+      : queryKeys.transactions(userId, month, year),
+    queryFn: () =>
+      filters
+        ? activityLedgerApi.transactions(userId, effectiveFilters)
+        : api.transactions(userId, { month, year, limit: 200 }),
     enabled: !!userId,
+    ...financialQueryPolicy,
+  });
+}
+
+export function useCashPocketBalance(accountId?: string) {
+  const userId = useUserId();
+  return useQuery({
+    queryKey: queryKeys.cashPocketBalance(userId, accountId ?? ''),
+    queryFn: () => activityLedgerApi.cashPocketBalance(userId, accountId!),
+    enabled: !!userId && !!accountId,
     ...financialQueryPolicy,
   });
 }

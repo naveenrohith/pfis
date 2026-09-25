@@ -2804,3 +2804,143 @@ export interface SubscriptionReviewActionResponse {
   created_at: string;
   updated_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// Data & settings preference policy API
+// ---------------------------------------------------------------------------
+
+export type PreferencePolicyRecommendationKind =
+  | 'anomaly'
+  | 'budget'
+  | 'card_payment'
+  | 'cash_reserve'
+  | 'debt_payment'
+  | 'goal_contribution'
+  | 'keep_reserve'
+  | 'pay_card_full'
+  | 'recurring'
+  | 'reserve'
+  | 'review'
+  | 'savings';
+
+export interface UserPreferencePolicy {
+  alert_threshold_pct: number;
+  briefing_cadence: GuidancePeriod;
+  reserve_floor: number;
+  dismissed_recommendation_kinds: PreferencePolicyRecommendationKind[];
+  excluded_recommendation_types: PreferencePolicyRecommendationKind[];
+  excluded_merchants: string[];
+  excluded_categories: string[];
+}
+
+export interface UserPreferencePolicyVersion {
+  id: string;
+  user_id: string;
+  version: number;
+  based_on_version?: number | null;
+  policy: UserPreferencePolicy;
+  created_at?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Insights monthly snapshot API (GET /api/dashboard/monthly-snapshot)
+// ---------------------------------------------------------------------------
+
+export interface MonthlySnapshotCoverage {
+  incomplete_month: boolean;
+  latest_transaction_date?: string | null;
+  data_freshness_days?: number | null;
+  latest_sync_status?: string | null;
+  last_synced_at?: string | null;
+}
+
+export interface MonthlySnapshotCategory {
+  category_id?: string | null;
+  name: string;
+  icon?: string | null;
+  total: number;
+  count: number;
+}
+
+export interface MonthlySnapshotMerchant {
+  name: string;
+  total: number;
+  count: number;
+}
+
+export interface MonthlySnapshotBudgetStatus {
+  category?: string | null;
+  limit: number;
+  actual: number;
+  usage_pct: number;
+  status: string;
+}
+
+export interface MonthlySnapshotRecurringChange {
+  merchant?: string;
+  status?: string;
+  cadence?: string | null;
+  monthly_equivalent?: number;
+  confidence?: number;
+  data_sufficiency?: string;
+  next_expected_date?: string | null;
+}
+
+export interface MonthlySnapshotAnomaly {
+  id?: string;
+  kind?: 'category' | 'merchant' | string;
+  label?: string;
+  current_amount?: number;
+  baseline_amount?: number;
+  delta_amount?: number;
+  delta_pct?: number;
+  confidence?: number;
+  data_sufficiency?: string;
+}
+
+export interface MonthlySnapshotResponse {
+  month: number;
+  year: number;
+  month_label: string;
+  income: number;
+  spend: number;
+  net: number;
+  transaction_count: number;
+  top_categories: MonthlySnapshotCategory[];
+  top_merchants: MonthlySnapshotMerchant[];
+  budget_status: MonthlySnapshotBudgetStatus[];
+  recurring_changes: MonthlySnapshotRecurringChange[];
+  notable_anomalies: MonthlySnapshotAnomaly[];
+  coverage: MonthlySnapshotCoverage;
+}
+
+// ---------------------------------------------------------------------------
+// Activity unified ledger additions
+// ---------------------------------------------------------------------------
+
+export interface ActivityTransactionFilters {
+  month?: number;
+  year?: number;
+  categoryId?: string;
+  limit?: number;
+  offset?: number;
+  q?: string;
+  note?: string;
+  tags?: string[];
+  transactionType?: TransactionType;
+  paymentMethod?: PaymentMethod;
+  reviewed?: boolean;
+  sort?: 'transaction_date' | 'amount' | 'merchant' | 'created_at';
+  direction?: 'asc' | 'desc';
+}
+
+export interface CashPocketBalanceResponse {
+  account_id: string;
+  user_id: string;
+  currency: string;
+  transfers_in: number;
+  cash_spend: number;
+  balance: number;
+  as_of?: string | null;
+}
+

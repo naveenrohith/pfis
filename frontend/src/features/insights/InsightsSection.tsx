@@ -20,6 +20,7 @@ import { useDashboardUi } from '@/app/DashboardUiContext';
 import { ChartFrame } from '@/components/system';
 import { Button } from '@/components/ui/Button';
 import { EmptyState, Skeleton } from '@/components/ui/Skeleton';
+import { ExplainAction } from '@/features/ai/ExplainAction';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
 import {
@@ -31,6 +32,7 @@ import {
   useSummary,
   useWorkspaceSnapshot,
 } from '@/features/workspace/queries';
+import { useMonthlySnapshot } from '@/features/insights/monthlySnapshotQueries';
 import {
   formatChartAxisCurrency,
   formatChartCurrency,
@@ -38,6 +40,7 @@ import {
   formatCurrency,
   formatDate,
 } from '@/lib/format';
+import type { ExplainPayload, MonthlySnapshotResponse } from '@/lib/types';
 
 export function InsightsSection(_props: { embedded?: boolean } = {}) {
   const { user } = useAuth();
@@ -49,10 +52,11 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
   const anomalySamples = useAnomalySamples();
   const adjudicateAnomalySample = useAdjudicateAnomalySample();
   const workspace = useWorkspaceSnapshot();
+  const monthlySnapshot = useMonthlySnapshot();
   const merchantIntelligence = useMerchants();
   const currency = user?.currency ?? 'INR';
 
-  if (summary.isLoading || insights.isLoading || workspace.isLoading) {
+  if (summary.isLoading || insights.isLoading || workspace.isLoading || monthlySnapshot.isLoading) {
     return <Skeleton className="h-[38rem]" />;
   }
 
@@ -83,6 +87,14 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
 
   return (
     <article className="min-w-0">
+      <MonthlySnapshotBrief
+        snapshot={monthlySnapshot.data}
+        currency={currency}
+        month={month}
+        year={year}
+        userId={user?.id}
+      />
+
       <header className="grid gap-4 border-b border-border/70 pb-5 sm:gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div className="max-w-3xl">
           <p className="text-xs font-extrabold tracking-[0.12em] text-intelligence">
@@ -122,7 +134,17 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
             <div className="mt-6">
               <ChartFrame
                 title="Observed spend by day"
-                description={`Daily debit spend · ${currency} · ${formatDate(trend[0].date)} to ${formatDate(trend[trend.length - 1].date)}`}
+                description={
+                  <>
+                    <span>
+                      Daily debit spend · {currency} · {formatDate(trend[0].date)} to{' '}
+                      {formatDate(trend[trend.length - 1].date)}
+                    </span>
+                    <span className="mt-1 block font-semibold text-foreground">
+                      Takeaway: higher plotted days are investigation points, not balance changes.
+                    </span>
+                  </>
+                }
                 summary={`Daily observed debit spend from ${formatDate(trend[0].date)} to ${formatDate(trend[trend.length - 1].date)}. Peaks are investigation points, not balance changes.`}
                 dataTable={
                   <table className="w-full min-w-[28rem] text-left text-sm">
@@ -233,30 +255,48 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
                 const delta = categoryDeltas.get(category.name);
                 return (
                   <li key={category.name}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCategoryDrill({ categoryId: category.name, label: category.name });
-                        scrollTo('transactions');
-                      }}
-                      className="focus-ring grid min-h-14 w-full grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded py-2 text-left"
-                    >
-                      <span className="text-xs font-extrabold text-muted-foreground">
-                        {String(index + 1).padStart(2, '0')}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate font-bold">{category.name}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {category.count} entries
-                          {delta?.change_pct == null
-                            ? ' · no prior baseline'
-                            : ` · ${formatChange(delta.change_pct)} vs prior month`}
+                    <div className="grid gap-2 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCategoryDrill({ categoryId: category.name, label: category.name });
+                          scrollTo('transactions');
+                        }}
+                        className="focus-ring grid min-h-14 w-full grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded text-left"
+                      >
+                        <span className="text-xs font-extrabold text-muted-foreground">
+                          {String(index + 1).padStart(2, '0')}
                         </span>
-                      </span>
-                      <span className="money-value pl-1 text-right text-sm font-extrabold">
-                        {formatCurrency(category.total, currency)}
-                      </span>
-                    </button>
+                        <span className="min-w-0">
+                          <span className="block truncate font-bold">{category.name}</span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {category.count} entries
+                            {delta?.change_pct == null
+                              ? ' · no prior baseline'
+                              : ` · ${formatChange(delta.change_pct)} vs prior month`}
+                          </span>
+                        </span>
+                        <span className="money-value pl-1 text-right text-sm font-extrabold">
+                          {formatCurrency(category.total, currency)}
+                        </span>
+                      </button>
+                      <ExplainAction
+                        userId={user?.id}
+                        payload={{
+                          month,
+                          year,
+                          subject_id: category.name,
+                          surface: 'insights_driver',
+                          title: category.name,
+                          description: `${category.count} ledger entries make this a leading monthly driver.`,
+                          metrics: {
+                            total: category.total,
+                            count: category.count,
+                            change_pct: delta?.change_pct,
+                          },
+                        }}
+                      />
+                    </div>
                   </li>
                 );
               })}
@@ -340,6 +380,25 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
                     </ul>
                   </div>
                 </details>
+                <div className="mt-4 flex flex-wrap justify-end border-t border-warning/20 pt-4">
+                  <ExplainAction
+                    userId={user?.id}
+                    payload={{
+                      month,
+                      year,
+                      subject_id: anomaly.id,
+                      surface: 'insights_anomaly',
+                      title: anomaly.label,
+                      description: `${anomaly.kind} departure compared with the user’s own history.`,
+                      metrics: {
+                        current_amount: anomaly.current_amount,
+                        baseline_amount: anomaly.baseline_amount,
+                        delta_pct: anomaly.delta_pct,
+                        confidence: anomaly.confidence,
+                      },
+                    }}
+                  />
+                </div>
                 <div className="mt-4 border-t border-warning/20 pt-4">
                   <p className="text-xs font-bold text-muted-foreground">
                     Was this departure useful to flag?
@@ -465,7 +524,21 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
             label: merchant.name,
             meta: `${merchant.transaction_count} entries · ${merchant.data_sufficiency} evidence`,
             value: formatCurrency(merchant.total_spend, currency),
+            explainPayload: {
+              month,
+              year,
+              subject_id: merchant.merchant_key,
+              surface: 'insights_merchant',
+              title: merchant.name,
+              description: 'Merchant concentration in the selected month.',
+              metrics: {
+                total_spend: merchant.total_spend,
+                transaction_count: merchant.transaction_count,
+                avg_spend: merchant.avg_spend,
+              },
+            },
           }))}
+          userId={user?.id}
         />
         <EvidenceList
           icon={<Repeat2 className="h-4 w-4" />}
@@ -478,7 +551,21 @@ export function InsightsSection(_props: { embedded?: boolean } = {}) {
             label: item.merchant,
             meta: `${item.status} · ${Math.round(item.confidence * 100)}% confidence`,
             value: `${formatCurrency(item.monthly_equivalent, currency)}/mo`,
+            explainPayload: {
+              month,
+              year,
+              subject_id: item.merchant,
+              surface: 'insights_recurring',
+              title: item.merchant,
+              description: 'History-based recurring candidate in the selected month.',
+              metrics: {
+                monthly_equivalent: item.monthly_equivalent,
+                occurrences: item.occurrences,
+                confidence: item.confidence,
+              },
+            },
           }))}
+          userId={user?.id}
         />
       </div>
 
@@ -522,19 +609,243 @@ function SectionHeading({
   );
 }
 
+function MonthlySnapshotBrief({
+  snapshot,
+  currency,
+  month,
+  year,
+  userId,
+}: {
+  snapshot?: MonthlySnapshotResponse;
+  currency: string;
+  month: number;
+  year: number;
+  userId?: string;
+}) {
+  if (!snapshot) {
+    return (
+      <section className="mb-6 rounded-3xl border border-border/70 bg-muted/25 p-5">
+        <p className="text-sm text-muted-foreground">
+          This month in brief is unavailable. The driver evidence below remains visible.
+        </p>
+      </section>
+    );
+  }
+
+  const coverage = snapshot.coverage;
+  const coverageLabel = coverage.incomplete_month ? 'Incomplete month' : 'Complete period';
+  const coverageDetail = buildCoverageDetail(coverage);
+  const leadCategory = snapshot.top_categories[0];
+  const leadMerchant = snapshot.top_merchants[0];
+  const attentionBudget = snapshot.budget_status.find((budget) =>
+    ['warning', 'danger', 'over', 'over_budget', 'at_risk'].includes(budget.status),
+  );
+  const primaryAnomaly = snapshot.notable_anomalies[0];
+  const primaryRecurring = snapshot.recurring_changes[0];
+
+  return (
+    <section
+      aria-labelledby="monthly-snapshot-title"
+      className="mb-6 rounded-3xl border border-intelligence/20 bg-intelligence/5 p-5 sm:p-6"
+    >
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,0.55fr)]">
+        <div className="min-w-0">
+          <p className="text-xs font-extrabold tracking-[0.12em] text-intelligence">
+            THIS MONTH IN BRIEF
+          </p>
+          <h2
+            id="monthly-snapshot-title"
+            className="mt-2 text-pretty text-2xl font-extrabold tracking-[-0.04em]"
+          >
+            {buildSnapshotHeadline(snapshot, currency)}
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+            PFIS is reading {snapshot.transaction_count} ledger records for {snapshot.month_label}.
+            Income, spend, and net are server-computed; recurring streams, anomalies, and budgets
+            stay labelled by evidence quality.
+          </p>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <SnapshotMetric label="Income" value={formatCurrency(snapshot.income, currency)} />
+            <SnapshotMetric label="Spend" value={formatCurrency(snapshot.spend, currency)} />
+            <SnapshotMetric label="Net" value={formatCurrency(snapshot.net, currency)} />
+          </div>
+        </div>
+
+        <aside className="rounded-2xl border border-border/70 bg-card/65 p-4">
+          <p className="text-xs font-extrabold uppercase tracking-[0.1em] text-muted-foreground">
+            Coverage
+          </p>
+          <p className="mt-2 font-extrabold">{coverageLabel}</p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{coverageDetail}</p>
+        </aside>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-2">
+        <NarrativeEvidence
+          title="Top categories"
+          empty="No categorized spend is available yet."
+          rows={snapshot.top_categories.slice(0, 3).map((category) => ({
+            key: category.category_id ?? category.name,
+            label: category.name,
+            value: formatCurrency(category.total, currency),
+            detail: `${category.count} entries`,
+          }))}
+        />
+        <NarrativeEvidence
+          title="Top merchants"
+          empty="No merchant concentration is available yet."
+          rows={snapshot.top_merchants.slice(0, 3).map((merchant) => ({
+            key: merchant.name,
+            label: merchant.name,
+            value: formatCurrency(merchant.total, currency),
+            detail: `${merchant.count} entries`,
+          }))}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        <SnapshotSignal
+          title="Budget status"
+          value={
+            attentionBudget
+              ? `${attentionBudget.category ?? 'A budget'} is ${attentionBudget.status.replaceAll('_', ' ')}`
+              : snapshot.budget_status.length
+                ? 'No budget is flagged'
+                : 'No budget evidence'
+          }
+          detail={
+            attentionBudget
+              ? `${formatCurrency(attentionBudget.actual, currency)} of ${formatCurrency(
+                  attentionBudget.limit,
+                  currency,
+                )} observed.`
+              : 'Budget rows come directly from the monthly snapshot.'
+          }
+        />
+        <SnapshotSignal
+          title="Recurring changes"
+          value={
+            primaryRecurring?.merchant
+              ? `${primaryRecurring.merchant} is ${primaryRecurring.status ?? 'tracked'}`
+              : 'No recurring change flagged'
+          }
+          detail={
+            primaryRecurring?.monthly_equivalent == null
+              ? 'Recurring candidates remain estimates until evidence matures.'
+              : `${formatCurrency(primaryRecurring.monthly_equivalent, currency)} monthly equivalent · ${primaryRecurring.data_sufficiency ?? 'unknown'} evidence.`
+          }
+        />
+        <SnapshotSignal
+          title="Anomalies"
+          value={
+            primaryAnomaly?.label ? `${primaryAnomaly.label} needs review` : 'No anomaly flagged'
+          }
+          detail={
+            primaryAnomaly?.current_amount == null
+              ? 'PFIS found no material departure in the snapshot.'
+              : `${formatCurrency(primaryAnomaly.current_amount, currency)} observed; not a fraud claim.`
+          }
+        />
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-intelligence/20 pt-4">
+        <p className="text-sm leading-6 text-muted-foreground">
+          Takeaway: {buildSnapshotTakeaway(leadCategory?.name, leadMerchant?.name, snapshot)}
+        </p>
+        <ExplainAction
+          userId={userId}
+          payload={{
+            month,
+            year,
+            subject_id: snapshot.month_label,
+            surface: 'insights_monthly_snapshot',
+            title: 'This month in brief',
+            description: `Monthly snapshot for ${snapshot.month_label} with coverage labelled ${coverageLabel.toLowerCase()}.`,
+            metrics: {
+              income: snapshot.income,
+              spend: snapshot.spend,
+              net: snapshot.net,
+              transaction_count: snapshot.transaction_count,
+            },
+          }}
+        />
+      </div>
+    </section>
+  );
+}
+
+function SnapshotMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-border/70 bg-card/70 p-3">
+      <p className="text-xs font-bold text-muted-foreground">{label}</p>
+      <p className="money-value mt-1 text-lg font-extrabold">{value}</p>
+    </div>
+  );
+}
+
+function NarrativeEvidence({
+  title,
+  empty,
+  rows,
+}: {
+  title: string;
+  empty: string;
+  rows: Array<{ key: string; label: string; value: string; detail: string }>;
+}) {
+  return (
+    <section className="rounded-2xl border border-border/70 bg-card/55 p-4">
+      <h3 className="text-sm font-extrabold">{title}</h3>
+      {rows.length ? (
+        <ul className="mt-3 grid gap-2">
+          {rows.map((row) => (
+            <li key={row.key} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-sm">
+              <span className="min-w-0">
+                <span className="block truncate font-bold">{row.label}</span>
+                <span className="block truncate text-xs text-muted-foreground">{row.detail}</span>
+              </span>
+              <span className="money-value font-extrabold">{row.value}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 text-sm text-muted-foreground">{empty}</p>
+      )}
+    </section>
+  );
+}
+
+function SnapshotSignal({ title, value, detail }: { title: string; value: string; detail: string }) {
+  return (
+    <section className="rounded-2xl border border-border/70 bg-card/55 p-4">
+      <h3 className="text-sm font-extrabold">{title}</h3>
+      <p className="mt-2 text-sm font-bold">{value}</p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">{detail}</p>
+    </section>
+  );
+}
+
 function EvidenceList({
   icon,
   title,
   description,
   empty,
   rows,
+  userId,
   className = '',
 }: {
   icon: ReactNode;
   title: string;
   description: string;
   empty: string;
-  rows: Array<{ key: string; label: string; meta: string; value: string }>;
+  rows: Array<{
+    key: string;
+    label: string;
+    meta: string;
+    value: string;
+    explainPayload?: ExplainPayload;
+  }>;
+  userId?: string;
   className?: string;
 }) {
   return (
@@ -554,8 +865,13 @@ function EvidenceList({
                 <span className="block truncate font-bold">{row.label}</span>
                 <span className="block truncate text-xs text-muted-foreground">{row.meta}</span>
               </span>
-              <span className="money-value whitespace-nowrap text-sm font-extrabold">
-                {row.value}
+              <span className="flex flex-wrap items-center justify-end gap-2">
+                <span className="money-value whitespace-nowrap text-sm font-extrabold">
+                  {row.value}
+                </span>
+                {row.explainPayload ? (
+                  <ExplainAction userId={userId} payload={row.explainPayload} />
+                ) : null}
               </span>
             </div>
           ))}
@@ -565,6 +881,41 @@ function EvidenceList({
       )}
     </section>
   );
+}
+
+function buildSnapshotHeadline(snapshot: MonthlySnapshotResponse, currency: string): string {
+  if (snapshot.transaction_count === 0) {
+    return `${snapshot.month_label} needs more evidence before PFIS can explain the month.`;
+  }
+  const direction =
+    snapshot.net > 0 ? 'positive net movement' : snapshot.net < 0 ? 'negative net movement' : 'flat net movement';
+  return `${snapshot.month_label} shows ${direction}: ${formatCurrency(snapshot.net, currency)} net.`;
+}
+
+function buildSnapshotTakeaway(
+  category: string | undefined,
+  merchant: string | undefined,
+  snapshot: MonthlySnapshotResponse,
+): string {
+  if (snapshot.transaction_count === 0) return 'connect or import activity before reading patterns.';
+  if (category && merchant) return `${category} and ${merchant} are the first places to inspect.`;
+  if (category) return `${category} is the first category to inspect.`;
+  if (merchant) return `${merchant} is the first merchant to inspect.`;
+  return 'PFIS has totals but not enough ranked evidence yet.';
+}
+
+function buildCoverageDetail(coverage: MonthlySnapshotResponse['coverage']): string {
+  const latest = coverage.latest_transaction_date
+    ? `latest ledger activity ${formatDate(coverage.latest_transaction_date)}`
+    : 'no ledger activity dated in this period';
+  const freshness =
+    coverage.data_freshness_days == null
+      ? 'freshness unknown'
+      : `${coverage.data_freshness_days} day(s) since latest activity`;
+  const sync = coverage.latest_sync_status
+    ? `sync ${coverage.latest_sync_status}${coverage.last_synced_at ? ` at ${formatDate(coverage.last_synced_at)}` : ''}`
+    : 'sync status unavailable';
+  return `${latest}; ${freshness}; ${sync}.`;
 }
 
 function buildConclusion(category: string | undefined, change: number | null | undefined) {

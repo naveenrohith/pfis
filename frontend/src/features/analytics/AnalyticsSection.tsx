@@ -285,8 +285,8 @@ function GoalBoard({
   return (
     <Card className="mt-4">
       <CardContent className="grid gap-4 p-4 sm:p-5">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
             <h3 className="flex items-center gap-2 font-bold">
               <Target className="h-4 w-4 text-primary" /> Goals
             </h3>
@@ -294,7 +294,7 @@ function GoalBoard({
               Track savings, category reduction, and recurring-spend reduction.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-[9rem_minmax(12rem,1fr)_7rem_auto]">
+          <div className="grid min-w-0 gap-2 sm:grid-cols-[9rem_minmax(12rem,1fr)_7rem_auto]">
             <Select value={goalType} onChange={(e) => setGoalType(e.target.value as GoalType)}>
               <option value="savings">Savings</option>
               <option value="category_reduction">Category cap</option>

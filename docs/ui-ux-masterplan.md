@@ -122,6 +122,7 @@ performance, privacy, and maintenance review before adoption. Never copy a block
 | Durable statement analysis review | Existing semantic section, disclosure, status, and evidence-table primitives | Adapt | Statements now exposes a user-triggered, redacted analysis artifact for unfamiliar card or bank layouts. Product detection, bounded row previews, rails, reconciliation evidence, and confidence remain review-only; account mapping and ledger import stay separate explicit actions. |
 | Deposit rail review | Existing Card, Select, Button, Badge, and semantic status primitives | Adapt | Statements keeps ambiguous bank rows review-only until the user assigns an explicit UPI, debit-card, ATM, or transfer rail; unsupported rows can be held outside the ledger. |
 | Deposit rail review | Existing semantic list, Select, Button, Badge, and evidence primitives | Retain | Statements now surfaces unresolved bank rows with account/period context and requires an explicit UPI, debit-card, ATM, or transfer choice before import; users can hold a row outside the ledger without guessing. |
+| Activity ledger note/tag filters and cash pocket summary | `badge input filter chips accessible search`; registry unavailable in this worktree | Retain | Existing Input, Button, Badge, Card, and semantic description-list primitives meet the Activity need without adding a dependency; URL-backed filters preserve hashes and the cash card labels ATM withdrawals as transfers, not spend. |
 
 ## Delivery Tracker
 
