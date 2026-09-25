@@ -42,7 +42,7 @@ from app.models.forecast import (
     CashFlowForecastOutcome,
     CashFlowForecastSnapshot,
 )
-from app.models.knowledge import TemporalEventDecision
+from app.models.knowledge import SubscriptionReviewAction, TemporalEventDecision
 from app.models.roadmap import (
     CardDispute,
     HealthChecklistItem,
@@ -111,6 +111,7 @@ __all__ = [
     "AccountBalanceForecastSnapshot",
     "AccountBalanceForecastOutcome",
     "TemporalEventDecision",
+    "SubscriptionReviewAction",
     "TemporalSourceSnapshot",
     "RoadmapBill",
     "HealthChecklistItem",

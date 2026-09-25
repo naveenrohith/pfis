@@ -209,3 +209,147 @@ async def test_budget_mutations_reject_cross_user_tokens(client: AsyncClient, au
 
     assert update.status_code == 403
     assert delete.status_code == 403
+
+
+async def _post_txn(client: AsyncClient, user_id: str, **overrides):
+    payload = {
+        "amount": 100,
+        "transaction_type": "debit",
+        "merchant_raw": "Drilldown Merchant",
+        "transaction_date": "2026-05-10",
+        "confidence_score": 0.9,
+    }
+    payload.update(overrides)
+    response = await client.post(f"/api/transactions/?user_id={user_id}", json=payload)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+@pytest.mark.asyncio
+async def test_budget_drilldown_lists_contributing_transactions(client: AsyncClient):
+    """Drill-down rows reconcile with the tracker's actual spend and remaining."""
+    user = await create_user(client, "budget-drilldown")
+    categories = (await client.get(f"/api/categories/?user_id={user['id']}")).json()
+    category_id, other_category_id = categories[0]["id"], categories[1]["id"]
+    created = await client.post(
+        f"/api/budgets/?user_id={user['id']}",
+        json={"category_id": category_id, "monthly_limit": 1000},
+    )
+    budget_id = created.json()["id"]
+
+    debit_one = await _post_txn(
+        client, user["id"], amount=600, category_id=category_id, reference_id="dd-1"
+    )
+    debit_two = await _post_txn(
+        client,
+        user["id"],
+        amount=300,
+        category_id=category_id,
+        transaction_date="2026-05-20",
+        reference_id="dd-2",
+    )
+    refund = await _post_txn(
+        client,
+        user["id"],
+        amount=50,
+        transaction_type="refund",
+        category_id=category_id,
+        transaction_date="2026-05-22",
+        reference_id="dd-3",
+    )
+    # Excluded: other category, other month, income credit, pending debit.
+    await _post_txn(
+        client, user["id"], amount=999, category_id=other_category_id, reference_id="x1"
+    )
+    await _post_txn(
+        client,
+        user["id"],
+        amount=999,
+        category_id=category_id,
+        transaction_date="2026-04-30",
+        reference_id="x2",
+    )
+    await _post_txn(
+        client,
+        user["id"],
+        amount=999,
+        transaction_type="credit",
+        category_id=category_id,
+        reference_id="x3",
+    )
+    await _post_txn(
+        client,
+        user["id"],
+        amount=999,
+        category_id=category_id,
+        transaction_status="pending",
+        reference_id="x4",
+    )
+
+    response = await client.get(f"/api/budgets/{budget_id}/drilldown?month=5&year=2026")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["month"] == 5 and body["year"] == 2026
+    assert body["transaction_count"] == 3
+    assert body["has_more"] is False
+    assert [row["id"] for row in body["transactions"]] == [
+        refund["id"],
+        debit_two["id"],
+        debit_one["id"],
+    ]
+    assert [row["spend_effect"] for row in body["transactions"]] == [-50.0, 300.0, 600.0]
+    assert body["transactions"][0]["transaction_type"] == "refund"
+    assert body["transactions"][0]["merchant"]
+    assert body["budget"]["actual_spend"] == 850.0
+    assert body["budget"]["remaining"] == 150.0
+    assert body["budget"]["status"] == "warning"
+
+    tracked = (
+        await client.get(f"/api/budgets/track?user_id={user['id']}&month=5&year=2026")
+    ).json()
+    assert tracked[0]["actual_spend"] == body["budget"]["actual_spend"]
+    assert tracked[0]["remaining"] == body["budget"]["remaining"]
+
+    limited = (
+        await client.get(f"/api/budgets/{budget_id}/drilldown?month=5&year=2026&limit=1")
+    ).json()
+    assert limited["transaction_count"] == 3
+    assert limited["has_more"] is True
+    assert len(limited["transactions"]) == 1
+    assert limited["budget"]["actual_spend"] == 850.0
+
+
+@pytest.mark.asyncio
+async def test_budget_drilldown_unknown_budget_returns_404(client: AsyncClient):
+    response = await client.get("/api/budgets/missing-budget/drilldown?month=5&year=2026")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_budget_drilldown_rejects_cross_user_tokens(client: AsyncClient, auth_required):
+    """Authenticated users cannot read another user's budget drill-down."""
+    owner, owner_token = await register_user(client, "drilldown-owner")
+    _, attacker_token = await register_user(client, "drilldown-attacker")
+    categories = (
+        await client.get(
+            f"/api/categories/?user_id={owner['id']}", headers=auth_headers(owner_token)
+        )
+    ).json()
+    created = await client.post(
+        f"/api/budgets/?user_id={owner['id']}",
+        headers=auth_headers(owner_token),
+        json={"category_id": categories[0]["id"], "monthly_limit": 5000},
+    )
+    budget_id = created.json()["id"]
+
+    denied = await client.get(
+        f"/api/budgets/{budget_id}/drilldown?month=5&year=2026",
+        headers=auth_headers(attacker_token),
+    )
+    allowed = await client.get(
+        f"/api/budgets/{budget_id}/drilldown?month=5&year=2026",
+        headers=auth_headers(owner_token),
+    )
+
+    assert denied.status_code == 403
+    assert allowed.status_code == 200

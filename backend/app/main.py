@@ -53,6 +53,7 @@ from app.api.routes import (
     financial_position,
     guidance,
     health,
+    horizon,
     insights,
     jobs,
     knowledge,
@@ -61,6 +62,7 @@ from app.api.routes import (
     preferences,
     reports,
     roadmap,
+    subscriptions,
     sync,
     transactions,
     users,
@@ -314,10 +316,6 @@ async def request_id_middleware(request, call_next):
         request_id_ctx.reset(token)
 
 
-# Static files (CSS, JS, assets)
-STATIC_DIR = pathlib.Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
 # Built React SPA (frontend/dist). The React workspace is the only dashboard
 # implementation served by FastAPI; local Vite development remains available.
 FRONTEND_DIST = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "dist"
@@ -365,11 +363,13 @@ app.include_router(analytics.router, prefix="/api")
 app.include_router(analytics.goals_router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
 app.include_router(guidance.router, prefix="/api")
+app.include_router(horizon.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(preferences.router, prefix="/api")
 app.include_router(accounts.router, prefix="/api")
 app.include_router(financial_position.router, prefix="/api")
 app.include_router(roadmap.router, prefix="/api")
+app.include_router(subscriptions.router, prefix="/api")
 
 # Phase 6: Budget + Reports routes
 app.include_router(budgets.router, prefix="/api")

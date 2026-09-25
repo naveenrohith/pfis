@@ -15,7 +15,14 @@ from app.models.category import Category
 from app.models.sync import Budget
 from app.models.transaction import Transaction
 from app.models.user import User
-from app.schemas.budget import BudgetCreate, BudgetResponse, BudgetTracker, BudgetUpdate
+from app.schemas.budget import (
+    BudgetCreate,
+    BudgetDrilldown,
+    BudgetDrilldownTransaction,
+    BudgetResponse,
+    BudgetTracker,
+    BudgetUpdate,
+)
 from app.security import ensure_user_owns_resource, get_current_user_optional, resolve_user_scope
 from app.services.transaction_aggregates import (
     spend_effect_expression,
@@ -180,36 +187,129 @@ async def track_budgets(
     )
     spend_map = {row.category_id: float(row.total) for row in spend_result.all()}
 
-    trackers = []
-    for budget, cat_name, cat_icon in budgets:
-        actual = spend_map.get(budget.category_id, 0)
-        limit = float(budget.monthly_limit)
-        remaining = limit - actual
-        pct = (actual / limit * 100) if limit > 0 else 0
-
-        if pct >= 100:
-            status = "over"
-        elif pct >= 80:
-            status = "warning"
-        else:
-            status = "under"
-
-        trackers.append(
-            BudgetTracker(
-                id=budget.id,
-                category_id=budget.category_id,
-                category_name=cat_name,
-                category_icon=cat_icon,
-                monthly_limit=budget.monthly_limit,
-                actual_spend=actual,
-                remaining=remaining,
-                usage_pct=round(pct, 1),
-                status=status,
-            )
-        )
+    trackers = [
+        _build_tracker(budget, cat_name, cat_icon, spend_map.get(budget.category_id, 0))
+        for budget, cat_name, cat_icon in budgets
+    ]
 
     # Sort: over first, then warning, then under
     priority = {"over": 0, "warning": 1, "under": 2}
     trackers.sort(key=lambda t: (priority.get(t.status, 3), -t.usage_pct))
 
     return trackers
+
+
+@router.get("/{budget_id}/drilldown", response_model=BudgetDrilldown)
+async def budget_drilldown(
+    budget_id: str,
+    month: int = Query(..., ge=1, le=12),
+    year: int = Query(..., ge=2020, le=2030),
+    limit: int = Query(100, ge=1, le=500),
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return one budget's monthly tracker and the transactions behind its actual spend.
+
+    Uses the same spend semantics as ``/track`` so the listed rows reconcile
+    with ``actual_spend``: debits add, refunds subtract, and transfers,
+    accounting adjustments, ignored, pending, and foreign-currency rows are
+    excluded.
+    """
+    result = await db.execute(
+        select(Budget, Category.name, Category.icon)
+        .join(Category, Budget.category_id == Category.id)
+        .where(Budget.id == budget_id)
+    )
+    row = result.one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    budget, cat_name, cat_icon = row
+    ensure_user_owns_resource(budget.user_id, current_user)
+
+    scope = (
+        Transaction.user_id == budget.user_id,
+        Transaction.category_id == budget.category_id,
+        spend_event_predicate(),
+        extract("month", Transaction.transaction_date) == month,
+        extract("year", Transaction.transaction_date) == year,
+    )
+    totals = (
+        await db.execute(
+            select(
+                func.count(Transaction.id).label("count"),
+                func.coalesce(func.sum(spend_effect_expression()), 0).label("total"),
+            ).where(*scope)
+        )
+    ).one()
+    # /track only reports positive net spend per category; mirror that clamp.
+    actual = max(float(totals.total), 0.0)
+
+    txn_rows = (
+        await db.execute(
+            select(
+                Transaction.id,
+                Transaction.transaction_date,
+                Transaction.merchant_normalized,
+                Transaction.merchant_raw,
+                Transaction.transaction_type,
+                Transaction.amount,
+                Transaction.currency,
+                spend_effect_expression().label("spend_effect"),
+            )
+            .where(*scope)
+            .order_by(
+                Transaction.transaction_date.desc(),
+                Transaction.amount.desc(),
+                Transaction.id,
+            )
+            .limit(limit)
+        )
+    ).all()
+
+    return BudgetDrilldown(
+        budget=_build_tracker(budget, cat_name, cat_icon, actual),
+        month=month,
+        year=year,
+        transaction_count=int(totals._mapping["count"]),
+        has_more=int(totals._mapping["count"]) > len(txn_rows),
+        transactions=[
+            BudgetDrilldownTransaction(
+                id=txn.id,
+                transaction_date=txn.transaction_date,
+                merchant=txn.merchant_normalized or txn.merchant_raw,
+                transaction_type=str(
+                    getattr(txn.transaction_type, "value", txn.transaction_type)
+                ).lower(),
+                amount=float(txn.amount),
+                spend_effect=float(txn.spend_effect),
+                currency=txn.currency,
+            )
+            for txn in txn_rows
+        ],
+    )
+
+
+def _build_tracker(
+    budget: Budget, cat_name: str, cat_icon: str | None, actual: float
+) -> BudgetTracker:
+    limit = float(budget.monthly_limit)
+    pct = (actual / limit * 100) if limit > 0 else 0
+
+    if pct >= 100:
+        status = "over"
+    elif pct >= 80:
+        status = "warning"
+    else:
+        status = "under"
+
+    return BudgetTracker(
+        id=budget.id,
+        category_id=budget.category_id,
+        category_name=cat_name,
+        category_icon=cat_icon,
+        monthly_limit=limit,
+        actual_spend=actual,
+        remaining=limit - actual,
+        usage_pct=round(pct, 1),
+        status=status,
+    )

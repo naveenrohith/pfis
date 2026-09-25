@@ -79,6 +79,7 @@ PORTABLE_EXPORT_TABLES = frozenset(
         "statement_line_matches",
         "statement_line_review_decisions",
         "statement_lines",
+        "subscription_review_actions",
         "sync_runs",
         "temporal_event_decisions",
         "temporal_source_snapshots",

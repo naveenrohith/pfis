@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import FinancialAccount
 from app.models.financial_position import (
+    CardCalendarEvent,
     CreditCardStatement,
     Liability,
     StatementLine,
@@ -25,11 +26,17 @@ from app.models.roadmap import (
     HouseholdSettlement,
     RoadmapBill,
 )
+from app.models.transaction import CardEvent, Transaction, TransactionType
 from app.models.user import User
 from app.schemas.roadmap import (
     BillCreate,
     BillResponse,
     BillUpdate,
+    CardCalendarItemCreate,
+    CardCalendarItemResponse,
+    CardCalendarItemUpdate,
+    CardCalendarMilestoneProgress,
+    CardCalendarTransactionEvidence,
     CardDisputeCreate,
     CardDisputeResponse,
     CardDisputeUpdate,
@@ -62,6 +69,8 @@ from app.services.temporal_source_history import (
 class RoadmapService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    _SETTLED_TRANSACTION_STATUSES = {"completed", "posted", "settled", "captured"}
 
     async def list_bills(self, user_id: str) -> list[BillResponse]:
         rows = await self.db.scalars(
@@ -206,6 +215,216 @@ class RoadmapService:
         await self.db.commit()
         await self.db.refresh(dispute)
         return CardDisputeResponse.model_validate(dispute)
+
+    async def list_card_calendar(
+        self, user_id: str, account_id: str
+    ) -> list[CardCalendarItemResponse]:
+        await self._require_card(user_id, account_id)
+        rows = await self.db.scalars(
+            select(CardCalendarEvent)
+            .where(
+                CardCalendarEvent.user_id == user_id,
+                CardCalendarEvent.financial_account_id == account_id,
+            )
+            .order_by(CardCalendarEvent.event_date, CardCalendarEvent.created_at)
+        )
+        return [await self._card_calendar_response(row) for row in rows]
+
+    async def create_card_calendar(
+        self, user_id: str, account_id: str, data: CardCalendarItemCreate
+    ) -> CardCalendarItemResponse:
+        await self._require_card(user_id, account_id)
+        event = CardCalendarEvent(
+            user_id=user_id,
+            financial_account_id=account_id,
+            **data.model_dump(),
+        )
+        self.db.add(event)
+        await self.db.flush()
+        await self._snapshot_card_calendar(event)
+        await self.db.commit()
+        await self.db.refresh(event)
+        return await self._card_calendar_response(event)
+
+    async def update_card_calendar(
+        self,
+        user_id: str,
+        account_id: str,
+        event_id: str,
+        data: CardCalendarItemUpdate,
+    ) -> CardCalendarItemResponse | None:
+        await self._require_card(user_id, account_id)
+        event = await self.db.scalar(
+            select(CardCalendarEvent).where(
+                CardCalendarEvent.id == event_id,
+                CardCalendarEvent.user_id == user_id,
+                CardCalendarEvent.financial_account_id == account_id,
+            )
+        )
+        if event is None:
+            return None
+        for field, value in data.model_dump(exclude_unset=True).items():
+            setattr(event, field, value)
+        self._validate_card_calendar_event(event)
+        await self.db.flush()
+        await self._snapshot_card_calendar(event)
+        await self.db.commit()
+        await self.db.refresh(event)
+        return await self._card_calendar_response(event)
+
+    async def delete_card_calendar(self, user_id: str, account_id: str, event_id: str) -> bool:
+        await self._require_card(user_id, account_id)
+        event = await self.db.scalar(
+            select(CardCalendarEvent).where(
+                CardCalendarEvent.id == event_id,
+                CardCalendarEvent.user_id == user_id,
+                CardCalendarEvent.financial_account_id == account_id,
+            )
+        )
+        if event is None:
+            return False
+        await self._snapshot_card_calendar(event, deleted=True)
+        await self.db.delete(event)
+        await self.db.commit()
+        return True
+
+    def _validate_card_calendar_event(self, event: CardCalendarEvent) -> None:
+        CardCalendarItemCreate.model_validate(
+            {
+                "event_type": event.event_type,
+                "label": event.label,
+                "event_date": event.event_date,
+                "source_kind": event.source_kind,
+                "source_label": event.source_label,
+                "source_identifier": event.source_identifier,
+                "annual_fee_amount": event.annual_fee_amount,
+                "fee_reversal_condition": event.fee_reversal_condition,
+                "fee_reversal_status": event.fee_reversal_status,
+                "milestone_spend_target": event.milestone_spend_target,
+                "milestone_period_start": event.milestone_period_start,
+                "milestone_period_end": event.milestone_period_end,
+            }
+        )
+
+    async def _card_calendar_response(self, event: CardCalendarEvent) -> CardCalendarItemResponse:
+        progress = None
+        if event.event_type in {"milestone_spend", "milestone"}:
+            progress = await self._milestone_progress(event)
+        return CardCalendarItemResponse(
+            id=event.id,
+            user_id=event.user_id,
+            financial_account_id=event.financial_account_id,
+            event_type=cast(
+                Literal["renewal", "annual_fee", "fee_reversal", "milestone_spend", "milestone"],
+                event.event_type,
+            ),
+            label=event.label,
+            event_date=event.event_date,
+            source_kind=cast(Literal["manual", "statement"], event.source_kind),
+            source_label=event.source_label,
+            source_identifier=event.source_identifier,
+            annual_fee_amount=event.annual_fee_amount,
+            fee_reversal_condition=event.fee_reversal_condition,
+            fee_reversal_status=cast(
+                Literal["unknown", "pending", "waived", "reversed", "not_eligible"] | None,
+                event.fee_reversal_status,
+            ),
+            milestone_spend_target=event.milestone_spend_target,
+            milestone_period_start=event.milestone_period_start,
+            milestone_period_end=event.milestone_period_end,
+            created_at=event.created_at,
+            milestone_progress=progress,
+        )
+
+    async def _milestone_progress(self, event: CardCalendarEvent) -> CardCalendarMilestoneProgress:
+        if (
+            event.milestone_spend_target is None
+            or event.milestone_period_start is None
+            or event.milestone_period_end is None
+        ):
+            return CardCalendarMilestoneProgress(
+                status="insufficient",
+                counted_amount=Decimal("0.00"),
+                target_amount=event.milestone_spend_target,
+                remaining_amount=None,
+                reason="Milestone target and period are required before progress can be computed.",
+            )
+        rows = list(
+            (
+                await self.db.scalars(
+                    select(Transaction)
+                    .where(
+                        Transaction.user_id == event.user_id,
+                        Transaction.financial_account_id == event.financial_account_id,
+                        Transaction.transaction_date >= event.milestone_period_start,
+                        Transaction.transaction_date <= event.milestone_period_end,
+                        Transaction.transaction_status.in_(self._SETTLED_TRANSACTION_STATUSES),
+                        Transaction.is_transfer.is_(False),
+                        Transaction.is_accounting_adjustment.is_(False),
+                        Transaction.review_outcome != "ignored_by_rule",
+                        Transaction.card_event.in_([CardEvent.PURCHASE, CardEvent.REFUND]),
+                    )
+                    .order_by(Transaction.transaction_date, Transaction.created_at, Transaction.id)
+                )
+            ).all()
+        )
+        counted = Decimal("0.00")
+        evidence = []
+        for row in rows:
+            direction: Literal["spend", "refund"]
+            if row.card_event == CardEvent.REFUND or row.transaction_type == TransactionType.REFUND:
+                direction = "refund"
+                counted -= row.amount
+            else:
+                direction = "spend"
+                counted += row.amount
+            evidence.append(
+                CardCalendarTransactionEvidence(
+                    transaction_id=row.id,
+                    transaction_date=row.transaction_date,
+                    amount=row.amount,
+                    direction=direction,
+                    merchant=row.merchant_normalized or row.merchant_raw,
+                    source_kind=row.source_kind,
+                    source_identifier=row.source_identifier,
+                )
+            )
+        remaining = max(event.milestone_spend_target - counted, Decimal("0.00"))
+        return CardCalendarMilestoneProgress(
+            status="ready",
+            counted_amount=counted,
+            target_amount=event.milestone_spend_target,
+            remaining_amount=remaining,
+            period_start=event.milestone_period_start,
+            period_end=event.milestone_period_end,
+            evidence=evidence,
+        )
+
+    async def _snapshot_card_calendar(
+        self, event: CardCalendarEvent, *, deleted: bool = False
+    ) -> None:
+        await capture_temporal_source_snapshot(
+            self.db,
+            user_id=event.user_id,
+            source_type="card_calendar",
+            source_id=event.id,
+            payload={
+                "financial_account_id": event.financial_account_id,
+                "event_type": event.event_type,
+                "label": event.label,
+                "event_date": event.event_date,
+                "source_kind": event.source_kind,
+                "source_label": event.source_label,
+                "source_identifier": event.source_identifier,
+                "annual_fee_amount": event.annual_fee_amount,
+                "fee_reversal_condition": event.fee_reversal_condition,
+                "fee_reversal_status": event.fee_reversal_status,
+                "milestone_spend_target": event.milestone_spend_target,
+                "milestone_period_start": event.milestone_period_start,
+                "milestone_period_end": event.milestone_period_end,
+            },
+            deleted=deleted,
+        )
 
     async def create_household(self, user_id: str, data: HouseholdCreate) -> HouseholdSummary:
         household = Household(owner_user_id=user_id, name=data.name)
