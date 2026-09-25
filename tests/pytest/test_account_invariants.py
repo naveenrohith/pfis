@@ -485,6 +485,7 @@ async def test_inactive_accounts_cannot_transfer(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_atm_withdrawal_creates_bank_to_cash_transfer_without_spend(client: AsyncClient):
     user = await create_user(client, "atm-withdrawal")
+    other = await create_user(client, "atm-withdrawal-other")
     bank = await _create_account(client, user["id"], "2001")
     cash = await _create_account(
         client,
@@ -521,6 +522,40 @@ async def test_atm_withdrawal_creates_bank_to_cash_transfer_without_spend(client
     assert summary.status_code == 200
     assert summary.json()["total_spend"] == 0
     assert summary.json()["total_income"] == 0
+
+    cash_spend = await client.post(
+        f"/api/transactions/?user_id={user['id']}",
+        json={
+            "financial_account_id": cash["id"],
+            "amount": 125,
+            "currency": "INR",
+            "transaction_type": "debit",
+            "payment_method": "other",
+            "transaction_date": today.isoformat(),
+            "merchant_raw": "Cash tea stall",
+            "merchant_normalized": "Cash tea stall",
+            "reference_id": "cash-spend-1",
+            "confidence_score": 1,
+        },
+    )
+    cash_spend.raise_for_status()
+
+    refreshed = await client.get(
+        f"/api/transactions/summary?user_id={user['id']}&month={today.month}&year={today.year}"
+    )
+    refreshed.raise_for_status()
+    assert refreshed.json()["total_spend"] == 125
+    assert refreshed.json()["total_income"] == 0
+    assert refreshed.json()["transaction_count"] == 1
+
+    pocket = await client.get(f"/api/accounts/{cash['id']}/cash-pocket?user_id={user['id']}")
+    pocket.raise_for_status()
+    assert pocket.json()["transfers_in"] == 500
+    assert pocket.json()["cash_spend"] == 125
+    assert pocket.json()["balance"] == 375
+
+    cross_user = await client.get(f"/api/accounts/{cash['id']}/cash-pocket?user_id={other['id']}")
+    assert cross_user.status_code == 404
 
 
 @pytest.mark.asyncio

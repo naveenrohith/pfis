@@ -24,6 +24,7 @@ from app.schemas.account import (
     BalanceKind,
     BalanceSnapshotCreate,
     BalanceSnapshotResponse,
+    CashPocketBalanceResponse,
     FinancialAccountCreate,
     FinancialAccountResponse,
     FinancialAccountUpdate,
@@ -32,11 +33,13 @@ from app.schemas.account import (
     TransferCreate,
     TransferResponse,
 )
+from app.schemas.financial_position import AccountPositionResponse
 from app.services.ledger_currency import get_ledger_currency, require_ledger_currency
 from app.services.temporal_source_history import (
     capture_financial_account_snapshot,
     capture_transaction_snapshot,
 )
+from app.services.transaction_aggregates import balance_transaction_eligible
 from app.services.transaction_service import TransactionService
 
 
@@ -107,7 +110,46 @@ class AccountService:
             .where(FinancialAccount.user_id == user_id)
             .order_by(FinancialAccount.is_active.desc(), FinancialAccount.institution_name)
         )
-        return [await self._account_response(account) for account in result.scalars().all()]
+        accounts = list(result.scalars().all())
+        if not accounts:
+            return []
+        account_ids = [account.id for account in accounts]
+        snapshots = list(
+            (
+                await self.db.scalars(
+                    select(AccountBalanceSnapshot)
+                    .where(AccountBalanceSnapshot.financial_account_id.in_(account_ids))
+                    .order_by(
+                        AccountBalanceSnapshot.financial_account_id,
+                        AccountBalanceSnapshot.as_of.desc(),
+                        AccountBalanceSnapshot.effective_at.desc().nulls_last(),
+                        AccountBalanceSnapshot.observed_at.desc(),
+                        AccountBalanceSnapshot.created_at.desc(),
+                    )
+                )
+            ).all()
+        )
+        latest_observed_by_account: dict[str, AccountBalanceSnapshot] = {}
+        latest_verified_by_account: dict[str, AccountBalanceSnapshot] = {}
+        for snapshot in snapshots:
+            latest_observed_by_account.setdefault(snapshot.financial_account_id, snapshot)
+            if snapshot.verified:
+                latest_verified_by_account.setdefault(snapshot.financial_account_id, snapshot)
+
+        from app.services.financial_position_service import FinancialPositionService
+
+        current_positions = await FinancialPositionService(self.db).account_positions(
+            user_id, account_ids
+        )
+        return [
+            self._account_response_from_parts(
+                account,
+                latest_observed=latest_observed_by_account.get(account.id),
+                latest_verified=latest_verified_by_account.get(account.id),
+                current_position=current_positions.get(account.id),
+            )
+            for account in accounts
+        ]
 
     async def list_link_rules(self, user_id: str) -> list[AccountLinkRuleResponse]:
         rows = list(
@@ -664,9 +706,16 @@ class AccountService:
             from app.services.financial_position_service import FinancialPositionService
 
             position_service = FinancialPositionService(self.db)
-            positions = [
-                await position_service.account_position(user_id, account.id) for account in accounts
-            ]
+            if hasattr(self.db, "scalars"):
+                position_map = await position_service.account_positions(
+                    user_id, [account.id for account in accounts]
+                )
+                positions = [position_map.get(account.id) for account in accounts]
+            else:
+                positions = [
+                    await position_service.account_position(user_id, account.id)
+                    for account in accounts
+                ]
             stale_cutoff = date.fromordinal(today.toordinal() - 7)
             eligible_positions = []
             for position in positions:
@@ -860,6 +909,62 @@ class AccountService:
             payment_rail=data.payment_rail,
         )
 
+    async def cash_pocket_balance(
+        self, user_id: str, account_id: str
+    ) -> CashPocketBalanceResponse | None:
+        account = await self._owned_account(user_id, account_id)
+        if account is None:
+            return None
+        if account.account_type != "cash":
+            raise ValueError("Cash pocket balance is only available for cash accounts")
+
+        rows = list(
+            (
+                await self.db.scalars(
+                    select(Transaction)
+                    .where(
+                        Transaction.user_id == user_id,
+                        Transaction.financial_account_id == account_id,
+                    )
+                    .order_by(Transaction.transaction_date, Transaction.created_at)
+                )
+            ).all()
+        )
+        transfers_in = Decimal("0")
+        cash_spend = Decimal("0")
+        as_of: date | None = None
+        for transaction in rows:
+            if not balance_transaction_eligible(transaction):
+                continue
+            as_of = (
+                transaction.transaction_date
+                if as_of is None or transaction.transaction_date > as_of
+                else as_of
+            )
+            if transaction.is_transfer and transaction.transaction_type == TransactionType.CREDIT:
+                transfers_in += transaction.amount
+            elif (
+                not transaction.is_transfer
+                and transaction.transaction_type == TransactionType.DEBIT
+            ):
+                cash_spend += transaction.amount
+            elif (
+                not transaction.is_transfer
+                and transaction.transaction_type == TransactionType.REFUND
+            ):
+                cash_spend -= transaction.amount
+
+        balance = transfers_in - cash_spend
+        return CashPocketBalanceResponse(
+            account_id=account.id,
+            user_id=user_id,
+            currency=account.currency,
+            transfers_in=float(round(transfers_in, 2)),
+            cash_spend=float(round(cash_spend, 2)),
+            balance=float(round(balance, 2)),
+            as_of=as_of,
+        )
+
     async def identity_history(
         self, user_id: str, account_id: str
     ) -> list[AccountIdentitySnapshotResponse] | None:
@@ -1008,15 +1113,30 @@ class AccountService:
             .limit(1)
         )
         latest_verified = verified_result.scalar_one_or_none()
-        # Keep account-list consumers on the same server-owned position policy
-        # as Net Worth, Cash Plan, and the dedicated position endpoint.  The
-        # verified snapshot fields above remain immutable observed evidence;
-        # current_balance is only the settlement-aware read-model estimate.
         from app.services.financial_position_service import FinancialPositionService
 
         current_position = await FinancialPositionService(self.db).account_position(
             account.user_id, account.id
         )
+        return self._account_response_from_parts(
+            account,
+            latest_observed=latest_observed,
+            latest_verified=latest_verified,
+            current_position=current_position,
+        )
+
+    def _account_response_from_parts(
+        self,
+        account: FinancialAccount,
+        *,
+        latest_observed: AccountBalanceSnapshot | None,
+        latest_verified: AccountBalanceSnapshot | None,
+        current_position: AccountPositionResponse | None,
+    ) -> FinancialAccountResponse:
+        # Keep account-list consumers on the same server-owned position policy
+        # as Net Worth, Cash Plan, and the dedicated position endpoint. The
+        # verified snapshot fields remain immutable observed evidence;
+        # current_balance is only the settlement-aware read-model estimate.
         return FinancialAccountResponse(
             id=account.id,
             user_id=account.user_id,

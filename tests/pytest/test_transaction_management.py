@@ -58,6 +58,60 @@ async def test_notes_and_tags_are_normalized_and_preserve_correction_history(
 
 
 @pytest.mark.asyncio
+async def test_transaction_list_filters_notes_and_tags_with_user_scope(client: AsyncClient):
+    owner = await create_user(client, "transaction-search-owner")
+    other = await create_user(client, "transaction-search-other")
+    first = await _transaction(client, owner["id"], amount=1100)
+    second = await _transaction(client, owner["id"], amount=1200)
+    other_txn = await _transaction(client, other["id"], amount=1300)
+
+    await client.patch(
+        f"/api/transactions/{first['id']}",
+        json={"note": "Cash reimbursement from office", "tags": ["Reimbursable", "cash"]},
+    )
+    await client.patch(
+        f"/api/transactions/{second['id']}",
+        json={"note": "Personal dinner", "tags": ["food"]},
+    )
+    await client.patch(
+        f"/api/transactions/{other_txn['id']}",
+        json={"note": "Cash reimbursement from office", "tags": ["Reimbursable"]},
+    )
+
+    by_note = await client.get(
+        f"/api/transactions/?user_id={owner['id']}&note=reimbursement&limit=10"
+    )
+    by_note.raise_for_status()
+    assert by_note.headers["X-Total-Count"] == "1"
+    assert by_note.json()[0]["id"] == first["id"]
+
+    by_tag = await client.get(f"/api/transactions/?user_id={owner['id']}&tag=reimbursable")
+    by_tag.raise_for_status()
+    assert by_tag.headers["X-Total-Count"] == "1"
+    assert by_tag.json()[0]["id"] == first["id"]
+
+    by_q = await client.get(f"/api/transactions/?user_id={owner['id']}&q=cash")
+    by_q.raise_for_status()
+    assert {item["id"] for item in by_q.json()} == {first["id"]}
+
+    owner_search_from_other_user = await client.get(
+        f"/api/transactions/?user_id={other['id']}&tag=reimbursable"
+    )
+    owner_search_from_other_user.raise_for_status()
+    assert {item["id"] for item in owner_search_from_other_user.json()} == {other_txn["id"]}
+
+    injection_probe = await client.get(
+        f"/api/transactions/?user_id={owner['id']}&note=%25' OR 1=1 --"
+    )
+    injection_probe.raise_for_status()
+    assert injection_probe.headers["X-Total-Count"] == "0"
+    assert injection_probe.json() == []
+
+    invalid_tag = await client.get(f"/api/transactions/?user_id={owner['id']}&tag={'x' * 33}")
+    assert invalid_tag.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_splits_replace_allocations_without_changing_ledger_spend(client: AsyncClient):
     user = await create_user(client, "transaction-splits")
     transaction = await _transaction(client, user["id"], amount=1000)
