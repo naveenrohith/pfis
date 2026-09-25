@@ -118,6 +118,46 @@ def test_user_exclusion_is_honored():
     assert any(check.name == "user_exclusion" for check in ranked[0].constraint_checks)
 
 
+def test_preference_policy_excludes_merchants_categories_and_protects_reserve_floor():
+    merchant = _recommendation(
+        "budget",
+        identifier="merchant-budget",
+        title="Review Amazon category budget",
+        amount=None,
+    )
+    category = _recommendation(
+        "review",
+        identifier="grocery-review",
+        title="Review grocery cashflow",
+        amount=None,
+    )
+    reserve_action = _recommendation(
+        "goal_contribution",
+        identifier="goal",
+        title="Move money to goal",
+        amount=750,
+    )
+
+    ranked = rank_recommendations(
+        [reserve_action, merchant, category],
+        _context(
+            excluded_merchants=frozenset({"amazon"}),
+            excluded_categories=frozenset({"grocery"}),
+            reserve_floor=400.0,
+            safe_to_spend=1000.0,
+        ),
+    )
+
+    by_id = {item.id: item for item in ranked}
+    assert by_id["merchant-budget"].recommendation_status == "excluded"
+    assert by_id["grocery-review"].recommendation_status == "excluded"
+    assert by_id["goal"].recommendation_status == "withheld"
+    reserve_check = next(
+        check for check in by_id["goal"].constraint_checks if check.name == "reserve_protection"
+    )
+    assert "below protected reserve" in reserve_check.reason
+
+
 def test_deterministic_ordering_uses_stable_tie_breakers():
     alpha = _recommendation("budget", identifier="b", title="Beta budget", confidence=0.8)
     bravo = _recommendation("budget", identifier="a", title="Alpha budget", confidence=0.8)

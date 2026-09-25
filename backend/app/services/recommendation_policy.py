@@ -19,6 +19,7 @@ from app.schemas.dashboard import (
 )
 from app.schemas.financial_position import CashPlanResponse
 from app.schemas.intelligence import GoalResponse
+from app.schemas.preferences import UserPreferencePolicy
 from app.services.recommendation_ranker import (
     RecommendationRankerContext,
     rank_recommendations,
@@ -80,6 +81,7 @@ def apply_recommendation_policy(
     as_of: date,
     source_coverage_score: int = 0,
     feedback: dict[str, RecommendationFeedback] | None = None,
+    preference_policy: UserPreferencePolicy | None = None,
 ) -> list[WorkspaceRecommendation]:
     """Attach bounded consequences, conflicts, and safe ranking signals."""
 
@@ -94,6 +96,7 @@ def apply_recommendation_policy(
     has_budget_action = any(item.type == "budget" for item in recommendations)
     has_recurring_action = any(item.type == "recurring" for item in recommendations)
     feedback = feedback or {}
+    policy = preference_policy or UserPreferencePolicy()
 
     for recommendation in recommendations:
         recommendation.freshness_as_of = as_of
@@ -162,10 +165,19 @@ def apply_recommendation_policy(
                 else None
             ),
             reserve_floor=(
-                float(getattr(cash_plan, "approved_reserve_total", 0.0) or 0.0)
+                max(
+                    float(getattr(cash_plan, "approved_reserve_total", 0.0) or 0.0),
+                    policy.reserve_floor,
+                )
                 if cash_plan is not None
-                else 0.0
+                else policy.reserve_floor
             ),
+            alert_threshold_pct=policy.alert_threshold_pct,
+            excluded_types=frozenset(
+                [*policy.dismissed_recommendation_kinds, *policy.excluded_recommendation_types]
+            ),
+            excluded_merchants=frozenset(policy.excluded_merchants),
+            excluded_categories=frozenset(policy.excluded_categories),
             feedback_exclusions={
                 kind: values.not_relevant
                 for kind, values in feedback.items()

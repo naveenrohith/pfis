@@ -101,3 +101,26 @@ class RecommendationOutcome(Base):
     observed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
+
+
+class UserPreferencePolicyVersion(Base):
+    __tablename__ = "user_preference_policy_versions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "version", name="uq_user_preference_policy_version"),
+        Index(
+            "ix_user_preference_policy_versions_user_created",
+            "user_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    based_on_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    policy_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )

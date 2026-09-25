@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.forecast_drift import ForecastDriftStatusResponse
 from app.schemas.intelligence import DataSufficiency, EvidenceItem
 
 ForecastStatus = Literal["ready", "needs_anchor", "needs_review"]
@@ -67,6 +68,7 @@ class AccountBalanceForecastResponse(BaseModel):
     confidence: float = Field(default=0.0, ge=0, le=1)
     data_sufficiency: DataSufficiency = "low"
     position_reason_codes: list[str] = Field(default_factory=list)
+    drift_status: ForecastDriftStatusResponse | None = None
     assumptions: list[str] = Field(default_factory=list)
     evidence: list[EvidenceItem] = Field(default_factory=list)
     points: list[AccountBalanceForecastPoint] = Field(default_factory=list)
@@ -152,6 +154,7 @@ class AccountBalanceForecastEvaluationResponse(BaseModel):
     calibration_status: Literal["insufficient_sample", "within_threshold", "drift"] = (
         "insufficient_sample"
     )
+    drift_status: ForecastDriftStatusResponse = Field(default_factory=ForecastDriftStatusResponse)
     calibration_thresholds: dict[str, float] = Field(
         default_factory=lambda: {
             "maximum_median_absolute_percentage_error_pct": 20.0,

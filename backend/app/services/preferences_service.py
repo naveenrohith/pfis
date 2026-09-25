@@ -4,10 +4,10 @@ import json
 from datetime import UTC, datetime
 from typing import cast
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.workspace import DashboardPreference
+from app.models.workspace import DashboardPreference, UserPreferencePolicyVersion
 from app.schemas.preferences import (
     BriefingCadence,
     DashboardPreferenceResponse,
@@ -16,6 +16,9 @@ from app.schemas.preferences import (
     DensityPreference,
     OnboardingGoal,
     ThemePreference,
+    UserPreferencePolicy,
+    UserPreferencePolicyUpdate,
+    UserPreferencePolicyVersionResponse,
 )
 
 DEFAULT_WIDGETS = [
@@ -27,6 +30,7 @@ DEFAULT_WIDGETS = [
     DashboardWidget(id="next-action", visible=True, size="medium"),
 ]
 CURRENT_LAYOUT_VERSION = 1
+DEFAULT_POLICY = UserPreferencePolicy()
 
 
 def _goal_widgets(goal: str | None) -> list[DashboardWidget]:
@@ -105,6 +109,82 @@ class PreferencesService:
         await self.db.commit()
         return self._response(user_id, None)
 
+    async def get_policy(self, user_id: str) -> UserPreferencePolicyVersionResponse:
+        row = await self._current_policy_row(user_id)
+        if row is None:
+            return UserPreferencePolicyVersionResponse(
+                id="default",
+                user_id=user_id,
+                version=0,
+                policy=DEFAULT_POLICY.model_copy(deep=True),
+                created_at=None,
+            )
+        return self._policy_response(row)
+
+    async def update_policy(
+        self, user_id: str, data: UserPreferencePolicyUpdate
+    ) -> UserPreferencePolicyVersionResponse:
+        current = await self._current_policy_row(user_id)
+        next_version = 1 if current is None else current.version + 1
+        row = UserPreferencePolicyVersion(
+            user_id=user_id,
+            version=next_version,
+            based_on_version=current.version if current is not None else None,
+            policy_json=self._policy_json(data),
+        )
+        self.db.add(row)
+        await self.db.commit()
+        await self.db.refresh(row)
+        return self._policy_response(row)
+
+    async def policy_history(self, user_id: str) -> list[UserPreferencePolicyVersionResponse]:
+        rows = list(
+            (
+                await self.db.scalars(
+                    select(UserPreferencePolicyVersion)
+                    .where(UserPreferencePolicyVersion.user_id == user_id)
+                    .order_by(UserPreferencePolicyVersion.version.desc())
+                )
+            ).all()
+        )
+        return [self._policy_response(row) for row in rows]
+
+    async def rollback_policy(
+        self, user_id: str, version: int
+    ) -> UserPreferencePolicyVersionResponse:
+        target = await self.db.scalar(
+            select(UserPreferencePolicyVersion).where(
+                UserPreferencePolicyVersion.user_id == user_id,
+                UserPreferencePolicyVersion.version == version,
+            )
+        )
+        if target is None:
+            raise LookupError("Preference policy version not found")
+        latest_version = await self.db.scalar(
+            select(func.coalesce(func.max(UserPreferencePolicyVersion.version), 0)).where(
+                UserPreferencePolicyVersion.user_id == user_id
+            )
+        )
+        next_version = int(latest_version or 0) + 1
+        row = UserPreferencePolicyVersion(
+            user_id=user_id,
+            version=next_version,
+            based_on_version=target.version,
+            policy_json=target.policy_json,
+        )
+        self.db.add(row)
+        await self.db.commit()
+        await self.db.refresh(row)
+        return self._policy_response(row)
+
+    async def _current_policy_row(self, user_id: str) -> UserPreferencePolicyVersion | None:
+        return await self.db.scalar(
+            select(UserPreferencePolicyVersion)
+            .where(UserPreferencePolicyVersion.user_id == user_id)
+            .order_by(UserPreferencePolicyVersion.version.desc())
+            .limit(1)
+        )
+
     @staticmethod
     def _response(
         user_id: str, preference: DashboardPreference | None
@@ -145,4 +225,23 @@ class PreferencesService:
             favorites=favorites,
             onboarding_goal=cast(OnboardingGoal | None, preference.onboarding_goal),
             updated_at=preference.updated_at,
+        )
+
+    @staticmethod
+    def _policy_json(policy: UserPreferencePolicy) -> str:
+        return json.dumps(
+            policy.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @staticmethod
+    def _policy_response(row: UserPreferencePolicyVersion) -> UserPreferencePolicyVersionResponse:
+        return UserPreferencePolicyVersionResponse(
+            id=row.id,
+            user_id=row.user_id,
+            version=row.version,
+            based_on_version=row.based_on_version,
+            policy=UserPreferencePolicy.model_validate(json.loads(row.policy_json)),
+            created_at=row.created_at,
         )

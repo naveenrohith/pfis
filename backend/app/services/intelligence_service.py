@@ -1244,9 +1244,20 @@ class IntelligenceService:
             data_through=projection.data_through,
         )
 
-    async def month_comparison(self, user_id: str, month: int, year: int) -> MonthComparison:
+    async def month_comparison(
+        self,
+        user_id: str,
+        month: int,
+        year: int,
+        *,
+        current_income_spend: tuple[float, float] | None = None,
+    ) -> MonthComparison:
         previous_month, previous_year = _prev_month(month, year)
-        income, spend = await self.monthly_income_spend(user_id, month, year)
+        income, spend = (
+            current_income_spend
+            if current_income_spend is not None
+            else await self.monthly_income_spend(user_id, month, year)
+        )
         prev_income, prev_spend = await self.monthly_income_spend(
             user_id, previous_month, previous_year
         )

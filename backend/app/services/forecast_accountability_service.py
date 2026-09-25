@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.forecast import CashFlowForecastOutcome, CashFlowForecastSnapshot
+from app.schemas.forecast_drift import ForecastDriftHorizonStatus, ForecastDriftStatusResponse
 from app.schemas.intelligence import (
     CashFlowForecastOutcomeResponse,
     CashFlowForecastSnapshotCreate,
@@ -22,6 +23,7 @@ from app.schemas.intelligence import (
     EvidenceItem,
 )
 from app.services.financial_clock import user_financial_today
+from app.services.forecast_drift_guard import ForecastDriftGuard
 from app.services.intelligence_service import IntelligenceService
 from app.services.knowledge.ruleset_registry import CASH_FLOW, CASH_FLOW_OUTCOME
 
@@ -208,11 +210,13 @@ class ForecastAccountabilityService:
                 continue
             created.append((outcome, snapshot))
         await self.db.commit()
+        drift_status = await ForecastDriftGuard(self.db).cash_flow_status(user_id)
         return CashFlowOutcomeEvaluationResponse(
             evaluation_version=CASH_FLOW_OUTCOME.version,
             evaluated_count=len(created),
             already_evaluated_count=already_evaluated,
             ineligible_count=ineligible,
+            drift_status=self._drift_response(drift_status),
             outcomes=[self._outcome_response(outcome, snapshot) for outcome, snapshot in created],
         )
 
@@ -304,4 +308,25 @@ class ForecastAccountabilityService:
             ),
             spend_range_covered=outcome.spend_range_covered,
             evaluated_at=outcome.evaluated_at,
+        )
+
+    @staticmethod
+    def _drift_response(drift_status) -> ForecastDriftStatusResponse:
+        return ForecastDriftStatusResponse(
+            ruleset_version=drift_status.ruleset_version,
+            status=drift_status.status,
+            reason_code=drift_status.reason_code,
+            minimum_outcomes=drift_status.minimum_outcomes,
+            maximum_mape_pct=drift_status.maximum_mape_pct,
+            minimum_interval_coverage_pct=drift_status.minimum_interval_coverage_pct,
+            horizons=[
+                ForecastDriftHorizonStatus(
+                    horizon=item.horizon,
+                    matured_outcomes=item.matured_outcomes,
+                    mean_absolute_percentage_error=item.mean_absolute_percentage_error,
+                    interval_coverage_pct=item.interval_coverage_pct,
+                    status=item.status,
+                )
+                for item in drift_status.horizons
+            ],
         )
