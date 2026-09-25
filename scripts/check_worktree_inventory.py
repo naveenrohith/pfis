@@ -52,20 +52,20 @@ PACKET_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "IR-3",
         re.compile(
-            r"^backend/alembic/versions/(031|032|033|035|036|037|039|041)_|"
+            r"^backend/alembic/versions/(031|032|033|035|036|037|039|041|059)_|"
             r"^backend/app/models/(anomaly|forecast|knowledge|roadmap|temporal_history)\.py$|"
-            r"^backend/app/schemas/(guidance|intelligence|roadmap|temporal)\.py$|"
-            r"^backend/app/api/routes/(analytics|guidance|insights|knowledge|roadmap)\.py$|"
+            r"^backend/app/schemas/(guidance|intelligence|roadmap|subscription_review|temporal)\.py$|"
+            r"^backend/app/api/routes/(analytics|guidance|insights|knowledge|roadmap|subscriptions)\.py$|"
             r"^backend/app/services/(anomaly_|forecast_|guidance_|insights_|intelligence_|"
-            r"knowledge/|recommendation_|roadmap_|temporal_)|"
+            r"knowledge/|recommendation_|roadmap_|subscription_review|temporal_)|"
             r"^tests/pytest/test_(anomaly|forecast|insights|intelligence|knowledge|recommendation|"
-            r"roadmap|temporal).*\.py$|^docs/feature-ideas-roadmap\.md$"
+            r"roadmap|subscription|temporal).*\.py$|^docs/feature-ideas-roadmap\.md$"
         ),
     ),
     (
         "IR-4",
         re.compile(
-            r"^backend/alembic/versions/(043|044|045|046|047|048|049|050|051|052|053|054|055)_|"
+            r"^backend/alembic/versions/(043|044|045|046|047|048|049|050|051|052|053|054|055|058)_|"
             r"^backend/app/models/financial_position\.py$|"
             r"^backend/app/schemas/(balance_forecast|financial_position)\.py$|"
             r"^backend/app/api/routes/financial_position\.py$|"
@@ -81,7 +81,7 @@ PACKET_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"^tests/pytest/|^\.github/|^Makefile$"
         ),
     ),
-    ("IR-6", re.compile(r"^README\.md$|^docs/")),
+    ("IR-6", re.compile(r"^README\.md$|^docs/|^agents/")),
 )
 
 

@@ -1,0 +1,68 @@
+{
+  "schema_version": "pfis-critical-read-query-budget-1",
+  "representative_dataset": {
+    "accounts": 4,
+    "cards": 2,
+    "transactions": 200,
+    "balance_snapshots": 4,
+    "card_position_observations": 2,
+    "budgets": 5
+  },
+  "headroom_policy": "max_statements is the observed statement count plus a small endpoint-specific allowance after the representative seed was measured.",
+  "budgets": {
+    "accounts_balance_list": {
+      "method": "GET",
+      "path_template": "/api/accounts",
+      "observed_statements": 39,
+      "max_statements": 43
+    },
+    "account_position": {
+      "method": "GET",
+      "path_template": "/api/accounts/{account_id}/position",
+      "observed_statements": 8,
+      "max_statements": 10
+    },
+    "net_worth": {
+      "method": "GET",
+      "path_template": "/api/net-worth",
+      "observed_statements": 34,
+      "max_statements": 38
+    },
+    "cash_plan": {
+      "method": "GET",
+      "path_template": "/api/cash-plan",
+      "observed_statements": 12,
+      "max_statements": 14
+    },
+    "card_portfolio_payment_plan": {
+      "method": "GET",
+      "path_template": "/api/cards/portfolio/payment-plan",
+      "observed_statements": 104,
+      "max_statements": 112
+    },
+    "card_overview": {
+      "method": "GET",
+      "path_template": "/api/cards/{account_id}",
+      "observed_statements": 23,
+      "max_statements": 26
+    },
+    "workspace_dashboard_summary": {
+      "method": "GET",
+      "path_template": "/api/dashboard/workspace",
+      "observed_statements": 75,
+      "max_statements": 81
+    },
+    "guidance_query": {
+      "method": "POST",
+      "path_template": "/api/guidance/query",
+      "observed_statements": 3,
+      "max_statements": 5
+    },
+    "readiness": {
+      "method": "GET",
+      "path_template": "/api/analytics/intelligence-readiness",
+      "observed_statements": 58,
+      "max_statements": 63
+    }
+  }
+}
