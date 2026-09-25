@@ -1480,3 +1480,78 @@ export const subscriptionReviewApi = {
       },
     ),
 };
+
+// ---------------------------------------------------------------------------
+// Data & settings preference policy API
+// ---------------------------------------------------------------------------
+
+export const preferencePolicyApi = {
+  current: (userId: string) =>
+    request<import('./types').UserPreferencePolicyVersion>('/preferences/policy', {
+      query: { user_id: userId },
+    }),
+  history: (userId: string) =>
+    request<import('./types').UserPreferencePolicyVersion[]>('/preferences/policy/history', {
+      query: { user_id: userId },
+    }),
+  save: (userId: string, policy: import('./types').UserPreferencePolicy) =>
+    request<import('./types').UserPreferencePolicyVersion>('/preferences/policy', {
+      method: 'PUT',
+      query: { user_id: userId },
+      body: policy,
+    }),
+  rollback: (userId: string, version: number) =>
+    request<import('./types').UserPreferencePolicyVersion>('/preferences/policy/rollback', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: { version },
+    }),
+};
+
+// ---------------------------------------------------------------------------
+// Insights monthly snapshot API
+// ---------------------------------------------------------------------------
+
+export const monthlySnapshotApi = {
+  monthlySnapshot: (userId: string, month: number, year: number) =>
+    request<import('./types').MonthlySnapshotResponse>('/dashboard/monthly-snapshot', {
+      query: { user_id: userId, month, year },
+    }),
+};
+
+// ---------------------------------------------------------------------------
+// Activity unified ledger API additions
+// ---------------------------------------------------------------------------
+
+export const activityLedgerApi = {
+  transactions: (userId: string, params: import('./types').ActivityTransactionFilters) => {
+    const query = new URLSearchParams({ user_id: userId });
+    const append = (key: string, value: string | number | boolean | undefined | null) => {
+      if (value !== undefined && value !== null && value !== '') query.set(key, String(value));
+    };
+
+    append('month', params.month);
+    append('year', params.year);
+    append('category_id', params.categoryId);
+    append('limit', params.limit ?? 200);
+    append('offset', params.offset);
+    append('q', params.q);
+    append('note', params.note);
+    append('transaction_type', params.transactionType);
+    append('payment_method', params.paymentMethod);
+    append('reviewed', params.reviewed);
+    append('sort', params.sort);
+    append('direction', params.direction);
+    for (const tag of params.tags ?? []) {
+      if (tag.trim()) query.append('tag', tag.trim());
+    }
+
+    return request<import('./types').Transaction[]>(`/transactions/?${query.toString()}`);
+  },
+  cashPocketBalance: (userId: string, accountId: string) =>
+    request<import('./types').CashPocketBalanceResponse>(
+      `/accounts/${encodeURIComponent(accountId)}/cash-pocket`,
+      { query: { user_id: userId } },
+    ),
+};
+
