@@ -20,6 +20,14 @@ vi.mock('@/app/DashboardUiContext', () => ({
 vi.mock('@/features/workspace/queries', () => ({
   useAutoSyncStatus: mocks.autoSync,
   useSyncStatus: () => ({ data: { latest_status: null } }),
+  useStatementAnalysisReviews: () => ({ data: [], isLoading: false, isError: false }),
+  useDepositStatementReviewItems: () => ({ data: [], isLoading: false, isError: false }),
+  useBalanceProviderStatus: () => ({ data: undefined, isLoading: false, isError: false }),
+  useOperationalHealth: () => ({
+    data: { status: 'healthy', status_reasons: [], data_warnings: [] },
+    isLoading: false,
+    isError: false,
+  }),
 }));
 
 vi.mock('@/features/workspace/SyncContext', () => ({
