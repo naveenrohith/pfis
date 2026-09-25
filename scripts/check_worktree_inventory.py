@@ -52,7 +52,7 @@ PACKET_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "IR-3",
         re.compile(
-            r"^backend/alembic/versions/(031|032|033|035|036|037|039|041|059)_|"
+            r"^backend/alembic/versions/(031|032|033|035|036|037|039|041|059|060)_|"
             r"^backend/app/models/(anomaly|forecast|knowledge|roadmap|temporal_history)\.py$|"
             r"^backend/app/schemas/(guidance|intelligence|roadmap|subscription_review|temporal)\.py$|"
             r"^backend/app/api/routes/(analytics|guidance|insights|knowledge|roadmap|subscriptions)\.py$|"

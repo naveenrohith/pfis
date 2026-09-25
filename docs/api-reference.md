@@ -1186,3 +1186,34 @@ returned only when the balance forecast has enough evidence; otherwise it is
 `missing_evidence`. The model fails closed: stale, incomplete, or review-needed
 sources produce attention/low-data/stale/deficit status instead of presenting
 estimates as verified.
+
+## Preference policy and forecast drift guard
+
+### Versioned preference policy
+
+User-owned preference policy endpoints are mounted under `/api/preferences` and require the same `user_id` scope checks as dashboard preferences.
+
+- `GET /api/preferences/policy?user_id=...` returns the current explicit policy. If no policy has been saved, PFIS returns version `0` defaults without creating a row.
+- `PUT /api/preferences/policy?user_id=...` appends a new immutable version. Validated fields include `alert_threshold_pct` (1-100), `briefing_cadence` (`daily`, `weekly`, `monthly`), `reserve_floor` (0-10,000,000), dismissed/excluded recommendation kinds, and merchant/category recommendation exclusions.
+- `GET /api/preferences/policy/history?user_id=...` lists append-only versions newest first.
+- `POST /api/preferences/policy/rollback?user_id=...` with `{ "version": N }` creates a new version by copying policy version `N`; old versions are not mutated.
+
+The recommendation ranker consumes only explicit policy values: excluded kinds, merchants, categories, and the configured reserve floor. No hidden learned adaptation is applied.
+
+### Forecast drift guard
+
+Forecast accountability responses include additive `drift_status` metadata with ruleset `pfis-forecast-drift-guard-1`, reason code `forecast_drift_guard`, per-horizon MAPE and interval coverage, and thresholds (`minimum_outcomes` = 3, `maximum_mape_pct` = 20, `minimum_interval_coverage_pct` = 70). Insufficient matured outcomes report `insufficient_evidence`, never `healthy`. When matured outcomes breach thresholds, status becomes `degraded`; account balance forecast consumers fall back to `needs_review` with reason code `forecast_drift_guard` rather than presenting the path as ready.
+
+## Product workflow completion slices
+
+### Cash pocket balance
+
+`GET /api/accounts/{account_id}/cash-pocket?user_id=...` returns the server-computed balance for an owned cash account. The response reports `transfers_in`, `cash_spend`, `balance`, `currency`, and `as_of`. ATM withdrawals remain paired transfer ledger rows (`is_transfer=true`, `payment_rail=atm`) and are excluded from income/spend aggregates; later manual cash purchases linked to the cash account are the spend events.
+
+### Monthly snapshot
+
+`GET /api/dashboard/monthly-snapshot?user_id=...&month=...&year=...` returns a deterministic month summary composed from existing transaction, budget, recurring, insight, anomaly, and sync read models. The response includes income, spend, net, transaction count, top categories, top merchants, budget status, recurring changes, notable anomalies, and coverage/freshness metadata. `coverage.incomplete_month` is true for the current or future month.
+
+### Transaction note and tag search
+
+`GET /api/transactions/` accepts additive filters `note=<text>` and repeated `tag=<tag>` parameters. The existing `q`/`text` search also includes transaction notes and serialized tags. Filters remain user-scoped, bounded by request validation, and applied through SQLAlchemy parameters rather than interpolated SQL.
