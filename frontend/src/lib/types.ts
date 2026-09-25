@@ -323,6 +323,37 @@ export interface BudgetTracker {
   status: BudgetStatus;
 }
 
+export interface BudgetDrilldownBudget {
+  id: string;
+  category_id: string;
+  category_name: string;
+  category_icon?: string | null;
+  monthly_limit: number;
+  actual_spend: number;
+  remaining: number;
+  usage_pct: number;
+  status: BudgetStatus;
+}
+
+export interface BudgetDrilldownTransaction {
+  id: string;
+  transaction_date: string;
+  merchant?: string | null;
+  transaction_type: TransactionType;
+  amount: number;
+  spend_effect: number;
+  currency: string;
+}
+
+export interface BudgetDrilldown {
+  budget: BudgetDrilldownBudget;
+  month: number;
+  year: number;
+  transaction_count: number;
+  transactions: BudgetDrilldownTransaction[];
+  has_more: boolean;
+}
+
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed';
 
 export interface Job {
@@ -808,6 +839,18 @@ export interface ExplainPayload {
   title: string;
   description?: string | null;
   metrics?: Record<string, string | number | boolean | null | undefined>;
+  month?: number;
+  year?: number;
+  subject_id?: string | null;
+}
+
+export interface ExplainMetric {
+  key: string;
+  label: string;
+  supplied_value?: string | null;
+  verified_value?: string | null;
+  status: 'verified' | 'mismatch' | 'unverified' | 'invalid' | 'withheld';
+  note: string;
 }
 
 export interface ExplainResponse {
@@ -816,6 +859,13 @@ export interface ExplainResponse {
   drivers: string[];
   next_actions: string[];
   safety_note: string;
+  ruleset_version?: string;
+  evidence_status?: 'verified' | 'partial' | 'conflict' | 'unverified';
+  source?: string;
+  as_of?: string | null;
+  metrics?: ExplainMetric[];
+  assumptions?: string[];
+  missing_evidence?: string[];
 }
 
 export type GuidancePeriod = 'daily' | 'weekly' | 'monthly';
@@ -1656,10 +1706,36 @@ export interface CardPaymentIntent {
 export interface CardCalendarEvent {
   id: string;
   financial_account_id: string;
-  event_type: 'renewal' | 'annual_fee' | 'fee_reversal' | 'milestone';
+  event_type: 'renewal' | 'annual_fee' | 'fee_reversal' | 'milestone_spend' | 'milestone';
   label: string;
   event_date: string;
-  source_kind: string;
+  source_kind: 'manual' | 'statement';
+  source_label: string;
+  source_identifier?: string | null;
+  annual_fee_amount?: number | null;
+  fee_reversal_condition?: string | null;
+  fee_reversal_status?: 'unknown' | 'pending' | 'waived' | 'reversed' | 'not_eligible' | null;
+  milestone_spend_target?: number | null;
+  milestone_period_start?: string | null;
+  milestone_period_end?: string | null;
+  milestone_progress?: {
+    status: 'ready' | 'insufficient';
+    counted_amount: number;
+    target_amount?: number | null;
+    remaining_amount?: number | null;
+    period_start?: string | null;
+    period_end?: string | null;
+    reason?: string | null;
+    evidence: {
+      transaction_id: string;
+      transaction_date: string;
+      amount: number;
+      direction: 'spend' | 'refund';
+      merchant?: string | null;
+      source_kind: string;
+      source_identifier?: string | null;
+    }[];
+  } | null;
   created_at: string;
 }
 

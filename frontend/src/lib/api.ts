@@ -3,6 +3,7 @@ import type {
   AutoSyncStatus,
   FinancialChangePage,
   AccountLinkRule,
+  BudgetDrilldown,
   BudgetTracker,
   BulkUpdateResponse,
   CashFlowProjection,
@@ -559,8 +560,12 @@ export const api = {
     request<Goal[]>('/goals/', { query: { user_id: userId, month, year } }),
   createGoal: (userId: string, payload: GoalCreatePayload) =>
     request<Goal>('/goals/', { method: 'POST', query: { user_id: userId }, body: payload }),
-  explain: (payload: ExplainPayload) =>
-    request<ExplainResponse>('/ai/explain', { method: 'POST', body: payload }),
+  explain: (payload: ExplainPayload, userId?: string) =>
+    request<ExplainResponse>('/ai/explain', {
+      method: 'POST',
+      query: userId ? { user_id: userId } : undefined,
+      body: payload,
+    }),
   guidanceBrief: (userId: string, period: GuidancePeriod, asOf: string) =>
     request<GuidanceBrief>('/guidance/brief', {
       query: { user_id: userId, period, as_of: asOf },
@@ -907,6 +912,13 @@ export const api = {
       event_type: CardCalendarEvent['event_type'];
       label: string;
       event_date: string;
+      source_label?: string;
+      annual_fee_amount?: number | null;
+      fee_reversal_condition?: string | null;
+      fee_reversal_status?: CardCalendarEvent['fee_reversal_status'];
+      milestone_spend_target?: number | null;
+      milestone_period_start?: string | null;
+      milestone_period_end?: string | null;
     },
   ) =>
     request<CardCalendarEvent>(`/cards/${accountId}/calendar`, {
@@ -918,7 +930,21 @@ export const api = {
     userId: string,
     accountId: string,
     eventId: string,
-    payload: Partial<Pick<CardCalendarEvent, 'event_type' | 'label' | 'event_date'>>,
+    payload: Partial<
+      Pick<
+        CardCalendarEvent,
+        | 'event_type'
+        | 'label'
+        | 'event_date'
+        | 'source_label'
+        | 'annual_fee_amount'
+        | 'fee_reversal_condition'
+        | 'fee_reversal_status'
+        | 'milestone_spend_target'
+        | 'milestone_period_start'
+        | 'milestone_period_end'
+      >
+    >,
   ) =>
     request<CardCalendarEvent>(`/cards/${accountId}/calendar/${eventId}`, {
       method: 'PATCH',
@@ -1352,6 +1378,10 @@ export const api = {
   // Budgets
   budgetsTrack: (userId: string, month: number, year: number) =>
     request<BudgetTracker[]>('/budgets/track', { query: { user_id: userId, month, year } }),
+  budgetDrilldown: (budgetId: string, userId: string, month: number, year: number, limit = 100) =>
+    request<BudgetDrilldown>(`/budgets/${budgetId}/drilldown`, {
+      query: { user_id: userId, month, year, limit },
+    }),
   createBudget: (userId: string, categoryId: string, monthlyLimit: number) =>
     request<{ id: string; status: string }>('/budgets/', {
       method: 'POST',

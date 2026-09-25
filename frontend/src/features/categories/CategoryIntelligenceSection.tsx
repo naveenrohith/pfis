@@ -7,11 +7,13 @@ import { useCategoryIntelligence } from '@/features/workspace/queries';
 import { useAuth } from '@/features/auth/AuthContext';
 import { useDashboardUi } from '@/app/DashboardUiContext';
 import { ExplainAction } from '@/features/ai/ExplainAction';
+import { useWorkspace } from '@/features/workspace/WorkspaceContext';
 import { formatCurrency } from '@/lib/format';
 
 export function CategoryIntelligenceSection({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const categories = useCategoryIntelligence();
+  const { month, year } = useWorkspace();
   const { setCategoryDrill, scrollTo } = useDashboardUi();
   const currency = user?.currency ?? 'INR';
   const items = categories.data?.categories ?? [];
@@ -102,7 +104,11 @@ export function CategoryIntelligenceSection({ embedded = false }: { embedded?: b
 
                   <div className="flex justify-end gap-1 border-t border-border pt-2">
                     <ExplainAction
+                      userId={user?.id}
                       payload={{
+                        month,
+                        year,
+                        subject_id: category.category_id ?? category.name,
                         surface: 'category',
                         title: category.name,
                         description: `${category.transaction_count} transaction(s), spend ${formatCurrency(category.total_spend, currency)}.`,

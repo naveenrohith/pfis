@@ -1,4 +1,5 @@
 import { formatCurrency } from '@/lib/format';
+import type { TodayFinancialState } from './todayState';
 
 interface TodayBriefCopyInput {
   transactionCount: number;
@@ -6,6 +7,7 @@ interface TodayBriefCopyInput {
   name: string;
   currency: string;
   recommendationTitle?: string;
+  financialState?: TodayFinancialState | null;
 }
 
 export function buildTodayBriefCopy({
@@ -14,6 +16,7 @@ export function buildTodayBriefCopy({
   name,
   currency,
   recommendationTitle,
+  financialState,
 }: TodayBriefCopyInput) {
   if (transactionCount === 0) {
     return {
@@ -23,16 +26,33 @@ export function buildTodayBriefCopy({
     };
   }
 
+  if (financialState === 'low-data') {
+    return {
+      headline: 'Your brief needs more activity before it can draw conclusions.',
+      summary: `PFIS has ${transactionCount} ${
+        transactionCount === 1 ? 'transaction' : 'transactions'
+      } for this month. Connect a source or add activity so trends and projections rest on enough evidence.`,
+    };
+  }
+
   return {
-    headline: recommendationTitle || fallbackHeadline(netCashFlow, name),
+    headline: recommendationTitle || fallbackHeadline(netCashFlow, name, financialState),
     summary: `You have ${netCashFlow >= 0 ? 'kept' : 'spent'} ${formatCurrency(Math.abs(netCashFlow), currency)} ${
       netCashFlow >= 0 ? 'after spending' : 'more than you earned'
     } this month.`,
   };
 }
 
-function fallbackHeadline(netCashFlow: number, name: string) {
-  return netCashFlow >= 0
-    ? `Good work, ${name}. You are keeping more than you spend.`
-    : `Hello, ${name}. This month needs one clear adjustment.`;
+function fallbackHeadline(
+  netCashFlow: number,
+  name: string,
+  financialState?: TodayFinancialState | null,
+) {
+  if (netCashFlow < 0 || financialState === 'deficit') {
+    return `Hello, ${name}. This month needs one clear adjustment.`;
+  }
+  if (financialState === 'attention') {
+    return `${name}, you are ahead this month, with one pressure worth watching.`;
+  }
+  return `Good work, ${name}. You are keeping more than you spend.`;
 }

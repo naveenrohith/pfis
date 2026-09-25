@@ -133,6 +133,214 @@ const outcomeLabels: Record<CardStatementLine['review_outcome'], string> = {
   needs_review: 'Review',
 };
 
+type CardCalendarDraft = {
+  event_type: CardCalendarEvent['event_type'];
+  label: string;
+  event_date: string;
+  source_label: string;
+  annual_fee_amount: string;
+  fee_reversal_condition: string;
+  fee_reversal_status: NonNullable<CardCalendarEvent['fee_reversal_status']>;
+  milestone_spend_target: string;
+  milestone_period_start: string;
+  milestone_period_end: string;
+};
+
+function createCalendarDraft(eventDate: string): CardCalendarDraft {
+  return {
+    event_type: 'annual_fee',
+    label: '',
+    event_date: eventDate,
+    source_label: 'User-entered',
+    annual_fee_amount: '',
+    fee_reversal_condition: '',
+    fee_reversal_status: 'unknown',
+    milestone_spend_target: '',
+    milestone_period_start: '',
+    milestone_period_end: '',
+  };
+}
+
+function calendarDraftFromEvent(event: CardCalendarEvent): CardCalendarDraft {
+  return {
+    event_type: event.event_type,
+    label: event.label,
+    event_date: event.event_date,
+    source_label: event.source_label || 'User-entered',
+    annual_fee_amount: event.annual_fee_amount == null ? '' : String(event.annual_fee_amount),
+    fee_reversal_condition: event.fee_reversal_condition ?? '',
+    fee_reversal_status: event.fee_reversal_status ?? 'unknown',
+    milestone_spend_target:
+      event.milestone_spend_target == null ? '' : String(event.milestone_spend_target),
+    milestone_period_start: event.milestone_period_start ?? '',
+    milestone_period_end: event.milestone_period_end ?? '',
+  };
+}
+
+function optionalAmount(value: string): number | null {
+  const trimmed = value.trim();
+  return trimmed ? Number(trimmed) : null;
+}
+
+function calendarPayloadFromDraft(draft: CardCalendarDraft) {
+  const isAnnualFee = draft.event_type === 'annual_fee';
+  const isFeeReversal = draft.event_type === 'fee_reversal';
+  const isMilestone = draft.event_type === 'milestone' || draft.event_type === 'milestone_spend';
+  return {
+    event_type: draft.event_type,
+    label: draft.label.trim(),
+    event_date: draft.event_date,
+    source_label: draft.source_label.trim() || 'User-entered',
+    annual_fee_amount: isAnnualFee ? optionalAmount(draft.annual_fee_amount) : null,
+    fee_reversal_condition: isFeeReversal
+      ? draft.fee_reversal_condition.trim() || null
+      : null,
+    fee_reversal_status: isFeeReversal ? draft.fee_reversal_status : null,
+    milestone_spend_target: isMilestone ? optionalAmount(draft.milestone_spend_target) : null,
+    milestone_period_start: isMilestone ? draft.milestone_period_start || null : null,
+    milestone_period_end: isMilestone ? draft.milestone_period_end || null : null,
+  };
+}
+
+const calendarEventTypeLabels: Record<CardCalendarEvent['event_type'], string> = {
+  annual_fee: 'Annual fee',
+  renewal: 'Renewal',
+  fee_reversal: 'Fee reversal',
+  milestone_spend: 'Spend milestone',
+  milestone: 'Milestone',
+};
+
+const feeReversalStatusLabels: Record<
+  NonNullable<CardCalendarEvent['fee_reversal_status']>,
+  string
+> = {
+  unknown: 'Unknown',
+  pending: 'Pending',
+  waived: 'Waived',
+  reversed: 'Reversed',
+  not_eligible: 'Not eligible',
+};
+
+function CalendarEventRow({
+  event,
+  currency,
+  selected,
+  onSelect,
+}: {
+  event: CardCalendarEvent;
+  currency: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const progress = event.milestone_progress;
+  const targetAmount = progress?.target_amount ?? null;
+  const countedAmount = progress?.counted_amount ?? 0;
+  const percent =
+    targetAmount && targetAmount > 0
+      ? Math.max(0, Math.min(100, Math.round((countedAmount / targetAmount) * 100)))
+      : 0;
+  const evidenceCount = progress?.evidence.length ?? 0;
+
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onSelect}
+      className={`focus-ring w-full border-b border-border/65 px-2 py-3 text-left last:border-b-0 transition-colors ${
+        selected ? 'bg-primary/10' : 'hover:bg-muted/40'
+      }`}
+    >
+      <span className="flex min-w-0 items-start gap-3">
+        <span className="mt-1 grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+          <CalendarDays className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <span className="block min-w-0 truncate text-sm font-extrabold tracking-[-0.015em]">
+              {event.label}
+            </span>
+            <time className="money-value shrink-0 text-sm" dateTime={event.event_date}>
+              {formatDate(event.event_date)}
+            </time>
+          </span>
+          <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+            {calendarEventTypeLabels[event.event_type]} · {event.source_label || 'User-entered'}
+            {event.source_kind === 'statement' ? ' · statement evidence' : ''}
+          </span>
+          <span className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+            {event.annual_fee_amount != null ? (
+              <span className="rounded-full bg-muted px-2 py-1">
+                Fee {formatCurrency(event.annual_fee_amount, currency)}
+              </span>
+            ) : null}
+            {event.fee_reversal_status ? (
+              <span className="rounded-full bg-muted px-2 py-1">
+                Reversal {feeReversalStatusLabels[event.fee_reversal_status]}
+              </span>
+            ) : null}
+            {event.fee_reversal_condition ? (
+              <span className="rounded-full bg-muted px-2 py-1">
+                Condition: {event.fee_reversal_condition}
+              </span>
+            ) : null}
+            {progress ? (
+              <span className="rounded-full bg-muted px-2 py-1">
+                {evidenceCount} evidence {evidenceCount === 1 ? 'item' : 'items'}
+              </span>
+            ) : null}
+          </span>
+          {progress ? (
+            <span className="mt-3 block rounded-lg bg-muted/45 p-3 text-xs text-muted-foreground">
+              {progress.status === 'insufficient' ? (
+                <span className="block font-bold text-warning">
+                  Insufficient: {progress.reason ?? 'progress evidence is not ready.'}
+                </span>
+              ) : (
+                <>
+                  <span className="grid gap-2 sm:grid-cols-3">
+                    <span>
+                      Counted{' '}
+                      <strong className="money-value text-foreground">
+                        {formatCurrency(progress.counted_amount, currency)}
+                      </strong>
+                    </span>
+                    <span>
+                      Target{' '}
+                      <strong className="money-value text-foreground">
+                        {formatCurrency(progress.target_amount, currency)}
+                      </strong>
+                    </span>
+                    <span>
+                      Remaining{' '}
+                      <strong className="money-value text-foreground">
+                        {formatCurrency(progress.remaining_amount, currency)}
+                      </strong>
+                    </span>
+                  </span>
+                  <span
+                    className="mt-3 block h-2 overflow-hidden rounded-full bg-background"
+                    role="progressbar"
+                    aria-label={`${event.label} milestone progress`}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={percent}
+                    aria-valuetext={`${formatCurrency(progress.counted_amount, currency)} counted of ${formatCurrency(progress.target_amount, currency)} target; ${formatCurrency(progress.remaining_amount, currency)} remaining`}
+                  >
+                    <span
+                      className="block h-full rounded-full bg-intelligence"
+                      style={{ width: `${percent}%` }}
+                    />
+                  </span>
+                </>
+              )}
+            </span>
+          ) : null}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 function statementEventLabel(line: CardStatementLine): string {
   if (line.component_kind && line.component_kind !== 'ordinary') {
     return line.component_kind
@@ -912,11 +1120,9 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
     reward_label: '',
     reward_rate: '',
   });
-  const [calendarDraft, setCalendarDraft] = useState({
-    event_type: 'annual_fee' as CardCalendarEvent['event_type'],
-    label: '',
-    event_date: financialToday,
-  });
+  const [calendarDraft, setCalendarDraft] = useState<CardCalendarDraft>(() =>
+    createCalendarDraft(financialToday),
+  );
   const [editingCalendarId, setEditingCalendarId] = useState<string | null>(null);
   const [calendarDeleteTarget, setCalendarDeleteTarget] = useState<CardCalendarEvent | null>(null);
   const [paymentDraft, setPaymentDraft] = useState({
@@ -1025,11 +1231,16 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
   const saveCalendar = useMutation({
     mutationFn: () =>
       editingCalendarId
-        ? api.updateCardCalendarEvent(user!.id, cardId, editingCalendarId, calendarDraft)
-        : api.createCardCalendarEvent(user!.id, cardId, calendarDraft),
+        ? api.updateCardCalendarEvent(
+            user!.id,
+            cardId,
+            editingCalendarId,
+            calendarPayloadFromDraft(calendarDraft),
+          )
+        : api.createCardCalendarEvent(user!.id, cardId, calendarPayloadFromDraft(calendarDraft)),
     onSuccess: async () => {
       setEditingCalendarId(null);
-      setCalendarDraft((current) => ({ ...current, label: '' }));
+      setCalendarDraft(createCalendarDraft(financialToday));
       await queryClient.invalidateQueries({
         queryKey: ['cardOverview', user!.id, cardId],
       });
@@ -1041,7 +1252,7 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
       setCalendarDeleteTarget(null);
       if (editingCalendarId === deletedId) {
         setEditingCalendarId(null);
-        setCalendarDraft((current) => ({ ...current, label: '' }));
+        setCalendarDraft(createCalendarDraft(financialToday));
       }
       await queryClient.invalidateQueries({
         queryKey: ['cardOverview', user!.id, cardId],
@@ -2034,20 +2245,14 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
               <div className="mt-4">
                 {card.calendar.length ? (
                   card.calendar.map((event) => (
-                    <LedgerRow
+                    <CalendarEventRow
                       key={event.id}
-                      leading={<CalendarDays className="h-4 w-4" aria-hidden="true" />}
-                      title={event.label}
-                      subtitle={`${event.event_type.replaceAll('_', ' ')} · ${event.source_kind}`}
-                      amount={formatDate(event.event_date)}
+                      event={event}
+                      currency={card.currency}
                       selected={editingCalendarId === event.id}
                       onSelect={() => {
                         setEditingCalendarId(event.id);
-                        setCalendarDraft({
-                          event_type: event.event_type,
-                          label: event.label,
-                          event_date: event.event_date,
-                        });
+                        setCalendarDraft(calendarDraftFromEvent(event));
                       }}
                     />
                   ))
@@ -2074,6 +2279,8 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
                     <Label htmlFor="calendar-label">Reminder label</Label>
                     <Input
                       id="calendar-label"
+                      name="calendar-label"
+                      autoComplete="off"
                       value={calendarDraft.label}
                       onChange={(event) =>
                         setCalendarDraft((current) => ({
@@ -2084,11 +2291,32 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
                       required
                     />
                   </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="calendar-source-label">Source label</Label>
+                    <Input
+                      id="calendar-source-label"
+                      name="calendar-source-label"
+                      autoComplete="off"
+                      value={calendarDraft.source_label}
+                      onChange={(event) =>
+                        setCalendarDraft((current) => ({
+                          ...current,
+                          source_label: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      This identifies the reminder source; PFIS does not contact or instruct the
+                      issuer.
+                    </p>
+                  </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-1.5">
                       <Label htmlFor="calendar-type">Type</Label>
                       <Select
                         id="calendar-type"
+                        name="calendar-type"
                         value={calendarDraft.event_type}
                         onChange={(event) =>
                           setCalendarDraft((current) => ({
@@ -2100,6 +2328,7 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
                         <option value="annual_fee">Annual fee</option>
                         <option value="renewal">Renewal</option>
                         <option value="fee_reversal">Fee reversal</option>
+                        <option value="milestone_spend">Spend milestone</option>
                         <option value="milestone">Milestone</option>
                       </Select>
                     </div>
@@ -2107,7 +2336,9 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
                       <Label htmlFor="calendar-date">Date</Label>
                       <Input
                         id="calendar-date"
+                        name="calendar-date"
                         type="date"
+                        autoComplete="off"
                         value={calendarDraft.event_date}
                         onChange={(event) =>
                           setCalendarDraft((current) => ({
@@ -2119,6 +2350,126 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
                       />
                     </div>
                   </div>
+                  {calendarDraft.event_type === 'annual_fee' ? (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="calendar-annual-fee">Annual fee amount</Label>
+                      <Input
+                        id="calendar-annual-fee"
+                        name="calendar-annual-fee"
+                        type="number"
+                        inputMode="decimal"
+                        min="0.01"
+                        step="0.01"
+                        autoComplete="off"
+                        value={calendarDraft.annual_fee_amount}
+                        onChange={(event) =>
+                          setCalendarDraft((current) => ({
+                            ...current,
+                            annual_fee_amount: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  ) : null}
+                  {calendarDraft.event_type === 'fee_reversal' ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="calendar-reversal-condition">Reversal condition</Label>
+                        <Input
+                          id="calendar-reversal-condition"
+                          name="calendar-reversal-condition"
+                          autoComplete="off"
+                          value={calendarDraft.fee_reversal_condition}
+                          onChange={(event) =>
+                            setCalendarDraft((current) => ({
+                              ...current,
+                              fee_reversal_condition: event.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="calendar-reversal-status">Reversal status</Label>
+                        <Select
+                          id="calendar-reversal-status"
+                          name="calendar-reversal-status"
+                          value={calendarDraft.fee_reversal_status}
+                          onChange={(event) =>
+                            setCalendarDraft((current) => ({
+                              ...current,
+                              fee_reversal_status: event.target
+                                .value as CardCalendarDraft['fee_reversal_status'],
+                            }))
+                          }
+                        >
+                          <option value="unknown">Unknown</option>
+                          <option value="pending">Pending</option>
+                          <option value="waived">Waived</option>
+                          <option value="reversed">Reversed</option>
+                          <option value="not_eligible">Not eligible</option>
+                        </Select>
+                      </div>
+                    </div>
+                  ) : null}
+                  {calendarDraft.event_type === 'milestone' ||
+                  calendarDraft.event_type === 'milestone_spend' ? (
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="calendar-milestone-target">Milestone target</Label>
+                        <Input
+                          id="calendar-milestone-target"
+                          name="calendar-milestone-target"
+                          type="number"
+                          inputMode="decimal"
+                          min="0.01"
+                          step="0.01"
+                          autoComplete="off"
+                          value={calendarDraft.milestone_spend_target}
+                          onChange={(event) =>
+                            setCalendarDraft((current) => ({
+                              ...current,
+                              milestone_spend_target: event.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="calendar-milestone-start">Period start</Label>
+                        <Input
+                          id="calendar-milestone-start"
+                          name="calendar-milestone-start"
+                          type="date"
+                          autoComplete="off"
+                          value={calendarDraft.milestone_period_start}
+                          required={Boolean(calendarDraft.milestone_spend_target)}
+                          onChange={(event) =>
+                            setCalendarDraft((current) => ({
+                              ...current,
+                              milestone_period_start: event.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="calendar-milestone-end">Period end</Label>
+                        <Input
+                          id="calendar-milestone-end"
+                          name="calendar-milestone-end"
+                          type="date"
+                          autoComplete="off"
+                          min={calendarDraft.milestone_period_start || undefined}
+                          value={calendarDraft.milestone_period_end}
+                          required={Boolean(calendarDraft.milestone_spend_target)}
+                          onChange={(event) =>
+                            setCalendarDraft((current) => ({
+                              ...current,
+                              milestone_period_end: event.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="flex flex-wrap gap-2">
                     <Button
                       type="submit"
@@ -2136,7 +2487,7 @@ export function CardsSection({ hideIntro = false }: { hideIntro?: boolean } = {}
                           disabled={saveCalendar.isPending || deleteCalendar.isPending}
                           onClick={() => {
                             setEditingCalendarId(null);
-                            setCalendarDraft((current) => ({ ...current, label: '' }));
+                            setCalendarDraft(createCalendarDraft(financialToday));
                           }}
                         >
                           Cancel edit

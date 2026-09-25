@@ -8,9 +8,10 @@ import type { ExplainPayload, ExplainResponse } from '@/lib/types';
 
 interface ExplainActionProps {
   payload: ExplainPayload;
+  userId?: string;
 }
 
-export function ExplainAction({ payload }: ExplainActionProps) {
+export function ExplainAction({ payload, userId }: ExplainActionProps) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [explanation, setExplanation] = useState<ExplainResponse | null>(null);
@@ -22,7 +23,7 @@ export function ExplainAction({ payload }: ExplainActionProps) {
     setBusy(true);
     setError(null);
     try {
-      setExplanation(await api.explain(payload));
+      setExplanation(await api.explain(payload, userId));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -43,6 +44,12 @@ export function ExplainAction({ payload }: ExplainActionProps) {
         ) : explanation ? (
           <div className="grid gap-4 text-sm">
             <p className="font-semibold">{explanation.summary}</p>
+            {explanation.evidence_status ? (
+              <p className="text-xs text-muted-foreground">
+                Evidence: {explanation.evidence_status.replace('_', ' ')}
+                {explanation.as_of ? ` · as of ${new Date(explanation.as_of).toLocaleString()}` : ''}
+              </p>
+            ) : null}
             {explanation.drivers.length > 0 && (
               <div>
                 <p className="mb-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
@@ -65,6 +72,18 @@ export function ExplainAction({ payload }: ExplainActionProps) {
                 ))}
               </ul>
             </div>
+            {explanation.missing_evidence && explanation.missing_evidence.length > 0 ? (
+              <div>
+                <p className="mb-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                  Missing evidence
+                </p>
+                <ul className="grid gap-1 text-muted-foreground">
+                  {explanation.missing_evidence.map((item) => (
+                    <li key={item}>- {item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <p className="rounded-lg border border-border bg-muted/35 p-3 text-xs text-muted-foreground">
               {explanation.safety_note}
             </p>
