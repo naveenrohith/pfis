@@ -115,7 +115,7 @@ export function PlanExperience() {
         description="PFIS orders planning from safe-to-spend readiness through position, commitments, forecast, and protection so every panel answers the next financial question."
       />
 
-      <WorkspaceContextBar label="Plan journey" className="sticky top-24 z-20 lg:top-[5.75rem]">
+      <WorkspaceContextBar label="Plan journey" className="sticky !top-[6.75rem] z-20">
         <PlanStepNavigator
           activeStage={activeStage}
           onNavigate={(stage) => scrollTo(planSectionForNavigation(stage), 'push')}
@@ -171,8 +171,8 @@ function PlanStepNavigator({
   onNavigate: (stage: PlanNavigationId) => void;
 }) {
   return (
-    <nav aria-label="Plan decision steps" className="w-full">
-      <ol className="grid grid-cols-2 gap-2 min-[360px]:grid-cols-5">
+    <nav aria-label="Plan decision steps" className="w-full max-w-full overflow-x-hidden">
+      <ol className="grid max-w-full grid-cols-2 gap-2 min-[360px]:grid-cols-5">
         {PLAN_STAGES.map((stage, index) => {
           const isActive = stage.id === activeStage;
           return (
@@ -182,7 +182,7 @@ function PlanStepNavigator({
                 aria-current={isActive ? 'step' : undefined}
                 variant={isActive ? 'primary' : 'outline'}
                 size="sm"
-                className="w-full min-w-0 justify-start px-2 text-left min-[360px]:justify-center min-[360px]:text-center"
+                className="w-full min-w-0 overflow-hidden justify-start px-2 text-left min-[360px]:justify-center min-[360px]:text-center"
                 onClick={(event) => {
                   event.preventDefault();
                   onNavigate(stage.id);
@@ -322,6 +322,11 @@ function ComingDetails({
       <CommitmentDetailLinks onNavigate={(section) => onNavigate(section, 'push')} />
       {view === 'cards' ? (
         <div id="cards" className="scroll-mt-[8rem] lg:scroll-mt-[9rem]">
+          <div className="mb-4 border-b border-border/65 pb-3">
+            <p className="text-xs font-extrabold uppercase tracking-[0.08em] text-muted-foreground">Card commitments</p>
+            <h3 className="mt-1 text-xl font-extrabold tracking-[-0.03em]">Card accounts</h3>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">Review what is due, the current position, and the evidence behind each card.</p>
+          </div>
           <CardsSection hideIntro />
         </div>
       ) : view === 'liabilities' ? (

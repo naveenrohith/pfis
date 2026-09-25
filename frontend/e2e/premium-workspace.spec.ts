@@ -1218,7 +1218,7 @@ test('scenario preview and briefing rhythm stay user controlled', async ({ page 
   await openDemoWorkspace(page);
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
-  await page.getByRole('tab', { name: 'Outlook', exact: true }).click();
+  await page.getByRole('link', { name: /(?:Change|What could change)/ }).click();
   await page.getByLabel('Add expected income', { exact: true }).fill('5000');
   await page.getByRole('button', { name: 'Preview change', exact: true }).click();
   const studio = page.getByRole('region', { name: 'Test one change before you commit to it.' });
