@@ -69,6 +69,8 @@ async def list_transactions(
     category_id: str | None = None,
     q: str | None = Query(None, max_length=160),
     text: str | None = Query(None, max_length=160),
+    note: str | None = Query(None, max_length=160),
+    tag: list[str] | None = Query(None, max_length=32),
     transaction_type: Literal["debit", "credit", "refund"] | None = None,
     type_filter: Literal["debit", "credit", "refund"] | None = Query(None, alias="type"),
     payment_method: str | None = Query(None, max_length=20),
@@ -101,40 +103,47 @@ async def list_transactions(
 
     from fastapi.responses import JSONResponse
 
-    txns = await service.get_transactions(
-        user_id=user_id,
-        month=month,
-        year=year,
-        category_id=category_id,
-        q=effective_q,
-        transaction_type=effective_type,
-        payment_method=payment_method,
-        reviewed=effective_reviewed,
-        date_from=date_from,
-        date_to=date_to,
-        amount_min=amount_min,
-        amount_max=amount_max,
-        sort=effective_sort,
-        direction=effective_direction,
-        limit=limit,
-        offset=offset,
-        include_ignored=include_ignored,
-    )
-    total_count = await service.get_transaction_count(
-        user_id=user_id,
-        month=month,
-        year=year,
-        category_id=category_id,
-        q=effective_q,
-        transaction_type=effective_type,
-        payment_method=payment_method,
-        reviewed=effective_reviewed,
-        date_from=date_from,
-        date_to=date_to,
-        amount_min=amount_min,
-        amount_max=amount_max,
-        include_ignored=include_ignored,
-    )
+    try:
+        txns = await service.get_transactions(
+            user_id=user_id,
+            month=month,
+            year=year,
+            category_id=category_id,
+            q=effective_q,
+            note=note,
+            tags=tag,
+            transaction_type=effective_type,
+            payment_method=payment_method,
+            reviewed=effective_reviewed,
+            date_from=date_from,
+            date_to=date_to,
+            amount_min=amount_min,
+            amount_max=amount_max,
+            sort=effective_sort,
+            direction=effective_direction,
+            limit=limit,
+            offset=offset,
+            include_ignored=include_ignored,
+        )
+        total_count = await service.get_transaction_count(
+            user_id=user_id,
+            month=month,
+            year=year,
+            category_id=category_id,
+            q=effective_q,
+            note=note,
+            tags=tag,
+            transaction_type=effective_type,
+            payment_method=payment_method,
+            reviewed=effective_reviewed,
+            date_from=date_from,
+            date_to=date_to,
+            amount_min=amount_min,
+            amount_max=amount_max,
+            include_ignored=include_ignored,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     from app.schemas.transaction import TransactionResponse as TR
 

@@ -30,8 +30,11 @@ class RecommendationRankerContext:
     available_liquidity: float | None = None
     safe_to_spend: float | None = None
     reserve_floor: float = 0.0
+    alert_threshold_pct: float = 20.0
     excluded_ids: frozenset[str] = frozenset()
     excluded_types: frozenset[str] = frozenset()
+    excluded_merchants: frozenset[str] = frozenset()
+    excluded_categories: frozenset[str] = frozenset()
     feedback_exclusions: Mapping[str, int] = field(default_factory=dict)
 
 
@@ -72,13 +75,15 @@ def _rank_candidate(
     item.recommendation_status = "ranked"
 
     excluded_count = context.feedback_exclusions.get(item.type, 0)
-    if item.id in context.excluded_ids or item.type in context.excluded_types or excluded_count > 0:
+    explicit_exclusion = _explicit_exclusion_reason(item, context)
+    if explicit_exclusion is not None or excluded_count > 0:
         item.recommendation_status = "excluded"
         item.constraint_checks.append(
             RecommendationConstraintCheck(
                 name="user_exclusion",
                 status="failed",
-                reason="The user has explicitly dismissed or excluded this recommendation.",
+                reason=explicit_exclusion
+                or "The user has explicitly dismissed or excluded this recommendation.",
             )
         )
         item.rank_reasons.append(
@@ -310,6 +315,21 @@ def _liquidity_impact(item: WorkspaceRecommendation) -> float:
     if item.consequence.unit != "currency":
         return 0.0
     return max(float(item.consequence.high), 0.0)
+
+
+def _explicit_exclusion_reason(
+    item: WorkspaceRecommendation, context: RecommendationRankerContext
+) -> str | None:
+    if item.id in context.excluded_ids:
+        return "The user has explicitly excluded this recommendation."
+    if item.type in context.excluded_types:
+        return "The user has explicitly excluded this recommendation kind."
+    target_text = f"{item.target} {item.title} {item.description}".casefold()
+    if any(merchant and merchant in target_text for merchant in context.excluded_merchants):
+        return "The user has excluded this merchant from recommendations."
+    if any(category and category in target_text for category in context.excluded_categories):
+        return "The user has excluded this category from recommendations."
+    return None
 
 
 def _debt_interest_score(item: WorkspaceRecommendation) -> float:

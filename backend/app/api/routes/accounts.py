@@ -24,6 +24,7 @@ from app.schemas.account import (
     BalanceSnapshotResponse,
     CardPositionObservationCreate,
     CardPositionObservationResponse,
+    CashPocketBalanceResponse,
     FinancialAccountCreate,
     FinancialAccountResponse,
     FinancialAccountUpdate,
@@ -152,6 +153,26 @@ async def get_account_identity_history(
     if history is None:
         raise HTTPException(status_code=404, detail="Account not found")
     return history
+
+
+@router.get(
+    "/accounts/{account_id}/cash-pocket",
+    response_model=CashPocketBalanceResponse,
+)
+async def get_cash_pocket_balance(
+    account_id: str,
+    user_id: str,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = resolve_user_scope(user_id, current_user)
+    try:
+        balance = await AccountService(db).cash_pocket_balance(user_id, account_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if balance is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return balance
 
 
 @router.post(

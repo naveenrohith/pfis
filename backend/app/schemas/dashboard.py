@@ -37,6 +37,52 @@ class WorkspaceSnapshot(BaseModel):
     sync_status: str = "idle"
 
 
+class MonthlySnapshotCoverage(BaseModel):
+    incomplete_month: bool = False
+    latest_transaction_date: date | None = None
+    data_freshness_days: int | None = None
+    latest_sync_status: str | None = None
+    last_synced_at: str | None = None
+
+
+class MonthlySnapshotCategory(BaseModel):
+    category_id: str | None = None
+    name: str
+    icon: str | None = None
+    total: float = 0.0
+    count: int = 0
+
+
+class MonthlySnapshotMerchant(BaseModel):
+    name: str
+    total: float = 0.0
+    count: int = 0
+
+
+class MonthlySnapshotBudgetStatus(BaseModel):
+    category: str | None = None
+    limit: float = 0.0
+    actual: float = 0.0
+    usage_pct: float = 0.0
+    status: str
+
+
+class MonthlySnapshotResponse(BaseModel):
+    month: int
+    year: int
+    month_label: str
+    income: float = 0.0
+    spend: float = 0.0
+    net: float = 0.0
+    transaction_count: int = 0
+    top_categories: list[MonthlySnapshotCategory] = Field(default_factory=list)
+    top_merchants: list[MonthlySnapshotMerchant] = Field(default_factory=list)
+    budget_status: list[MonthlySnapshotBudgetStatus] = Field(default_factory=list)
+    recurring_changes: list[dict[str, object]] = Field(default_factory=list)
+    notable_anomalies: list[dict[str, object]] = Field(default_factory=list)
+    coverage: MonthlySnapshotCoverage = Field(default_factory=MonthlySnapshotCoverage)
+
+
 class TimelineEvent(BaseModel):
     """A single financial movement rendered on the timeline."""
 

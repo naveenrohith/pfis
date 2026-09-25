@@ -221,6 +221,57 @@ async def test_workspace_budget_risk_recommendation(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_monthly_snapshot_composes_existing_services_and_labels_incomplete(
+    client: AsyncClient,
+):
+    user = await create_user(client, "monthly-snapshot")
+    cats = (await client.get(f"/api/categories/?user_id={user['id']}")).json()
+    cat_id = cats[0]["id"]
+    today = date.today()
+    await client.post(
+        f"/api/budgets/?user_id={user['id']}",
+        json={"category_id": cat_id, "monthly_limit": 1000.0},
+    )
+    await _seed_transaction(
+        client,
+        user["id"],
+        cat_id,
+        amount=5000.0,
+        transaction_type="credit",
+        merchant_normalized="Employer",
+        reference_id="snapshot-income",
+    )
+    await _seed_transaction(
+        client,
+        user["id"],
+        cat_id,
+        amount=250.0,
+        transaction_type="debit",
+        merchant_normalized="Coffee Bar",
+        reference_id="snapshot-spend",
+    )
+
+    response = await client.get(
+        f"/api/dashboard/monthly-snapshot?user_id={user['id']}"
+        f"&month={today.month}&year={today.year}"
+    )
+    response.raise_for_status()
+    snapshot = response.json()
+
+    assert snapshot["income"] == 5000
+    assert snapshot["spend"] == 250
+    assert snapshot["net"] == 4750
+    assert snapshot["transaction_count"] == 2
+    assert snapshot["top_categories"][0]["total"] == 250
+    assert snapshot["top_merchants"][0]["name"] == "Coffee Bar"
+    assert snapshot["budget_status"][0]["status"] == "under"
+    assert snapshot["coverage"]["incomplete_month"] is True
+    assert snapshot["coverage"]["latest_transaction_date"] == today.isoformat()
+    assert isinstance(snapshot["recurring_changes"], list)
+    assert isinstance(snapshot["notable_anomalies"], list)
+
+
+@pytest.mark.asyncio
 async def test_workspace_does_not_leak_raw_email_or_secrets(client: AsyncClient):
     """The workspace payload must never contain email bodies, tokens, or secrets."""
     user = await create_user(client)

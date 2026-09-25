@@ -71,6 +71,7 @@ CHANGE_DOMAINS_BY_TABLE: dict[str, frozenset[str]] = {
     "goals": frozenset({"planning", "today", "insights"}),
     "recommendation_states": frozenset({"today"}),
     "recommendation_outcomes": frozenset({"today", "insights"}),
+    "user_preference_policy_versions": frozenset({"today", "planning", "guidance"}),
     "card_disputes": frozenset({"cards", "data"}),
     "health_checklist_items": frozenset({"data"}),
     "temporal_event_decisions": frozenset({"planning", "today", "guidance"}),

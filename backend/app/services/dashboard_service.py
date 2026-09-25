@@ -29,6 +29,9 @@ from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
 from app.models.workspace import RecommendationOutcome, RecommendationState
 from app.schemas.dashboard import (
+    MonthlySnapshotBudgetStatus,
+    MonthlySnapshotCoverage,
+    MonthlySnapshotResponse,
     ReviewSummary,
     SyncSummary,
     TimelineEvent,
@@ -48,6 +51,7 @@ from app.services.intelligence_service import IntelligenceService
 from app.services.knowledge.recurring_knowledge import RecurringPatternService
 from app.services.knowledge.ruleset_registry import RECOMMENDATION_RANKING
 from app.services.ledger_currency import get_ledger_currency
+from app.services.preferences_service import PreferencesService
 from app.services.recommendation_policy import RecommendationFeedback, apply_recommendation_policy
 from app.services.recommendation_utils import recommendation_id
 from app.services.transaction_aggregates import (
@@ -56,6 +60,7 @@ from app.services.transaction_aggregates import (
     spend_effect_expression,
     spend_event_predicate,
 )
+from app.services.transaction_service import TransactionService
 from app.utils.financial_time import financial_today
 
 logger = logging.getLogger(__name__)
@@ -95,7 +100,12 @@ class WorkspaceService:
             recurring_patterns=recurring_patterns,
             historical_periods=historical_periods,
         )
-        comparison = await intelligence.month_comparison(user_id, month, year)
+        comparison = await intelligence.month_comparison(
+            user_id,
+            month,
+            year,
+            current_income_spend=(period_metrics["income"], period_metrics["spend"]),
+        )
         financial_health = await intelligence.financial_health(
             user_id,
             month,
@@ -111,6 +121,7 @@ class WorkspaceService:
         goals = await intelligence.list_goals(user_id, month, year)
         currency = period_metrics["currency"] or await get_ledger_currency(self.db, user_id)
         feedback = await self._recommendation_feedback(user_id)
+        preference_policy = (await PreferencesService(self.db).get_policy(user_id)).policy
 
         spend = period_metrics["spend"]
         income = period_metrics["income"]
@@ -178,6 +189,7 @@ class WorkspaceService:
             as_of=min(period_end, today),
             source_coverage_score=financial_health.source_coverage_score,
             feedback=feedback,
+            preference_policy=preference_policy,
         )
 
         return WorkspaceResponse(
@@ -193,6 +205,53 @@ class WorkspaceService:
             month_comparison=comparison,
             financial_health=financial_health,
             recurring_commitments=recurring,
+        )
+
+    async def get_monthly_snapshot(
+        self, user_id: str, month: int, year: int
+    ) -> MonthlySnapshotResponse:
+        period_end = date(year, month, monthrange(year, month)[1])
+        metrics = await self._period_metrics(user_id, month, year)
+        today = financial_today(metrics["timezone"])
+        cutoff = min(period_end, today)
+        summary = await TransactionService(self.db).get_monthly_summary(user_id, month, year)
+        budgets = await self._budget_status(user_id, month, year)
+        sync = await self._sync_summary(user_id)
+        latest_transaction_date = await self.db.scalar(
+            select(func.max(Transaction.transaction_date)).where(
+                Transaction.user_id == user_id,
+                financial_activity_predicate(),
+                extract("month", Transaction.transaction_date) == month,
+                extract("year", Transaction.transaction_date) == year,
+            )
+        )
+        recurring_patterns = await RecurringPatternService(self.db).analyze(user_id, as_of=cutoff)
+        anomalies = await InsightsService(self.db).anomalies_for_period(user_id, month, year)
+        freshness_days = (
+            (today - latest_transaction_date).days if latest_transaction_date is not None else None
+        )
+        return MonthlySnapshotResponse(
+            month=month,
+            year=year,
+            month_label=f"{year}-{month:02d}",
+            income=float(summary.get("total_income", 0.0)),
+            spend=float(summary.get("total_spend", 0.0)),
+            net=float(summary.get("net", 0.0)),
+            transaction_count=int(summary.get("transaction_count", 0)),
+            top_categories=summary.get("category_breakdown", [])[:5],
+            top_merchants=summary.get("top_merchants", [])[:5],
+            budget_status=[MonthlySnapshotBudgetStatus.model_validate(item) for item in budgets],
+            recurring_changes=[pattern.as_dict() for pattern in recurring_patterns[:10]],
+            notable_anomalies=[
+                anomaly.model_dump(mode="json") for anomaly in anomalies if anomaly.predicted_alert
+            ][:5],
+            coverage=MonthlySnapshotCoverage(
+                incomplete_month=period_end >= today,
+                latest_transaction_date=latest_transaction_date,
+                data_freshness_days=freshness_days,
+                latest_sync_status=sync.latest_status,
+                last_synced_at=sync.last_synced_at,
+            ),
         )
 
     # ──────────────────────────────────────────

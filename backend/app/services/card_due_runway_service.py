@@ -68,8 +68,9 @@ class _CardDueRunwayPayload(TypedDict):
 class CardDueRunwayService:
     """Compare a card's billed total due with the selected funding path."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, *, forecast_service: BalanceForecastService | None = None):
         self.db = db
+        self._forecast_service = forecast_service or BalanceForecastService(db)
 
     async def runway(self, user_id: str, card_account_id: str) -> CardDueRunwayResponse | None:
         account = await self.db.scalar(
@@ -231,7 +232,7 @@ class CardDueRunwayService:
             )
         )
         forecast_horizon = max(1, min(days_until_due, 180))
-        forecast = await BalanceForecastService(self.db).forecast(
+        forecast = await self._forecast_service.forecast(
             user_id,
             funding_account_id,
             horizon_days=forecast_horizon,

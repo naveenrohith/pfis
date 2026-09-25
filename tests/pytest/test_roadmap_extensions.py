@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
+from app.models.temporal_history import TemporalSourceSnapshot
 from app.models.transaction import (
     CardEvent,
     PaymentMethod,
@@ -10,6 +11,7 @@ from app.models.transaction import (
     Transaction,
     TransactionType,
 )
+from sqlalchemy import select
 
 from tests.pytest.helpers import create_user
 
@@ -288,6 +290,12 @@ async def test_card_calendar_lifecycle_and_milestone_progress(client, test_sessi
     )
     assert hidden_update.status_code == 404
 
+    invalid_update = await client.patch(
+        f"/api/cards/{card['id']}/calendar/{item['id']}?user_id={owner['id']}",
+        json={"milestone_period_end": (period_start - timedelta(days=1)).isoformat()},
+    )
+    assert invalid_update.status_code == 422
+
     updated = await client.patch(
         f"/api/cards/{card['id']}/calendar/{item['id']}?user_id={owner['id']}",
         json={"label": "Updated milestone", "milestone_spend_target": 1000},
@@ -303,6 +311,45 @@ async def test_card_calendar_lifecycle_and_milestone_progress(client, test_sessi
     empty = await client.get(f"/api/cards/{card['id']}/calendar?user_id={owner['id']}")
     empty.raise_for_status()
     assert empty.json() == []
+
+    async with test_session_factory() as session:
+        snapshots = (
+            await session.scalars(
+                select(TemporalSourceSnapshot)
+                .where(
+                    TemporalSourceSnapshot.user_id == owner["id"],
+                    TemporalSourceSnapshot.source_type == "card_calendar",
+                    TemporalSourceSnapshot.source_id == item["id"],
+                )
+                .order_by(TemporalSourceSnapshot.captured_at)
+            )
+        ).all()
+    assert [snapshot.deleted for snapshot in snapshots] == [False, False, True]
+
+
+async def test_card_calendar_milestone_without_terms_is_insufficient(client):
+    owner = await create_user(client, "calendar-insufficient")
+    card = await _account(client, owner["id"], "credit_card", "7799")
+
+    created = await client.post(
+        f"/api/cards/{card['id']}/calendar?user_id={owner['id']}",
+        json={
+            "event_type": "milestone_spend",
+            "label": "Issuer offer noted without spend terms",
+            "event_date": date(2027, 4, 1).isoformat(),
+            "source_kind": "manual",
+            "source_label": "User-entered issuer message",
+        },
+    )
+
+    created.raise_for_status()
+    progress = created.json()["milestone_progress"]
+    assert progress["status"] == "insufficient"
+    assert progress["counted_amount"] == "0.00"
+    assert progress["target_amount"] is None
+    assert progress["remaining_amount"] is None
+    assert "Milestone target and period" in progress["reason"]
+    assert progress["evidence"] == []
 
 
 async def test_card_calendar_fee_and_reversal_fields_are_source_labelled(client):

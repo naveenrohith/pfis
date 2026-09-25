@@ -522,3 +522,13 @@ class TransferResponse(BaseModel):
     currency: str
     transaction_date: date
     payment_rail: Literal["transfer", "atm"] = "transfer"
+
+
+class CashPocketBalanceResponse(BaseModel):
+    account_id: str
+    user_id: str
+    currency: str
+    transfers_in: float = 0.0
+    cash_spend: float = 0.0
+    balance: float = 0.0
+    as_of: date | None = None

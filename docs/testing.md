@@ -69,15 +69,15 @@ plus small headroom:
 
 | Budget key | Observed statements | Ceiling |
 | --- | ---: | ---: |
-| `accounts_balance_list` | 39 | 43 |
+| `accounts_balance_list` | 10 | 12 |
 | `account_position` | 8 | 10 |
-| `net_worth` | 34 | 38 |
-| `cash_plan` | 12 | 14 |
-| `card_portfolio_payment_plan` | 104 | 112 |
+| `net_worth` | 12 | 14 |
+| `cash_plan` | 11 | 13 |
+| `card_portfolio_payment_plan` | 87 | 92 |
 | `card_overview` | 23 | 26 |
-| `workspace_dashboard_summary` | 75 | 81 |
+| `workspace_dashboard_summary` | 74 | 78 |
 | `guidance_query` | 3 | 5 |
-| `readiness` | 58 | 63 |
+| `readiness` | 36 | 40 |
 
 Run just this gate with:
 
@@ -85,12 +85,13 @@ Run just this gate with:
 .\.venv\Scripts\python.exe -m pytest -q tests\pytest\test_query_budgets.py -p no:cacheprovider --basetemp .test-run\pytest-qb
 ```
 
-Known hotspot to preserve for later work: account-list and current net-worth
-reads call the account-position read model once per account, and the card
-portfolio plan calls due-runway/forecast paths per active card. These are
-obvious N+1-style shapes, but this gate intentionally records current behavior
-without changing financial arithmetic in the financial-position or guidance
-services.
+Wave 2 performance work removed the highest-risk N+1 shapes without changing
+financial arithmetic: account-list, current net-worth, and readiness batch the
+account-position read model across accounts; card portfolio reuses a shared
+balance-forecast service for repeated funding-account paths; workspace reuses
+its already-read current period metrics for month comparison. Remaining card
+portfolio statements are still intentionally conservative because card overview
+and due-runway keep issuer cutoff/status logic isolated per card.
 
 In the managed Windows environment, set the test temp directory to a writable
 path if the default user temp directory is blocked:

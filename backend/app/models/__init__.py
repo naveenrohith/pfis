@@ -69,7 +69,12 @@ from app.models.sync import (
 from app.models.temporal_history import TemporalSourceSnapshot
 from app.models.transaction import Transaction, TransactionSplit
 from app.models.user import User
-from app.models.workspace import DashboardPreference, RecommendationOutcome, RecommendationState
+from app.models.workspace import (
+    DashboardPreference,
+    RecommendationOutcome,
+    RecommendationState,
+    UserPreferencePolicyVersion,
+)
 
 __all__ = [
     "User",
@@ -137,4 +142,5 @@ __all__ = [
     "DashboardPreference",
     "RecommendationState",
     "RecommendationOutcome",
+    "UserPreferencePolicyVersion",
 ]

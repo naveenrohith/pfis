@@ -20,9 +20,11 @@ from app.schemas.balance_forecast import (
     AccountBalanceForecastSnapshotCreate,
     AccountBalanceForecastSnapshotResponse,
 )
+from app.schemas.forecast_drift import ForecastDriftHorizonStatus, ForecastDriftStatusResponse
 from app.schemas.intelligence import DataSufficiency, EvidenceItem
 from app.services.balance_forecast_service import BalanceForecastService
 from app.services.financial_clock import user_financial_today
+from app.services.forecast_drift_guard import ForecastDriftGuard
 
 OUTCOME_RULESET_VERSION = "pfis-account-balance-forecast-outcome-1"
 MINIMUM_CALIBRATION_OUTCOMES = 3
@@ -180,12 +182,16 @@ class BalanceForecastAccountabilityService:
             ).all()
         )
         if not snapshots:
+            drift_status = await ForecastDriftGuard(self.db).account_balance_status(
+                user_id, account_id
+            )
             return AccountBalanceForecastEvaluationResponse(
                 evaluation_version=OUTCOME_RULESET_VERSION,
                 evaluated_count=0,
                 already_evaluated_count=0,
                 pending_count=0,
                 calibration_thresholds=self._calibration_thresholds(),
+                drift_status=self._drift_response(drift_status),
                 outcomes=[],
             )
 
@@ -340,6 +346,9 @@ class BalanceForecastAccountabilityService:
             ),
             calibration_status=calibration_status,
             calibration_thresholds=self._calibration_thresholds(),
+            drift_status=self._drift_response(
+                await ForecastDriftGuard(self.db).account_balance_status(user_id, account_id)
+            ),
             outcomes=[self._outcome_response(outcome, snapshot) for outcome, snapshot in created],
         )
 
@@ -534,3 +543,24 @@ class BalanceForecastAccountabilityService:
             "minimum_interval_coverage_pct": MINIMUM_INTERVAL_COVERAGE_PCT,
             "minimum_outcomes": float(MINIMUM_CALIBRATION_OUTCOMES),
         }
+
+    @staticmethod
+    def _drift_response(drift_status) -> ForecastDriftStatusResponse:
+        return ForecastDriftStatusResponse(
+            ruleset_version=drift_status.ruleset_version,
+            status=drift_status.status,
+            reason_code=drift_status.reason_code,
+            minimum_outcomes=drift_status.minimum_outcomes,
+            maximum_mape_pct=drift_status.maximum_mape_pct,
+            minimum_interval_coverage_pct=drift_status.minimum_interval_coverage_pct,
+            horizons=[
+                ForecastDriftHorizonStatus(
+                    horizon=item.horizon,
+                    matured_outcomes=item.matured_outcomes,
+                    mean_absolute_percentage_error=item.mean_absolute_percentage_error,
+                    interval_coverage_pct=item.interval_coverage_pct,
+                    status=item.status,
+                )
+                for item in drift_status.horizons
+            ],
+        )

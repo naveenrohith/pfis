@@ -6,6 +6,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.forecast_drift import ForecastDriftStatusResponse
+
 Severity = Literal["info", "success", "warning", "danger"]
 GoalType = Literal["savings", "category_reduction", "recurring_reduction"]
 DataSufficiency = Literal["low", "medium", "high"]
@@ -318,6 +320,7 @@ class CashFlowOutcomeEvaluationResponse(BaseModel):
     evaluated_count: int
     already_evaluated_count: int
     ineligible_count: int
+    drift_status: ForecastDriftStatusResponse = Field(default_factory=ForecastDriftStatusResponse)
     outcomes: list[CashFlowForecastOutcomeResponse] = Field(default_factory=list)
 
 

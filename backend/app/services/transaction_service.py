@@ -635,6 +635,8 @@ class TransactionService:
         year: int | None = None,
         category_id: str | None = None,
         q: str | None = None,
+        note: str | None = None,
+        tags: list[str] | None = None,
         transaction_type: str | None = None,
         payment_method: str | None = None,
         reviewed: bool | None = None,
@@ -667,6 +669,8 @@ class TransactionService:
         query = self._apply_list_filters(
             query,
             q=q,
+            note=note,
+            tags=tags,
             transaction_type=transaction_type,
             payment_method=payment_method,
             reviewed=reviewed,
@@ -1297,6 +1301,8 @@ class TransactionService:
         year: int | None = None,
         category_id: str | None = None,
         q: str | None = None,
+        note: str | None = None,
+        tags: list[str] | None = None,
         transaction_type: str | None = None,
         payment_method: str | None = None,
         reviewed: bool | None = None,
@@ -1320,6 +1326,8 @@ class TransactionService:
         query = self._apply_list_filters(
             query,
             q=q,
+            note=note,
+            tags=tags,
             transaction_type=transaction_type,
             payment_method=payment_method,
             reviewed=reviewed,
@@ -1332,28 +1340,60 @@ class TransactionService:
         return int(result.scalar() or 0)
 
     @staticmethod
+    def _like_contains_pattern(value: str) -> str:
+        escaped = (
+            value.strip().lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        return f"%{escaped}%"
+
+    @staticmethod
     def _apply_list_filters(
         query,
         *,
         q: str | None,
-        transaction_type: str | None,
-        payment_method: str | None,
-        reviewed: bool | None,
-        date_from: date | None,
-        date_to: date | None,
-        amount_min: float | None,
-        amount_max: float | None,
+        note: str | None = None,
+        tags: list[str] | None = None,
+        transaction_type: str | None = None,
+        payment_method: str | None = None,
+        reviewed: bool | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        amount_min: float | None = None,
+        amount_max: float | None = None,
     ):
         if q:
-            term = f"%{q.strip().lower()}%"
+            term = TransactionService._like_contains_pattern(q)
             query = query.where(
                 or_(
-                    func.lower(Transaction.merchant_normalized).like(term),
-                    func.lower(Transaction.merchant_raw).like(term),
-                    func.lower(Transaction.reference_id).like(term),
-                    func.lower(Transaction.account_last4).like(term),
+                    func.lower(Transaction.merchant_normalized).like(term, escape="\\"),
+                    func.lower(Transaction.merchant_raw).like(term, escape="\\"),
+                    func.lower(Transaction.reference_id).like(term, escape="\\"),
+                    func.lower(Transaction.account_last4).like(term, escape="\\"),
+                    func.lower(Transaction.note).like(term, escape="\\"),
+                    func.lower(Transaction.tags_json).like(term, escape="\\"),
                 )
             )
+        if note:
+            note_term = TransactionService._like_contains_pattern(note)
+            query = query.where(func.lower(Transaction.note).like(note_term, escape="\\"))
+        if tags:
+            normalized_tags = []
+            seen_tags: set[str] = set()
+            for raw_tag in tags:
+                tag = raw_tag.strip()
+                if not tag:
+                    continue
+                if len(tag) > 32:
+                    raise ValueError("Tags must be 32 characters or fewer")
+                key = tag.casefold()
+                if key not in seen_tags:
+                    normalized_tags.append(key)
+                    seen_tags.add(key)
+            for tag in normalized_tags:
+                tag_pattern = TransactionService._like_contains_pattern(f'"{tag}"')
+                query = query.where(
+                    func.lower(Transaction.tags_json).like(tag_pattern, escape="\\")
+                )
         if transaction_type:
             query = query.where(Transaction.transaction_type == transaction_type)
         if payment_method:

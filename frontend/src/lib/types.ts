@@ -1990,6 +1990,93 @@ export interface CardPortfolioPaymentPlan {
   ruleset_version: string;
 }
 
+export type FinancialHorizonStatus = 'healthy' | 'attention' | 'deficit' | 'low_data' | 'stale';
+export type FinancialHorizonEventStatus =
+  'verified' | 'planned' | 'estimated' | 'risk' | 'provisional';
+export type FinancialHorizonEventSource =
+  | 'balance_position'
+  | 'cash_plan'
+  | 'commitment'
+  | 'liability'
+  | 'card_upcoming'
+  | 'card_due_runway'
+  | 'balance_forecast';
+export type FinancialHorizonRiskSeverity = 'info' | 'warning' | 'danger';
+
+export interface FinancialHorizonAmountSummary {
+  assets: number;
+  liabilities: number;
+  net: number;
+}
+
+export interface FinancialHorizonCurrentPosition {
+  currency: string;
+  account_count: number;
+  verified: FinancialHorizonAmountSummary;
+  provisional: FinancialHorizonAmountSummary;
+  cash_plan_readiness?: string | null;
+  safe_to_spend?: number | null;
+  safe_to_spend_basis?: string | null;
+  reason_codes: string[];
+}
+
+export interface FinancialHorizonEvent {
+  id: string;
+  date: string;
+  label: string;
+  amount?: number | null;
+  direction: 'in' | 'out' | 'neutral';
+  source: FinancialHorizonEventSource;
+  source_id?: string | null;
+  status: FinancialHorizonEventStatus;
+  confidence: number;
+  reason_codes: string[];
+}
+
+export interface FinancialHorizonLowestPoint {
+  date: string;
+  expected_balance: number;
+  low_balance?: number | null;
+  high_balance?: number | null;
+  confidence: number;
+  source_account_id: string;
+}
+
+export interface FinancialHorizonRiskSignal {
+  code: string;
+  severity: FinancialHorizonRiskSeverity;
+  label: string;
+  detail: string;
+  date?: string | null;
+  amount?: number | null;
+  source: string;
+}
+
+export interface FinancialHorizonSourceHealth {
+  source_id: string;
+  source: string;
+  status: 'fresh' | 'due' | 'overdue' | 'unknown' | 'incomplete' | 'review';
+  latest_sync_at?: string | null;
+  coverage_start?: string | null;
+  coverage_end?: string | null;
+  coverage_complete?: boolean | null;
+  reason_codes: string[];
+}
+
+export interface FinancialHorizonResponse {
+  as_of: string;
+  horizon_days: number;
+  current_position: FinancialHorizonCurrentPosition;
+  events: FinancialHorizonEvent[];
+  lowest_projected_point?: FinancialHorizonLowestPoint | null;
+  lowest_projected_point_unavailable_reason?: string | null;
+  risk_signals: FinancialHorizonRiskSignal[];
+  source_health: FinancialHorizonSourceHealth[];
+  status: FinancialHorizonStatus;
+  missing_evidence: string[];
+  ruleset_version: string;
+}
+
 export type CardSpendRoutingPriority = 'utilization_safety' | 'rewards' | 'balanced';
 
 export interface CardSpendRoutingOption {
@@ -2663,4 +2750,57 @@ export interface FinancialIntelligenceRepairResponse {
   liabilities_synced: number;
   false_positive_transactions_removed: number;
   conflicts_held_for_review: number;
+}
+
+export type SubscriptionReviewLifecycle = 'candidate' | 'mature' | 'missed' | 'inactive';
+export type SubscriptionReviewAction = 'confirm' | 'mark_not_recurring' | 'cancelled';
+
+export interface SubscriptionReviewItem {
+  schema_version: 'pfis-subscription-review-item-1';
+  id: string;
+  stream_key: string;
+  merchant: string;
+  lifecycle_status: SubscriptionReviewLifecycle;
+  cadence?: string | null;
+  typical_amount: number;
+  monthly_equivalent: number;
+  currency: string;
+  amount_change_detected: boolean;
+  amount_low: number;
+  amount_high: number;
+  occurrences: number;
+  cadence_confidence: number;
+  amount_confidence: number;
+  confidence: number;
+  last_seen: string;
+  next_expected?: string | null;
+  next_expected_null_reason?: string | null;
+  days_since_last_expected?: number | null;
+  evidence_transaction_ids: string[];
+  financial_account_id?: string | null;
+  user_action?: SubscriptionReviewAction | null;
+  action_id?: string | null;
+  action_note?: string | null;
+  action_updated_at?: string | null;
+  ruleset_version: string;
+}
+
+export interface SubscriptionReviewListResponse {
+  schema_version: 'pfis-subscription-review-list-1';
+  as_of: string;
+  ruleset_version: string;
+  thresholds: Record<string, number | string>;
+  items: SubscriptionReviewItem[];
+  excluded_count: number;
+}
+
+export interface SubscriptionReviewActionResponse {
+  schema_version: 'pfis-subscription-review-action-1';
+  id: string;
+  stream_key: string;
+  merchant: string;
+  action: SubscriptionReviewAction;
+  note?: string | null;
+  created_at: string;
+  updated_at: string;
 }
