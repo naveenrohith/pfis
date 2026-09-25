@@ -12,7 +12,20 @@ const {
   todayUi,
   dataSufficiency,
   decisionQueryFails,
+  workspaceState,
+  workspaceRefetch,
 } = vi.hoisted(() => ({
+  workspaceState: {
+    isLoading: false,
+    isError: false,
+    hasData: true,
+    netCashFlow: 30000,
+    transactionCount: 12,
+    projectedNet: undefined as number | undefined,
+    lastSyncedAt: null as string | null,
+    latestStatus: null as string | null,
+  },
+  workspaceRefetch: vi.fn(),
   cashPlanState: {
     data: undefined as
       | {
@@ -32,6 +45,9 @@ const {
         }
       | undefined,
     isLoading: false,
+    isError: false,
+    isFetching: false,
+    refetch: vi.fn(),
   },
   scrollTo: vi.fn(),
   recommendations: [] as Array<{
@@ -88,28 +104,44 @@ vi.mock('@/features/workspace/SyncContext', () => ({
 vi.mock('@/features/workspace/queries', () => ({
   useCashPlan: () => cashPlanState,
   useWorkspaceSnapshot: () => ({
-    isLoading: false,
-    isError: false,
-    data: {
-      snapshot: {
-        income: 50000,
-        spend: 20000,
-        net_cash_flow: 30000,
-        transaction_count: 12,
-      },
-      projection: undefined,
-      financial_health: {
-        monthly_stability: 75,
-        recurring_burden: 10,
-        data_sufficiency: dataSufficiency.value,
-        data_confidence: 90,
-      },
-      month_comparison: null,
-      recommendations,
-      insights: [],
-      sync_summary: { last_synced_at: null },
-    },
-    refetch: vi.fn(),
+    isLoading: workspaceState.isLoading,
+    isError: workspaceState.isError,
+    isFetching: false,
+    error: workspaceState.isError ? new Error('GET /api/workspace failed: 503') : null,
+    data: workspaceState.hasData
+      ? {
+          snapshot: {
+            income: 50000,
+            spend: 20000,
+            net_cash_flow: workspaceState.netCashFlow,
+            transaction_count: workspaceState.transactionCount,
+            budget_risk_count: 0,
+          },
+          projection:
+            workspaceState.projectedNet === undefined
+              ? undefined
+              : {
+                  projected_net: workspaceState.projectedNet,
+                  daily_spend_rate: 900,
+                  recurring_commitments: 0,
+                  data_through: '2026-07-20',
+                },
+          financial_health: {
+            monthly_stability: 75,
+            recurring_burden: 10,
+            data_sufficiency: dataSufficiency.value,
+            data_confidence: 90,
+          },
+          month_comparison: null,
+          recommendations,
+          insights: [],
+          sync_summary: {
+            last_synced_at: workspaceState.lastSyncedAt,
+            latest_status: workspaceState.latestStatus,
+          },
+        }
+      : undefined,
+    refetch: workspaceRefetch,
   }),
 }));
 
@@ -119,6 +151,20 @@ describe('Today Financial Horizon', () => {
     todayUi.activeSection = 'overview';
     dataSufficiency.value = 'high';
     decisionQueryFails.value = false;
+    Object.assign(workspaceState, {
+      isLoading: false,
+      isError: false,
+      hasData: true,
+      netCashFlow: 30000,
+      transactionCount: 12,
+      projectedNet: undefined,
+      lastSyncedAt: null,
+      latestStatus: null,
+    });
+    workspaceRefetch.mockReset();
+    cashPlanState.data = undefined;
+    cashPlanState.isError = false;
+    cashPlanState.refetch = vi.fn();
     recommendations.splice(0);
     decisions.splice(0);
     setGuidanceState.mockReset();
@@ -311,5 +357,149 @@ describe('Today Financial Horizon', () => {
     expect(await screen.findByText('Action status is unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use this action' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry action status' })).toBeInTheDocument();
+  });
+
+  describe('workspace state model', () => {
+    function stateOf(container: HTMLElement) {
+      return container.querySelector('[data-today-state]')?.getAttribute('data-today-state');
+    }
+
+    it('reinforces progress in the healthy state', () => {
+      const { container } = renderToday();
+
+      expect(stateOf(container)).toBe('healthy');
+      expect(
+        screen.getByRole('heading', {
+          level: 1,
+          name: 'Good work, Asha. You are keeping more than you spend.',
+        }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Some signals could not be refreshed')).not.toBeInTheDocument();
+      expect(screen.queryByText('Showing last known values')).not.toBeInTheDocument();
+    });
+
+    it('explains emerging pressure in the attention state', () => {
+      workspaceState.projectedNet = -4000;
+
+      const { container } = renderToday();
+
+      expect(stateOf(container)).toBe('attention');
+      expect(
+        screen.getByRole('heading', { name: 'Review the pressure building this month' }),
+      ).toBeInTheDocument();
+    });
+
+    it('states a shortfall plainly without positive visuals in the deficit state', () => {
+      workspaceState.netCashFlow = -6000;
+
+      const { container } = renderToday();
+
+      expect(stateOf(container)).toBe('deficit');
+      expect(screen.getByText(/spent ₹6,000 more than you earned/)).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Find the largest driver of this shortfall' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Good work/)).not.toBeInTheDocument();
+      expect(screen.getByText('Net cash flow this month').closest('section')).toHaveClass(
+        'bg-muted/60',
+      );
+    });
+
+    it('makes connecting data the primary action and hides forecasts in the low-data state', () => {
+      dataSufficiency.value = 'low';
+      workspaceState.transactionCount = 2;
+      workspaceState.projectedNet = 12000;
+
+      const { container } = renderToday();
+
+      expect(stateOf(container)).toBe('low-data');
+      expect(
+        screen.getByRole('heading', { name: 'This brief has limited evidence' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Not projected')).toBeInTheDocument();
+      expect(screen.queryByText('₹12,000')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Connect or import activity' }));
+      expect(scrollTo).toHaveBeenCalledWith('inbox');
+    });
+
+    it('labels the age of last known values and routes to sources in the stale state', () => {
+      workspaceState.lastSyncedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+      const { container } = renderToday();
+
+      expect(stateOf(container)).toBe('stale');
+      const notice = screen.getByRole('status', { name: 'Showing last known values' });
+      expect(notice).toHaveTextContent(/Sources last synced/);
+      expect(screen.getAllByText('₹30,000').length).toBeGreaterThan(0);
+      fireEvent.click(screen.getByRole('button', { name: 'Review data sources' }));
+      expect(scrollTo).toHaveBeenCalledWith('inbox');
+    });
+
+    it('treats a failed latest sync as stale even when the last sync is recent', () => {
+      workspaceState.lastSyncedAt = new Date().toISOString();
+      workspaceState.latestStatus = 'failed';
+
+      const { container } = renderToday();
+
+      expect(stateOf(container)).toBe('stale');
+      expect(
+        screen.getByRole('status', { name: 'The latest sync did not finish' }),
+      ).toBeInTheDocument();
+    });
+
+    it('shows a grouped loading skeleton while the summary is first loading', () => {
+      workspaceState.isLoading = true;
+      workspaceState.hasData = false;
+
+      renderToday();
+
+      const loading = screen.getByRole('status', { name: 'Loading financial brief' });
+      expect(loading).toHaveAttribute('aria-busy', 'true');
+      expect(loading).toHaveAttribute('data-today-state', 'loading');
+    });
+
+    it('keeps usable sections and names the failed signal in the partial-error state', () => {
+      cashPlanState.isError = true;
+
+      const { container } = renderToday();
+
+      expect(stateOf(container)).toBe('partial-error');
+      const notice = screen.getByRole('status', { name: 'Some signals could not be refreshed' });
+      expect(notice).toHaveTextContent('PFIS could not refresh Safe to spend.');
+      expect(screen.getByText('Safe to spend is unavailable')).toBeInTheDocument();
+      expect(screen.queryByText('Set up a bank position')).not.toBeInTheDocument();
+      expect(screen.getAllByText('₹30,000').length).toBeGreaterThan(0);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Retry unavailable signals' }));
+      expect(cashPlanState.refetch).toHaveBeenCalledTimes(1);
+      expect(workspaceRefetch).not.toHaveBeenCalled();
+    });
+
+    it('keeps last loaded figures when a summary refresh fails', () => {
+      workspaceState.isError = true;
+
+      const { container } = renderToday();
+
+      expect(stateOf(container)).toBe('partial-error');
+      expect(
+        screen.getByRole('status', { name: 'Some signals could not be refreshed' }),
+      ).toHaveTextContent('The figures below are from the last successful load.');
+      expect(screen.getAllByText('₹30,000').length).toBeGreaterThan(0);
+    });
+
+    it('gives human-readable recovery and Data & settings access in the full-error state', () => {
+      workspaceState.isError = true;
+      workspaceState.hasData = false;
+
+      const { container } = renderToday();
+
+      expect(stateOf(container)).toBe('full-error');
+      expect(screen.getByRole('alert')).toHaveTextContent('The summary is temporarily unavailable');
+      expect(screen.queryByText(/503/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Retry summary' }));
+      expect(workspaceRefetch).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByRole('button', { name: /Open Data & settings/ }));
+      expect(scrollTo).toHaveBeenCalledWith('inbox');
+    });
   });
 });

@@ -50,6 +50,8 @@ from app.models.transaction import (
 from app.schemas.account import TransferCreate
 from app.schemas.financial_position import (
     AccountPositionResponse,
+    BalancePositionProductType,
+    BalancePositionStatus,
     CardActivitySignal,
     CardCalendarEventCreate,
     CardCalendarEventResponse,
@@ -317,6 +319,27 @@ class FinancialPositionService:
         )
         pending_increase = max(pending_effect, Decimal("0"))
         pending_decrease = max(-pending_effect, Decimal("0"))
+        anchor_eligible_transactions = [
+            transaction
+            for transaction in anchor_transactions
+            if transaction.currency == account.currency
+            and balance_transaction_eligible(transaction)
+        ]
+        unlinked_count = sum(
+            1
+            for transaction in anchor_transactions
+            if transaction.payment_rail == PaymentRail.TRANSFER
+            and transaction.card_event == CardEvent.PAYMENT
+            and not transaction.is_transfer
+        )
+        unreviewed_count = sum(
+            1
+            for transaction in anchor_transactions
+            if not transaction.is_accounting_adjustment
+            and transaction.review_outcome != "ignored_by_rule"
+            and (transaction.review_outcome == "needs_review" or not transaction.reviewed_flag)
+        )
+        duplicate_candidate_count = self._duplicate_candidate_count(anchor_eligible_transactions)
         position_reason_codes: list[str] = []
         coverage_start: datetime | None = None
         coverage_end: datetime | None = None
@@ -342,8 +365,7 @@ class FinancialPositionService:
                 position_confidence -= 0.12
             if any(
                 item.review_outcome == "needs_review" or not item.reviewed_flag
-                for item in anchor_transactions
-                if balance_transaction_eligible(item)
+                for item in anchor_eligible_transactions
             ):
                 position_reason_codes.append("unreviewed_activity")
                 position_confidence -= 0.20
@@ -367,6 +389,9 @@ class FinancialPositionService:
                 # reduce the bank's estimated spendable balance.
                 position_reason_codes.append("unlinked_card_payment")
                 position_confidence -= 0.20
+            if duplicate_candidate_count:
+                position_reason_codes.append("duplicate_candidate_activity")
+                position_confidence -= 0.12
             if as_of is None and await self._source_coverage_incomplete(
                 user_id, account, anchor_transactions
             ):
@@ -472,21 +497,7 @@ class FinancialPositionService:
                         )
                     )
 
-            duplicate_groups: dict[tuple[date, Decimal, str, str], list[Transaction]] = {}
-            for transaction in eligible_between:
-                merchant = (
-                    (transaction.merchant_normalized or transaction.merchant_raw or "")
-                    .strip()
-                    .casefold()
-                )
-                signature = (
-                    transaction.transaction_date,
-                    transaction.amount,
-                    transaction.transaction_type.value,
-                    merchant,
-                )
-                duplicate_groups.setdefault(signature, []).append(transaction)
-            for signature, candidates in duplicate_groups.items():
+            for signature, candidates in self._duplicate_candidate_groups(eligible_between).items():
                 if len(candidates) < 2:
                     continue
                 transaction_ids = sorted(candidate.id for candidate in candidates)
@@ -530,8 +541,18 @@ class FinancialPositionService:
             status = "reconciled" if not reconciliation_items else "needs_review"
         position_confidence = max(0.0, min(position_confidence, 1.0))
         position_reason_codes = list(dict.fromkeys(position_reason_codes))
+        canonical_status, canonical_reason_codes = self._canonical_balance_position_status(
+            account,
+            latest,
+            financial_today=financial_today,
+            position_status=position_status,
+            position_reason_codes=position_reason_codes,
+            coverage_status=coverage_status,
+        )
         return AccountPositionResponse(
             financial_account_id=account.id,
+            account_id=account.id,
+            product_type=cast(BalancePositionProductType, account.account_type),
             currency=account.currency,
             balance_kind=cast(Literal["asset", "liability"], account.balance_kind),
             verified_balance=float(latest.amount) if latest and latest.verified else None,
@@ -560,6 +581,9 @@ class FinancialPositionService:
             ),
             pending_increase=float(pending_increase),
             pending_decrease=float(pending_decrease),
+            unlinked_count=unlinked_count,
+            unreviewed_count=unreviewed_count,
+            duplicate_candidate_count=duplicate_candidate_count,
             position_status=cast(
                 Literal[
                     "needs_observation",
@@ -573,6 +597,10 @@ class FinancialPositionService:
             ),
             position_confidence=position_confidence,
             position_reason_codes=position_reason_codes,
+            status=canonical_status,
+            confidence=position_confidence,
+            reason_codes=canonical_reason_codes,
+            ruleset_version="pfis-balance-position-1",
             opening_balance=float(opening_balance) if opening_balance is not None else None,
             opening_as_of=opening_as_of,
             known_movement=float(known_change) if known_change is not None else None,
@@ -584,6 +612,71 @@ class FinancialPositionService:
             review_count=len(reconciliation_items),
             reconciliation_items=reconciliation_items,
         )
+
+    @staticmethod
+    def _duplicate_candidate_groups(
+        transactions: list[Transaction],
+    ) -> dict[tuple[date, Decimal, str, str], list[Transaction]]:
+        duplicate_groups: dict[tuple[date, Decimal, str, str], list[Transaction]] = {}
+        for transaction in transactions:
+            merchant = (
+                (transaction.merchant_normalized or transaction.merchant_raw or "")
+                .strip()
+                .casefold()
+            )
+            signature = (
+                transaction.transaction_date,
+                transaction.amount,
+                transaction.transaction_type.value,
+                merchant,
+            )
+            duplicate_groups.setdefault(signature, []).append(transaction)
+        return duplicate_groups
+
+    @classmethod
+    def _duplicate_candidate_count(cls, transactions: list[Transaction]) -> int:
+        return sum(
+            1
+            for candidates in cls._duplicate_candidate_groups(transactions).values()
+            if len(candidates) >= 2
+        )
+
+    @staticmethod
+    def _canonical_balance_position_status(
+        account: FinancialAccount,
+        latest: AccountBalanceSnapshot | None,
+        *,
+        financial_today: date,
+        position_status: str,
+        position_reason_codes: list[str],
+        coverage_status: Literal["fresh", "due", "overdue", "unknown"],
+    ) -> tuple[BalancePositionStatus, list[str]]:
+        """Map legacy response fields to the documented BalancePosition contract."""
+
+        reason_codes = list(position_reason_codes)
+        if account.account_type not in {"bank", "credit_card", "cash"}:
+            if "unsupported_product_type" not in reason_codes:
+                reason_codes.append("unsupported_product_type")
+            return "unsupported", reason_codes
+        if latest is None or position_status == "needs_observation":
+            return "incomplete", reason_codes
+        if "source_coverage_incomplete" in reason_codes:
+            return "incomplete", reason_codes
+        if position_status == "needs_review":
+            review_reasons = set(reason_codes) - {
+                "balance_observation_due",
+                "balance_observation_overdue",
+            }
+            if review_reasons:
+                return "needs_review", reason_codes
+        if coverage_status in {"due", "overdue"}:
+            return "stale", reason_codes
+        stale_cutoff = date.fromordinal(financial_today.toordinal() - 7)
+        if latest.as_of < stale_cutoff:
+            if "stale_verified_observation" not in reason_codes:
+                reason_codes.append("stale_verified_observation")
+            return "stale", reason_codes
+        return cast(BalancePositionStatus, position_status), reason_codes
 
     @staticmethod
     def _transaction_after_snapshot(

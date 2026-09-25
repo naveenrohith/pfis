@@ -15,6 +15,7 @@ This directory is the source of truth for PFIS agent and Copilot work.
 - [audit/14-85-intelligence-product-reassessment.md](audit/14-85-intelligence-product-reassessment.md) - canonical intelligence, product-stage, balance-position, and validation roadmap
 - [deployment.md](deployment.md) - production-candidate deployment, backup, and health runbook
 - [frontend.md](frontend.md) - canonical React/Vite workspace ownership and release gates
+- [operations/](operations/) - incident, alert-routing, restore-drill, and rollback evidence templates
 - [repository-standards.md](repository-standards.md) - source ownership, placement rules, and generated-file policy
 - [ui-ux-masterplan.md](ui-ux-masterplan.md) - workspace navigation, MCP component research, and UI/UX delivery gates
 - [privacy-review-premium-workspace.md](privacy-review-premium-workspace.md) - premium workspace data-use and privacy approval

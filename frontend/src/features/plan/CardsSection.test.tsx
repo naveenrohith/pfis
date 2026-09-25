@@ -4,15 +4,23 @@ import { describe, expect, it, vi } from 'vitest';
 import { CardsSection } from './CardsSection';
 import type { AccountBalanceForecast } from '@/lib/types';
 
-const { addBalance, balanceForecast, cardDisputes, cardOverview, saveCardPreferences } = vi.hoisted(
-  () => ({
+const {
+  addBalance,
+  balanceForecast,
+  cardDisputes,
+  cardOverview,
+  createCardCalendarEvent,
+  saveCardPreferences,
+  updateCardCalendarEvent,
+} = vi.hoisted(() => ({
   addBalance: vi.fn(),
   balanceForecast: vi.fn(),
   cardDisputes: vi.fn(),
   cardOverview: vi.fn(),
+  createCardCalendarEvent: vi.fn(),
   saveCardPreferences: vi.fn(),
-  }),
-);
+  updateCardCalendarEvent: vi.fn(),
+}));
 
 const accountForecastFixture: AccountBalanceForecast = {
   financial_account_id: 'card-1',
@@ -219,7 +227,9 @@ vi.mock('@/lib/api', () => ({
     addBalance,
     cardDisputes,
     cardOverview,
+    createCardCalendarEvent,
     saveCardPreferences,
+    updateCardCalendarEvent,
     createCardDispute: vi.fn(),
     updateCardDispute: vi.fn(),
   },
@@ -420,6 +430,93 @@ describe('CardsSection activity centre', () => {
           label: 'Annual fee review',
           event_date: '2026-10-05',
           source_kind: 'manual',
+          source_label: 'User-entered',
+          annual_fee_amount: 2500,
+          fee_reversal_condition: null,
+          fee_reversal_status: null,
+          milestone_spend_target: null,
+          milestone_period_start: null,
+          milestone_period_end: null,
+          milestone_progress: null,
+          created_at: '2026-02-06T10:00:00Z',
+        },
+        {
+          id: 'calendar-2',
+          financial_account_id: 'card-1',
+          event_type: 'fee_reversal',
+          label: 'Annual fee waiver follow-up',
+          event_date: '2026-11-05',
+          source_kind: 'manual',
+          source_label: 'Support call note',
+          annual_fee_amount: null,
+          fee_reversal_condition: 'Spend ₹75,000 in 90 days',
+          fee_reversal_status: 'pending',
+          milestone_spend_target: null,
+          milestone_period_start: null,
+          milestone_period_end: null,
+          milestone_progress: null,
+          created_at: '2026-02-06T10:00:00Z',
+        },
+        {
+          id: 'calendar-3',
+          financial_account_id: 'card-1',
+          event_type: 'milestone_spend',
+          label: 'Quarterly spend milestone',
+          event_date: '2026-03-31',
+          source_kind: 'manual',
+          source_label: 'Card benefit tracker',
+          annual_fee_amount: null,
+          fee_reversal_condition: null,
+          fee_reversal_status: null,
+          milestone_spend_target: 75000,
+          milestone_period_start: '2026-01-01',
+          milestone_period_end: '2026-03-31',
+          milestone_progress: {
+            status: 'ready',
+            counted_amount: 42000,
+            target_amount: 75000,
+            remaining_amount: 33000,
+            period_start: '2026-01-01',
+            period_end: '2026-03-31',
+            reason: null,
+            evidence: [
+              {
+                transaction_id: 'txn-1',
+                transaction_date: '2026-02-01',
+                amount: 42000,
+                direction: 'spend',
+                merchant: 'DE-IDENTIFIED MERCHANT',
+                source_kind: 'statement',
+                source_identifier: 'line-1',
+              },
+            ],
+          },
+          created_at: '2026-02-06T10:00:00Z',
+        },
+        {
+          id: 'calendar-4',
+          financial_account_id: 'card-1',
+          event_type: 'milestone',
+          label: 'Benefit milestone needs terms',
+          event_date: '2026-04-15',
+          source_kind: 'manual',
+          source_label: 'User-entered',
+          annual_fee_amount: null,
+          fee_reversal_condition: null,
+          fee_reversal_status: null,
+          milestone_spend_target: null,
+          milestone_period_start: null,
+          milestone_period_end: null,
+          milestone_progress: {
+            status: 'insufficient',
+            counted_amount: 0,
+            target_amount: null,
+            remaining_amount: null,
+            period_start: null,
+            period_end: null,
+            reason: 'Milestone target and period are required before progress can be computed.',
+            evidence: [],
+          },
           created_at: '2026-02-06T10:00:00Z',
         },
       ],
@@ -446,6 +543,8 @@ describe('CardsSection activity centre', () => {
       ],
     });
     cardDisputes.mockResolvedValue([]);
+    updateCardCalendarEvent.mockResolvedValue({ id: 'calendar-1' });
+    createCardCalendarEvent.mockResolvedValue({ id: 'calendar-new' });
     saveCardPreferences.mockResolvedValue({
       financial_account_id: 'card-1',
       utilization_target_pct: 30,
@@ -567,10 +666,54 @@ describe('CardsSection activity centre', () => {
     expect(screen.getByText(/Neither action contacts your bank or issuer/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get('cardView')).toBe('evidence'),
+    );
+    expect(await screen.findByText('Fees and milestones')).toBeInTheDocument();
+    expect(screen.getByText(/Card benefit tracker/)).toBeInTheDocument();
+    expect(screen.getByText('Fee ₹2,500')).toBeInTheDocument();
+    expect(screen.getByText('Reversal Pending')).toBeInTheDocument();
+    expect(screen.getByText('Condition: Spend ₹75,000 in 90 days')).toBeInTheDocument();
+    expect(screen.getByText('1 evidence item')).toBeInTheDocument();
+    expect(screen.getByText('Remaining')).toBeInTheDocument();
+    expect(screen.getByText('₹33,000')).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: 'Quarterly spend milestone milestone progress' }),
+    ).toHaveAttribute('aria-valuenow', '56');
+    expect(
+      screen.getByText(
+        'Insufficient: Milestone target and period are required before progress can be computed.',
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Annual fee review/i }));
     fireEvent.click(screen.getByText('Edit fee or milestone reminder'));
-    expect(screen.getByRole('button', { name: 'Update reminder' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Delete reminder' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Update reminder' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Delete reminder' })).toBeEnabled();
+      expect(screen.getByLabelText('Source label')).toHaveValue('User-entered');
+    expect(screen.getByLabelText('Annual fee amount')).toHaveValue(2500);
+    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'fee_reversal' } });
+    expect(screen.getByLabelText('Reversal condition')).toBeInTheDocument();
+    expect(screen.getByLabelText('Reversal status')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Annual fee amount')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'milestone_spend' } });
+    fireEvent.change(screen.getByLabelText('Milestone target'), { target: { value: '75000' } });
+    fireEvent.change(screen.getByLabelText('Period start'), { target: { value: '2026-01-01' } });
+    fireEvent.change(screen.getByLabelText('Period end'), { target: { value: '2026-03-31' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update reminder' }));
+    await waitFor(() =>
+      expect(updateCardCalendarEvent).toHaveBeenCalledWith('user-1', 'card-1', 'calendar-1', {
+        event_type: 'milestone_spend',
+        label: 'Annual fee review',
+        event_date: '2026-10-05',
+        source_label: 'User-entered',
+        annual_fee_amount: null,
+        fee_reversal_condition: null,
+        fee_reversal_status: null,
+        milestone_spend_target: 75000,
+        milestone_period_start: '2026-01-01',
+        milestone_period_end: '2026-03-31',
+      }),
+    );
     fireEvent.click(screen.getByText('Set a utilization and reward rule'));
     fireEvent.change(screen.getByLabelText('Explicit reward rule'), {
       target: { value: 'Dining' },
@@ -594,5 +737,5 @@ describe('CardsSection activity centre', () => {
       expect(new URLSearchParams(window.location.search).get('cardView')).toBe('pay'),
     );
     expect(screen.getByText('PAYMENT SCENARIOS')).toBeInTheDocument();
-  });
+  }, 20_000);
 });

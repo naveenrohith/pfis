@@ -19,6 +19,10 @@ from app.schemas.dashboard import (
 )
 from app.schemas.financial_position import CashPlanResponse
 from app.schemas.intelligence import GoalResponse
+from app.services.recommendation_ranker import (
+    RecommendationRankerContext,
+    rank_recommendations,
+)
 
 
 @dataclass(frozen=True)
@@ -142,10 +146,32 @@ def apply_recommendation_policy(
         _priority(recommendation, income=income)
         _apply_feedback(recommendation, feedback.get(recommendation.type))
 
-    return sorted(
+    return rank_recommendations(
         recommendations,
-        key=lambda item: item.priority,
-        reverse=True,
+        RecommendationRankerContext(
+            as_of=as_of,
+            evidence_cutoff=as_of,
+            available_liquidity=(
+                float(getattr(cash_plan, "flexible_money", 0.0) or 0.0)
+                if cash_plan is not None and getattr(cash_plan, "flexible_money", None) is not None
+                else None
+            ),
+            safe_to_spend=(
+                float(getattr(cash_plan, "flexible_money", 0.0) or 0.0)
+                if cash_plan is not None and getattr(cash_plan, "flexible_money", None) is not None
+                else None
+            ),
+            reserve_floor=(
+                float(getattr(cash_plan, "approved_reserve_total", 0.0) or 0.0)
+                if cash_plan is not None
+                else 0.0
+            ),
+            feedback_exclusions={
+                kind: values.not_relevant
+                for kind, values in feedback.items()
+                if values.not_relevant > 0
+            },
+        ),
     )
 
 

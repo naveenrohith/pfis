@@ -60,6 +60,13 @@ async def test_dashboard_returns_service_unavailable_without_react_build(
     assert "dashboard-revamp" not in response.text
 
 
+async def test_retired_static_dashboard_is_not_served(client):
+    response = await client.get("/static/dashboard.html")
+
+    assert response.status_code == 404
+    assert "dashboard-revamp" not in response.text
+
+
 def test_production_startup_requires_react_build(tmp_path, monkeypatch):
     monkeypatch.setattr(app_main, "settings", SimpleNamespace(is_production=True))
     monkeypatch.setattr(app_main, "SPA_INDEX", tmp_path / "missing" / "index.html")

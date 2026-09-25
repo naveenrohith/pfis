@@ -66,7 +66,7 @@ PFIS already has the first version of this flow in `backend/app/services/parser/
 | Production posture is incomplete | High | Security, deployment readiness | `README.md` says local/single-user; SQLite default; default dev secret warning in `config.py` | Add production profile, secrets policy, deployment docs, and database migration controls |
 | Background jobs are in-process | Medium | Reliability | `job_service.py` stores active tasks in process memory | Introduce a durable worker/queue before multi-user or hosted use |
 | Reports route builds HTML by string concatenation | Medium | Maintainability, safety | `backend/app/api/routes/reports.py` creates large inline HTML | Move report rendering to templates or reusable view helpers |
-| Static dashboard and Svelte migration coexist | Medium | Product direction | `backend/app/static/` is served while `frontend/` is in migration | Define frontend ownership and migration completion criteria |
+| Static dashboard and Svelte migration coexist | Medium | Product direction | Historical: `backend/app/static/` was served while `frontend/` was in migration | Resolved by React/Vite ownership and static dashboard removal |
 
 ## Readiness Scores
 
@@ -89,7 +89,7 @@ PFIS already has the first version of this flow in `backend/app/services/parser/
 1. Keep the current layered architecture, but introduce explicit connector and pipeline stage contracts before adding SMS, PDFs, bank APIs, or AI-assisted parsing.
 2. Treat parser regression tests as product-critical tests. Every parser behavior change should include a sample input and expected `ParseResult`.
 3. Convert the reports HTML endpoint to a template-based implementation before expanding report complexity.
-4. Decide whether the static dashboard or Svelte app is the primary frontend target and document the migration end state.
+4. Keep the React/Vite app as the primary frontend target and do not recreate the removed static dashboard.
 5. Add production hardening as a roadmap phase, not as incidental fixes.
 
 ## Validation Strategy
@@ -102,4 +102,3 @@ PFIS already has the first version of this flow in `backend/app/services/parser/
 ## Rollback Strategy
 
 Architecture changes should be phased behind existing API contracts. For each modernization phase, preserve the current route behavior, add tests first, and keep the previous service path available until the replacement path is validated.
-

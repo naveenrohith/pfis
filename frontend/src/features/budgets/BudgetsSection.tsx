@@ -15,6 +15,7 @@ import { api } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
 import type { BudgetTracker } from '@/lib/types';
 import { BudgetModal } from './BudgetModal';
+import { BudgetDrilldownDialog } from './BudgetDrilldownDialog';
 
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'danger'> = {
   under: 'success',
@@ -177,6 +178,7 @@ export function BudgetsSection({ embedded = false }: { embedded?: boolean } = {}
                     >
                       View
                     </Button>
+                    <BudgetDrilldownDialog budget={b} currency={currency} />
                   </div>
                 </CardContent>
               </Card>

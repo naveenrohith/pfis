@@ -230,7 +230,7 @@ The first implementation slice after the Phase 1-4 approval work is **Today**. I
 ### Verified application boundary
 
 - The canonical client is the React/Vite application under `frontend/`, served at `/dashboard` when built.
-- The backend's static dashboard is a fallback only. New experience work must not be added to `backend/app/static`.
+- The backend's retired static dashboard has been removed. New experience work must stay in `frontend/`.
 - Existing APIs already cover the first redesign phases: workspace/dashboard state, transactions, insights, analytics, budgets, accounts, deterministic guidance, preferences, Gmail sync/status, pipeline health, reports, and live dashboard updates.
 - The existing app already has browser coverage for keyboard command access, quick add, transactions, dashboard personalization, reduced motion, Axe analysis, and desktop/tablet/mobile screenshots.
 

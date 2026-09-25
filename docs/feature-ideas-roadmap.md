@@ -291,7 +291,9 @@ widget.
   read-only `/api/cards/portfolio/spend-routing` surface now covers this
   bounded slice). A bank-cash/payment-execution optimizer remains future work.
 - Statement-to-ledger coverage score: matched, new, and review counts.
-- Card renewal, annual-fee, fee-reversal, and milestone-spend calendar.
+- Card renewal, annual-fee, fee-reversal, and milestone-spend calendar (backend
+  CRUD and settled-spend evidence are implemented; frontend workspace polish
+  remains future work).
 - Transaction dispute tracker with complaint date, reference number, and status.
 - Security/activity centre for duplicate alerts, high-value activity, and
   pending reversals; it must not claim to block a card at the bank.
@@ -310,7 +312,9 @@ widget.
 - Bill reminders with paid/skipped/due-soon status.
 - Subscription and recurring-payment view.
 - Monthly snapshot: income, spend, savings, and largest period change.
-- Budget drill-down with transactions and remaining amount.
+- Budget drill-down with transactions and remaining amount (read-only
+  `/api/budgets/{budget_id}/drilldown` now covers the backend slice; a frontend
+  drill-down view remains future work).
 - Financial-health checklist for emergency fund, insurance, and nominee tasks.
 - Deterministic unusual-spending alerts based on the user's own history.
 - Exportable monthly reports.

@@ -1,65 +1,34 @@
 """AI-ready explanation routes.
 
-These endpoints provide deterministic explanation scaffolding for embedded AI
-surfaces. They intentionally operate on titles, descriptions, and aggregate
-metrics supplied by the frontend, and never require raw email bodies or secrets.
+Explanations are deterministic and evidence-backed. Supplied aggregates are
+qualified against owned PFIS read models when a user scope is available, and
+never require raw email bodies or secrets.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import get_db
+from app.models.user import User
 from app.schemas.intelligence import ExplainRequest, ExplainResponse
+from app.security import get_current_user_optional, resolve_user_scope
+from app.services.explanation_service import ExplanationService
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
 
 @router.post("/explain", response_model=ExplainResponse)
-async def explain_surface(data: ExplainRequest):
-    """Return a concise deterministic explanation for a dashboard surface."""
-    drivers: list[str] = []
-    next_actions: list[str] = []
-    metrics = data.metrics or {}
-
-    if data.description:
-        drivers.append(data.description)
-
-    for key, value in metrics.items():
-        if value is None or value == "":
-            continue
-        label = str(key).replace("_", " ")
-        drivers.append(f"{label}: {value}")
-
-    surface = data.surface.lower()
-    if "budget" in surface:
-        next_actions.extend(
-            [
-                "Review the category transactions.",
-                "Adjust the monthly limit if the spend is expected.",
-            ]
-        )
-    elif "merchant" in surface:
-        next_actions.extend(
-            ["Open the latest transactions.", "Set a default category if this merchant repeats."]
-        )
-    elif "category" in surface:
-        next_actions.extend(
-            [
-                "Compare the category against last month.",
-                "Check the top merchants driving the total.",
-            ]
-        )
-    elif "health" in surface or "cash" in surface:
-        next_actions.extend(
-            ["Review projected month-end net.", "Create a goal for the weakest signal."]
-        )
-    else:
-        next_actions.extend(
-            ["Open the related workspace section.", "Review any unconfirmed transactions first."]
-        )
-
-    return ExplainResponse(
-        surface=data.surface,
-        summary=f"{data.title} is based on deterministic PFIS aggregates for the selected workspace.",
-        drivers=drivers[:6],
-        next_actions=next_actions[:4],
-        safety_note="Uses aggregate dashboard context only; raw email bodies, tokens, and secrets are not included.",
+async def explain_surface(
+    data: ExplainRequest,
+    user_id: str | None = None,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    """Qualify supplied surface aggregates and return an evidence-backed explanation."""
+    scoped_user_id = (
+        resolve_user_scope(user_id, current_user) if user_id or current_user is not None else None
     )
+    try:
+        return await ExplanationService(db).explain(data, scoped_user_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

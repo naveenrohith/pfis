@@ -287,6 +287,7 @@ async def test_financial_position_route_wrappers_cover_cards_accounts_and_planni
     db = _Db()
     monkeypatch.setattr(routes, "resolve_user_scope", lambda user_id, _current: user_id)
     monkeypatch.setattr(routes, "FinancialPositionService", _FinancialService)
+    monkeypatch.setattr(routes, "RoadmapService", _FinancialService)
     monkeypatch.setattr(routes, "CardPortfolioUpcomingStateService", _AuxService)
     monkeypatch.setattr(routes, "CardPortfolioPaymentPlanService", _AuxService)
     monkeypatch.setattr(routes, "CardSpendRoutingService", _AuxService)

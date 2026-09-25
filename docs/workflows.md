@@ -462,9 +462,13 @@ recoverable.
     schedules a payment, or treats user-entered reward rates as issuer facts.
 14. Grounded Guidance accepts dated card-next-state questions such as what
     happens next, the next statement close, or utilization/limit pressure. It
-    reads the same upcoming-state surface with a `current_card_cycle` temporal
-    scope and returns a review action rather than submitting a payment or
-    claiming live available credit.
+    first passes the in-memory query through a typed deterministic planner with
+    explicit intent slots, confidence, ambiguity refusal, and a read-model list.
+    It then reads the same upcoming-state surface with a `current_card_cycle`
+    temporal scope and returns source IDs, as-of/cutoff dates, ownership-scope
+    and arithmetic/temporal checks, and a review action rather than submitting
+    a payment or claiming live available credit. Raw guidance queries are not
+    persisted or logged.
 15. Cards also compares the next-statement central projection and uncertainty
     range with the user's utilization target. It reports projected headroom,
     projected excess, or an `at_risk` state when only the uncertainty band
@@ -625,10 +629,21 @@ or false-positive rate and therefore remains deferred by the evaluator.
 3. Active savings, category-reduction, and recurring-reduction goals are linked
    to supporting recommendations. A goal that exceeds confirmed flexible money
    is shown as a trade-off, never silently funded from obligations or reserves.
-4. Ranking combines consequence materiality, confidence, urgency,
-   reversibility, goal support, and conflict penalties. Explicit personal
-   feedback can adjust a type only after three completed outcomes and never by
-   more than six priority points; the adjustment is visible in evidence.
+4. The deterministic ranker is versioned as `pfis-recs-1`. It scores already
+   derived candidates only; it does not call an LLM or learned model. Each
+   ranked item includes rank reasons, constraint checks, the evidence cutoff,
+   and a status. Required evidence gaps produce a safe `withheld` item with
+   `missing_evidence` instead of a guessed recommendation.
+5. Ranking combines days-to-due urgency, liquidity impact versus available
+   safe-to-spend, reserve protection, debt/interest-cost reduction, evidence
+   confidence, effort, reversibility, candidate conflicts, and explicit
+   exclusions or dismissal/outcome feedback. When two candidates conflict and
+   cash is insufficient, the infeasible action is withheld with the conflict
+   reason while the feasible reserve-protecting item remains ranked.
+6. Explicit personal feedback can adjust a type only after three completed
+   outcomes and never by more than six priority points; the adjustment is
+   visible in evidence. User exclusions and not-relevant feedback suppress
+   repeated prompting without hiding unrelated recommendation types.
 
 ## Bills, card planning, and household sharing
 

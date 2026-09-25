@@ -113,6 +113,9 @@ Minimum production-candidate checklist:
 - Store backups separately from the application host.
 - Test restoring a backup into a clean database before go-live.
 - Record restore time and any manual commands used.
+- Complete the restore-drill evidence template in
+  `docs/operations/restore-drill-evidence-template.md`; every placeholder must
+  be supplied by the named data-recovery owner.
 
 Use Supabase/PostgreSQL-native backup tooling. The ignored `backend/pfis.db`
 file is a quarantined rollback artifact from the completed legacy cutover. It
@@ -370,3 +373,18 @@ TLS termination, firewall/network policy, managed backup schedules, hosted log
 shipping, and alert routing remain provider controls. The release gate requires
 their identifiers in its evidence so they cannot be silently omitted; never
 commit credentials or fabricated ownership names.
+
+## Operations Evidence Templates
+
+Use the templates in `docs/operations/` for release and incident handoff
+evidence:
+
+- `incident-response-template.md`
+- `alert-routing-ownership-template.md`
+- `restore-drill-evidence-template.md`
+- `rollback-evidence-template.md`
+
+The templates intentionally contain placeholders for environment-owned values.
+Named deployment owners must replace those placeholders in a protected
+`RELEASE_EVIDENCE_DIR`. They are not proof that a hosted alert route, restore
+drill, incident rehearsal, or rollback rehearsal has already been performed.

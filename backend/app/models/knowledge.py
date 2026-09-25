@@ -45,3 +45,33 @@ class TemporalEventDecision(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class SubscriptionReviewAction(Base):
+    """Latest user-owned review action for one recurring merchant stream."""
+
+    __tablename__ = "subscription_review_actions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "stream_key", name="uq_subscription_review_user_stream"),
+        Index("ix_subscription_review_actions_user_action", "user_id", "action"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    stream_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    merchant: Mapped[str] = mapped_column(String(255), nullable=False)
+    financial_account_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
+    action: Mapped[str] = mapped_column(String(24), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )

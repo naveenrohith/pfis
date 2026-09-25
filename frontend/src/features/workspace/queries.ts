@@ -36,6 +36,8 @@ export const queryKeys = {
   anomalyAdjudications: (u: string) => ['anomalyAdjudications', u] as const,
   anomalySamples: (u: string, m: number, y: number) => ['anomalySamples', u, m, y] as const,
   budgets: (u: string, m: number, y: number) => ['budgets', u, m, y] as const,
+  budgetDrilldown: (u: string, b: string, m: number, y: number, limit: number) =>
+    ['budgetDrilldown', u, b, m, y, limit] as const,
   workspace: (u: string, m: number, y: number) => ['workspace', u, m, y] as const,
   merchants: (u: string, m: number, y: number) => ['merchants', u, m, y] as const,
   learnedMerchantRules: (u: string) => ['learnedMerchantRules', u] as const,
@@ -309,6 +311,17 @@ export function useBudgets() {
     queryKey: queryKeys.budgets(userId, month, year),
     queryFn: () => api.budgetsTrack(userId, month, year),
     enabled: !!userId,
+    ...financialQueryPolicy,
+  });
+}
+
+export function useBudgetDrilldown(budgetId: string, enabled = true, limit = 100) {
+  const userId = useUserId();
+  const { month, year } = useWorkspace();
+  return useQuery({
+    queryKey: queryKeys.budgetDrilldown(userId, budgetId, month, year, limit),
+    queryFn: () => api.budgetDrilldown(budgetId, userId, month, year, limit),
+    enabled: !!userId && !!budgetId && enabled,
     ...financialQueryPolicy,
   });
 }

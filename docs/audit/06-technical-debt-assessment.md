@@ -15,7 +15,7 @@ PFIS does not show the usual signs of a chaotic MVP. The technical debt is conce
 | Inline HTML report rendering | Medium | Resolved | Maintainability, escaping risk | Extracted to `report_service.py` / `report_renderer.py` with `html.escape` | Keep rendering out of routes |
 | In-process background jobs | Medium | Open (local-acceptable) | Reliability | `job_service.py` uses `asyncio.create_task` and `_active_tasks` | Use durable queue/worker for hosted/multi-user only |
 | Local-first config | High for production | Resolved | Security, operations | `config.py` fails closed in the production profile | Keep production profile explicit |
-| Static dashboard plus Svelte migration | Medium | Open | UI duplication | `backend/app/static/` and `frontend/` coexist | Retire static dashboard after Svelte parity |
+| Static dashboard plus frontend migration | Medium | Resolved | UI duplication | Historical: `backend/app/static/` and `frontend/` coexisted | Static dashboard removed after React parity review |
 | Broad generic parser fallback | Medium | Resolved (tracking) | Data quality | `ParseResult.used_fallback` + pipeline `fallback_parsed` metric | Add review queue if fallback rate is high |
 | Mixed schema paths | Medium | Resolved | Schema drift | `init_db()` skips `create_all` in production; parity test enforces ORM↔migration | Production uses `alembic upgrade head` |
 | Duplicate `ValueError` masking | Low | Resolved | Data correctness | Typed `DuplicateTransactionError`; pipeline catches it specifically | — |
@@ -31,11 +31,11 @@ PFIS does not show the usual signs of a chaotic MVP. The technical debt is conce
 
 ## Dead Code and Redundancy Review
 
-No obvious broad deletion should be performed as part of this audit. The repo already went through cleanup and the active dashboard assets are `dashboard-revamp.css` and `dashboard-revamp.js`. Future cleanup should use evidence:
+No obvious broad deletion should be performed as part of this historical audit. The retired dashboard assets have since been removed. Future cleanup should use evidence:
 
 - imports unused by Ruff
 - files not referenced by routes, docs, tests, or static HTML
-- stale frontend assets after the Svelte migration decision
+- stale frontend assets after frontend ownership decisions
 - obsolete parser branches after fixture coverage confirms no use
 
 ## Recommended Solution
@@ -65,4 +65,3 @@ Technical debt work should be small and test-first. Do not combine parser change
 ## Rollback Strategy
 
 Keep debt-reduction commits small. If a refactor fails, revert only that commit and retain added regression tests when they describe correct behavior.
-

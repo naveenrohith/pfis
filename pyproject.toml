@@ -50,7 +50,6 @@ exclude = [
 source = ["backend/app"]
 branch = true
 omit = [
-    "backend/app/static/*",
     "*/__init__.py",
 ]
 

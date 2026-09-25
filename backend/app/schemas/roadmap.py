@@ -85,6 +85,89 @@ class CardDisputeResponse(CardDisputeCreate):
     model_config = ConfigDict(from_attributes=True)
 
 
+CardCalendarEventType = Literal[
+    "renewal", "annual_fee", "fee_reversal", "milestone_spend", "milestone"
+]
+CardCalendarSourceKind = Literal["manual", "statement"]
+FeeReversalStatus = Literal["unknown", "pending", "waived", "reversed", "not_eligible"]
+
+
+class CardCalendarTransactionEvidence(BaseModel):
+    transaction_id: str
+    transaction_date: date
+    amount: Decimal
+    direction: Literal["spend", "refund"]
+    merchant: str | None = None
+    source_kind: str
+    source_identifier: str | None = None
+
+
+class CardCalendarMilestoneProgress(BaseModel):
+    status: Literal["ready", "insufficient"]
+    counted_amount: Decimal = Field(..., max_digits=18, decimal_places=2)
+    target_amount: Decimal | None = Field(None, max_digits=18, decimal_places=2)
+    remaining_amount: Decimal | None = Field(None, max_digits=18, decimal_places=2)
+    period_start: date | None = None
+    period_end: date | None = None
+    reason: str | None = None
+    evidence: list[CardCalendarTransactionEvidence] = Field(default_factory=list)
+
+
+class CardCalendarItemCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    event_type: CardCalendarEventType
+    label: str = Field(..., min_length=1, max_length=160)
+    event_date: date
+    source_kind: CardCalendarSourceKind = "manual"
+    source_label: str = Field("User-entered", min_length=1, max_length=160)
+    source_identifier: str | None = Field(None, max_length=128)
+    annual_fee_amount: Decimal | None = Field(None, gt=0, max_digits=18, decimal_places=2)
+    fee_reversal_condition: str | None = Field(None, max_length=500)
+    fee_reversal_status: FeeReversalStatus | None = None
+    milestone_spend_target: Decimal | None = Field(None, gt=0, max_digits=18, decimal_places=2)
+    milestone_period_start: date | None = None
+    milestone_period_end: date | None = None
+
+    @model_validator(mode="after")
+    def validate_event_details(self) -> "CardCalendarItemCreate":
+        # Reminder-only items stay valid; unknown terms surface as insufficient progress.
+        if self.milestone_spend_target is not None and (
+            self.milestone_period_start is None or self.milestone_period_end is None
+        ):
+            raise ValueError("Milestone-spend targets require a period")
+        if (
+            self.milestone_period_start is not None
+            and self.milestone_period_end is not None
+            and self.milestone_period_end < self.milestone_period_start
+        ):
+            raise ValueError("Milestone-spend period end must not be before the start")
+        return self
+
+
+class CardCalendarItemUpdate(BaseModel):
+    event_type: CardCalendarEventType | None = None
+    label: str | None = Field(None, min_length=1, max_length=160)
+    event_date: date | None = None
+    source_kind: CardCalendarSourceKind | None = None
+    source_label: str | None = Field(None, min_length=1, max_length=160)
+    source_identifier: str | None = Field(None, max_length=128)
+    annual_fee_amount: Decimal | None = Field(None, gt=0, max_digits=18, decimal_places=2)
+    fee_reversal_condition: str | None = Field(None, max_length=500)
+    fee_reversal_status: FeeReversalStatus | None = None
+    milestone_spend_target: Decimal | None = Field(None, gt=0, max_digits=18, decimal_places=2)
+    milestone_period_start: date | None = None
+    milestone_period_end: date | None = None
+
+
+class CardCalendarItemResponse(CardCalendarItemCreate):
+    id: str
+    user_id: str
+    financial_account_id: str
+    created_at: datetime
+    milestone_progress: CardCalendarMilestoneProgress | None = None
+    model_config = ConfigDict(from_attributes=True)
+
+
 class HouseholdCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=160)
 

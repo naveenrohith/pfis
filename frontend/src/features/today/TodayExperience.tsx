@@ -28,6 +28,12 @@ import { formatCurrency, formatDate, formatTime } from '@/lib/format';
 import type { CashPlan, RecommendationConsequence, RecommendationDecision } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { buildTodayBriefCopy } from './todayCopy';
+import {
+  deriveTodayState,
+  type TodayFinancialState,
+  type TodayStaleSync,
+  type TodayUnavailableSignal,
+} from './todayState';
 
 export function TodayExperience() {
   const { user } = useAuth();
@@ -79,26 +85,56 @@ export function TodayExperience() {
     onError: (error) => notify((error as Error).message, 'error'),
   });
 
-  if (workspace.isLoading && !workspace.data) return <TodaySkeleton />;
+  const todayState = deriveTodayState({
+    data: workspace.data,
+    workspaceLoading: workspace.isLoading,
+    workspaceError: workspace.isError,
+    cashPlanError: cashPlan.isError,
+    decisionsError: decisions.isError,
+    syncRunning: running,
+    now: Date.now(),
+  });
 
-  if (workspace.isError && !workspace.data) {
+  if (todayState.kind === 'loading') return <TodaySkeleton />;
+
+  if (todayState.kind === 'full-error') {
     return (
-      <div className="space-y-8">
+      <div className="space-y-8" data-today-state="full-error">
         <PageIntro
           eyebrow="Financial brief"
-          title="Your financial story could not be loaded."
-          description="PFIS kept your workspace intact. Retry the live summary or open Activity to inspect the source records."
+          title="Your financial brief could not be loaded."
+          description="Your records are unchanged. PFIS could not reach this month’s summary, so it is not showing any figures rather than guessing."
         />
-        <EmptyState
-          icon={<CircleAlert className="h-5 w-5" />}
-          title="The summary is temporarily unavailable"
-          description={(workspace.error as Error).message}
-          action={
-            <Button onClick={() => void workspace.refetch()}>
-              <RefreshCw className="h-4 w-4" /> Retry summary
-            </Button>
-          }
-        />
+        <section role="alert" aria-labelledby="today-full-error-title">
+          <h2 id="today-full-error-title" className="sr-only">
+            Financial brief unavailable
+          </h2>
+          <EmptyState
+            icon={<CircleAlert aria-hidden="true" className="h-5 w-5" />}
+            title="The summary is temporarily unavailable"
+            description="Retry the summary. If it keeps failing, check your connected sources in Data & settings."
+            action={
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  aria-disabled={workspace.isFetching || undefined}
+                  onClick={() => {
+                    if (!workspace.isFetching) void workspace.refetch();
+                  }}
+                >
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={cn('h-4 w-4', workspace.isFetching && 'motion-safe:animate-spin')}
+                  />
+                  {workspace.isFetching ? 'Retrying summary…' : 'Retry summary'}
+                </Button>
+                <Button type="button" variant="outline" onClick={() => scrollTo('inbox')}>
+                  Open Data &amp; settings <ArrowRight aria-hidden="true" className="h-4 w-4" />
+                </Button>
+              </div>
+            }
+          />
+        </section>
       </div>
     );
   }
@@ -139,7 +175,8 @@ export function TodayExperience() {
   const actionTarget = primaryAction?.target ?? 'insights';
   const recurringBurden = financialHealth?.recurring_burden;
   const evidence = (data?.insights ?? []).slice(0, 2);
-  const lowData = financialHealth?.data_sufficiency === 'low';
+  const financialState = todayState.financial;
+  const lowData = financialState === 'low-data';
   const transactionCount = snapshot?.transaction_count ?? 0;
   const safeToSpendReviewNeeded =
     !cashPlan.isLoading && (cashPlan.isError || cashPlan.data?.readiness !== 'ready');
@@ -150,10 +187,21 @@ export function TodayExperience() {
     name,
     currency,
     recommendationTitle: primaryAction?.title,
+    financialState,
   });
+  const noActionCopy = noActionGuidance(financialState);
+  const retryUnavailable = () => {
+    if (todayState.unavailable.includes('summary')) void workspace.refetch();
+    if (todayState.unavailable.includes('safe-to-spend')) void cashPlan.refetch();
+    if (todayState.unavailable.includes('action-status')) void decisions.refetch();
+  };
+  const retryingUnavailable =
+    (todayState.unavailable.includes('summary') && workspace.isFetching) ||
+    (todayState.unavailable.includes('safe-to-spend') && cashPlan.isFetching) ||
+    (todayState.unavailable.includes('action-status') && decisions.isFetching);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-today-state={todayState.kind}>
       <PageIntro
         eyebrow={`${greeting(user?.timezone ?? 'Asia/Kolkata')} · ${currentView === 'overview' ? 'Financial brief' : currentView === 'guidance' ? 'Evidence' : 'Action history'}`}
         title={
@@ -240,23 +288,49 @@ export function TodayExperience() {
         </nav>
       </WorkspaceContextBar>
 
+      <TodayStatusNotices
+        stale={todayState.stale}
+        unavailable={todayState.unavailable}
+        retrying={retryingUnavailable}
+        onRetry={retryUnavailable}
+        onOpenSources={() => scrollTo('inbox')}
+      />
+
       {currentView === 'overview' ? (
         <div className="scroll-mt-24 space-y-6">
           {lowData ? (
-            <div className="flex items-start gap-3 border-y border-warning/25 bg-warning/5 px-4 py-3 text-sm">
-              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-              <div>
-                <p className="font-extrabold">This brief has limited evidence</p>
-                <p className="mt-1 text-muted-foreground">
-                  PFIS found fewer than three transactions in this period. Trends and
-                  recommendations will become more reliable as activity arrives.
-                </p>
+            <section
+              aria-labelledby="today-low-data-title"
+              className="flex flex-col gap-3 border-y border-warning/25 bg-warning/5 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="flex items-start gap-3">
+                <CircleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                <div>
+                  <h2 id="today-low-data-title" className="font-extrabold">
+                    This brief has limited evidence
+                  </h2>
+                  <p className="mt-1 text-muted-foreground">
+                    {transactionCount === 0
+                      ? 'PFIS has no transactions in this period yet.'
+                      : 'PFIS found fewer than three transactions in this period.'}{' '}
+                    Connect a source or import activity; projections stay hidden until there is
+                    enough evidence.
+                  </p>
+                </div>
               </div>
-            </div>
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0 self-start sm:self-center"
+                onClick={() => scrollTo('inbox')}
+              >
+                Connect or import activity <ArrowRight aria-hidden="true" className="h-4 w-4" />
+              </Button>
+            </section>
           ) : null}
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,.65fr)]">
-            <FinancialHero>
+            <FinancialHero className={cn(financialState === 'deficit' && 'bg-muted/60')}>
               <p className="text-sm text-muted-foreground">Net cash flow this month</p>
               <p
                 className={cn(
@@ -278,6 +352,7 @@ export function TodayExperience() {
               <FinancialHorizon
                 plan={cashPlan.data}
                 loading={cashPlan.isLoading}
+                unavailable={cashPlan.isError}
                 onComplete={() => scrollTo('cash-plan')}
               />
             </FinancialHero>
@@ -311,13 +386,10 @@ export function TodayExperience() {
             ) : (
               <InsightSurface
                 icon={<Sparkles className="h-4 w-4" />}
-                eyebrow={primaryAction ? 'Recommended next' : 'No urgent action'}
-                title={primaryAction?.title ?? 'Explore the drivers behind this month'}
-                description={
-                  primaryAction?.description ??
-                  'PFIS has no urgent action for this period. Review the evidence and keep your data current.'
-                }
-                tone={primaryAction ? 'intelligence' : 'neutral'}
+                eyebrow={primaryAction ? 'Recommended next' : noActionCopy.eyebrow}
+                title={primaryAction?.title ?? noActionCopy.title}
+                description={primaryAction?.description ?? noActionCopy.description}
+                tone={primaryAction ? 'intelligence' : noActionCopy.tone}
                 className="h-full"
                 meta={
                   <div className="flex flex-col gap-3">
@@ -462,13 +534,25 @@ export function TodayExperience() {
               />
               <Pulse
                 label="Projected month end"
-                value={formatCurrency(projection?.projected_net ?? netCashFlow, currency)}
-                context={
-                  projection
-                    ? `At ${formatCurrency(projection.daily_spend_rate, currency)} per day`
-                    : 'Projection is being prepared'
+                value={
+                  lowData
+                    ? 'Not projected'
+                    : formatCurrency(projection?.projected_net ?? netCashFlow, currency)
                 }
-                tone={(projection?.projected_net ?? netCashFlow) < 0 ? 'warning' : 'positive'}
+                context={
+                  lowData
+                    ? 'PFIS needs more activity before projecting this month'
+                    : projection
+                      ? `At ${formatCurrency(projection.daily_spend_rate, currency)} per day`
+                      : 'Projection is being prepared'
+                }
+                tone={
+                  lowData
+                    ? 'neutral'
+                    : (projection?.projected_net ?? netCashFlow) < 0
+                      ? 'warning'
+                      : 'positive'
+                }
               />
             </div>
           </section>
@@ -623,7 +707,14 @@ export function TodayExperience() {
 
 function TodaySkeleton() {
   return (
-    <div className="space-y-10" role="status" aria-label="Loading financial brief">
+    <div
+      className="space-y-10"
+      role="status"
+      aria-busy="true"
+      aria-label="Loading financial brief"
+      data-today-state="loading"
+    >
+      <span className="sr-only">Loading your position, priority action, and signals.</span>
       <div className="space-y-3">
         <Skeleton className="h-4 w-36" />
         <Skeleton className="h-12 max-w-3xl" />
@@ -638,16 +729,165 @@ function TodaySkeleton() {
   );
 }
 
+const UNAVAILABLE_SIGNAL_LABELS: Record<TodayUnavailableSignal, string> = {
+  summary: 'the monthly summary',
+  'safe-to-spend': 'Safe to spend',
+  'action-status': 'action status',
+};
+
+function TodayStatusNotices({
+  stale,
+  unavailable,
+  retrying,
+  onRetry,
+  onOpenSources,
+}: {
+  stale: TodayStaleSync | null;
+  unavailable: TodayUnavailableSignal[];
+  retrying: boolean;
+  onRetry: () => void;
+  onOpenSources: () => void;
+}) {
+  if (!stale && !unavailable.length) return null;
+  const signalList = formatList(unavailable.map((signal) => UNAVAILABLE_SIGNAL_LABELS[signal]));
+
+  return (
+    <div className="space-y-3">
+      {stale ? (
+        <section
+          role="status"
+          aria-labelledby="today-stale-title"
+          className="flex flex-col gap-3 border-l-2 border-warning bg-warning/5 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-start gap-3">
+            <Clock3 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <div>
+              <h2 id="today-stale-title" className="font-extrabold">
+                {stale.reason === 'failed'
+                  ? 'The latest sync did not finish'
+                  : 'Showing last known values'}
+              </h2>
+              <p className="mt-1 text-muted-foreground">
+                {stale.lastSyncedAt
+                  ? `Sources last synced ${formatDate(stale.lastSyncedAt)} at ${formatTime(stale.lastSyncedAt)}.`
+                  : 'Sources have not completed a sync yet.'}{' '}
+                Newer activity may be missing until they refresh.
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="shrink-0 self-start sm:self-center"
+            onClick={onOpenSources}
+          >
+            Review data sources <ArrowRight aria-hidden="true" className="h-4 w-4" />
+          </Button>
+        </section>
+      ) : null}
+      {unavailable.length ? (
+        <section
+          role="status"
+          aria-labelledby="today-partial-error-title"
+          className="flex flex-col gap-3 border-l-2 border-warning bg-warning/5 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-start gap-3">
+            <CircleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <div>
+              <h2 id="today-partial-error-title" className="font-extrabold">
+                Some signals could not be refreshed
+              </h2>
+              <p className="mt-1 text-muted-foreground">
+                PFIS could not refresh {signalList}.{' '}
+                {unavailable.includes('summary')
+                  ? 'The figures below are from the last successful load.'
+                  : 'The rest of this page is unaffected.'}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-disabled={retrying || undefined}
+            className="shrink-0 self-start sm:self-center"
+            onClick={() => {
+              if (!retrying) onRetry();
+            }}
+          >
+            <RefreshCw
+              aria-hidden="true"
+              className={cn('h-4 w-4', retrying && 'motion-safe:animate-spin')}
+            />
+            {retrying ? 'Retrying…' : 'Retry unavailable signals'}
+          </Button>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function noActionGuidance(financialState: TodayFinancialState | null): {
+  eyebrow: string;
+  title: string;
+  description: string;
+  tone: 'neutral' | 'attention';
+} {
+  if (financialState === 'deficit') {
+    return {
+      eyebrow: 'Start here',
+      title: 'Find the largest driver of this shortfall',
+      description:
+        'Spending is above income this month. Review the evidence to choose the adjustment with the most near-term effect.',
+      tone: 'attention',
+    };
+  }
+  if (financialState === 'attention') {
+    return {
+      eyebrow: 'Worth a look',
+      title: 'Review the pressure building this month',
+      description:
+        'You are ahead so far, but one signal is moving the wrong way. Review the evidence before it grows.',
+      tone: 'attention',
+    };
+  }
+  if (financialState === 'low-data') {
+    return {
+      eyebrow: 'No recommendation yet',
+      title: 'Add activity before acting on this month',
+      description:
+        'PFIS needs more transactions before it can recommend an action with confidence.',
+      tone: 'neutral',
+    };
+  }
+  return {
+    eyebrow: 'No urgent action',
+    title: 'Explore the drivers behind this month',
+    description:
+      'PFIS has no urgent action for this period. Review the evidence and keep your data current.',
+    tone: 'neutral',
+  };
+}
+
+function formatList(items: string[]) {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
 function FinancialHorizon({
   plan,
   loading,
+  unavailable,
   onComplete,
 }: {
   plan?: CashPlan;
   loading: boolean;
+  unavailable: boolean;
   onComplete: () => void;
 }) {
-  const readyPlan = plan?.readiness === 'ready' && plan.flexible_money != null ? plan : null;
+  const readyPlan =
+    !unavailable && plan?.readiness === 'ready' && plan.flexible_money != null ? plan : null;
   const ready = readyPlan != null;
   const currentPosition =
     plan?.planning_balance ?? plan?.estimated_balance ?? plan?.verified_balance;
@@ -673,20 +913,24 @@ function FinancialHorizon({
           <h2 id="money-horizon-title" className="mt-1 text-xl font-extrabold tracking-tight">
             {loading
               ? 'Checking planning inputs'
-              : readyPlan
-                ? formatCurrency(readyPlan.flexible_money, readyPlan.currency)
-                : plan
-                  ? missingAction[plan.readiness] || 'Review calculation inputs'
-                  : 'Set up a bank position'}
+              : unavailable
+                ? 'Safe to spend is unavailable'
+                : readyPlan
+                  ? formatCurrency(readyPlan.flexible_money, readyPlan.currency)
+                  : plan
+                    ? missingAction[plan.readiness] || 'Review calculation inputs'
+                    : 'Set up a bank position'}
           </h2>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             {readyPlan
               ? `Flexible until ${formatDate(readyPlan.next_income_date)} · ${readyPlan.balance_basis === 'estimated' ? 'estimated position' : 'observed position'}${currentPositionAsOf ? ` as of ${formatDate(currentPositionAsOf)}` : ''}`
-              : 'Not calculated until the required evidence is ready.'}
+              : unavailable
+                ? 'PFIS could not refresh the planning inputs, so no amount is shown.'
+                : 'Not calculated until the required evidence is ready.'}
           </p>
         </div>
         <Badge variant={ready ? 'success' : 'warning'}>
-          {ready ? 'Ready for planning' : 'Evidence needed'}
+          {ready ? 'Ready for planning' : unavailable ? 'Not refreshed' : 'Evidence needed'}
         </Badge>
       </div>
 

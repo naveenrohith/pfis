@@ -1,6 +1,15 @@
 """Integration coverage for roadmap phases 7 and 8."""
 
 from datetime import date, timedelta
+from decimal import Decimal
+
+from app.models.transaction import (
+    CardEvent,
+    PaymentMethod,
+    PaymentRail,
+    Transaction,
+    TransactionType,
+)
 
 from tests.pytest.helpers import create_user
 
@@ -140,6 +149,207 @@ async def test_card_disputes_require_owned_card_and_matching_statement_line(clie
     )
     resolved.raise_for_status()
     assert resolved.json()["status"] == "resolved"
+
+
+async def test_card_calendar_lifecycle_and_milestone_progress(client, test_session_factory):
+    owner = await create_user(client, "calendar-owner")
+    other = await create_user(client, "calendar-other")
+    card = await _account(client, owner["id"], "credit_card", "4455")
+    other_card = await _account(client, other["id"], "credit_card", "4466")
+    period_start = date(2026, 9, 1)
+    period_end = date(2026, 9, 30)
+
+    async with test_session_factory() as session:
+        session.add_all(
+            [
+                Transaction(
+                    user_id=owner["id"],
+                    financial_account_id=card["id"],
+                    amount=Decimal("1000.00"),
+                    currency="INR",
+                    transaction_type=TransactionType.DEBIT,
+                    payment_method=PaymentMethod.CREDIT_CARD,
+                    payment_rail=PaymentRail.OTHER,
+                    card_event=CardEvent.PURCHASE,
+                    transaction_status="settled",
+                    merchant_raw="Book Store",
+                    merchant_normalized="Book Store",
+                    transaction_date=date(2026, 9, 5),
+                    source_kind="statement",
+                    source_identifier="stmt-line-1",
+                    confidence_score=1.0,
+                    reviewed_flag=True,
+                    review_outcome="newly_imported",
+                ),
+                Transaction(
+                    user_id=owner["id"],
+                    financial_account_id=card["id"],
+                    amount=Decimal("300.00"),
+                    currency="INR",
+                    transaction_type=TransactionType.REFUND,
+                    payment_method=PaymentMethod.CREDIT_CARD,
+                    payment_rail=PaymentRail.OTHER,
+                    card_event=CardEvent.REFUND,
+                    transaction_status="posted",
+                    merchant_raw="Book Store",
+                    merchant_normalized="Book Store",
+                    transaction_date=date(2026, 9, 8),
+                    source_kind="statement",
+                    source_identifier="stmt-line-2",
+                    confidence_score=1.0,
+                    reviewed_flag=True,
+                    review_outcome="newly_imported",
+                ),
+                Transaction(
+                    user_id=owner["id"],
+                    financial_account_id=card["id"],
+                    amount=Decimal("500.00"),
+                    currency="INR",
+                    transaction_type=TransactionType.DEBIT,
+                    payment_method=PaymentMethod.CREDIT_CARD,
+                    payment_rail=PaymentRail.OTHER,
+                    card_event=CardEvent.PURCHASE,
+                    transaction_status="pending",
+                    merchant_raw="Pending Merchant",
+                    merchant_normalized="Pending Merchant",
+                    transaction_date=date(2026, 9, 9),
+                    source_kind="email",
+                    confidence_score=1.0,
+                    reviewed_flag=True,
+                    review_outcome="newly_imported",
+                ),
+                Transaction(
+                    user_id=other["id"],
+                    financial_account_id=other_card["id"],
+                    amount=Decimal("7000.00"),
+                    currency="INR",
+                    transaction_type=TransactionType.DEBIT,
+                    payment_method=PaymentMethod.CREDIT_CARD,
+                    payment_rail=PaymentRail.OTHER,
+                    card_event=CardEvent.PURCHASE,
+                    transaction_status="settled",
+                    merchant_raw="Other User",
+                    merchant_normalized="Other User",
+                    transaction_date=date(2026, 9, 10),
+                    source_kind="statement",
+                    confidence_score=1.0,
+                    reviewed_flag=True,
+                    review_outcome="newly_imported",
+                ),
+            ]
+        )
+        await session.commit()
+
+    invalid = await client.post(
+        f"/api/cards/{card['id']}/calendar?user_id={owner['id']}",
+        json={
+            "event_type": "milestone_spend",
+            "label": "Quarterly milestone",
+            "event_date": period_end.isoformat(),
+            "source_kind": "manual",
+            "source_label": "User-entered bank offer",
+            "milestone_spend_target": 2000,
+            "milestone_period_start": period_end.isoformat(),
+            "milestone_period_end": period_start.isoformat(),
+        },
+    )
+    assert invalid.status_code == 422
+
+    created = await client.post(
+        f"/api/cards/{card['id']}/calendar?user_id={owner['id']}",
+        json={
+            "event_type": "milestone_spend",
+            "label": "Quarterly milestone",
+            "event_date": period_end.isoformat(),
+            "source_kind": "manual",
+            "source_label": "User-entered bank offer",
+            "milestone_spend_target": 2000,
+            "milestone_period_start": period_start.isoformat(),
+            "milestone_period_end": period_end.isoformat(),
+        },
+    )
+    created.raise_for_status()
+    item = created.json()
+    assert item["milestone_progress"]["counted_amount"] == "700.00"
+    assert item["milestone_progress"]["remaining_amount"] == "1300.00"
+    evidence = item["milestone_progress"]["evidence"]
+    assert [row["direction"] for row in evidence] == ["spend", "refund"]
+    assert {row["source_identifier"] for row in evidence} == {"stmt-line-1", "stmt-line-2"}
+
+    listed = await client.get(f"/api/cards/{card['id']}/calendar?user_id={owner['id']}")
+    listed.raise_for_status()
+    assert [row["id"] for row in listed.json()] == [item["id"]]
+
+    hidden_list = await client.get(f"/api/cards/{card['id']}/calendar?user_id={other['id']}")
+    assert hidden_list.status_code == 404
+    hidden_update = await client.patch(
+        f"/api/cards/{card['id']}/calendar/{item['id']}?user_id={other['id']}",
+        json={"label": "Cross-user edit"},
+    )
+    assert hidden_update.status_code == 404
+
+    updated = await client.patch(
+        f"/api/cards/{card['id']}/calendar/{item['id']}?user_id={owner['id']}",
+        json={"label": "Updated milestone", "milestone_spend_target": 1000},
+    )
+    updated.raise_for_status()
+    assert updated.json()["label"] == "Updated milestone"
+    assert updated.json()["milestone_progress"]["remaining_amount"] == "300.00"
+
+    deleted = await client.delete(
+        f"/api/cards/{card['id']}/calendar/{item['id']}?user_id={owner['id']}"
+    )
+    assert deleted.status_code == 204
+    empty = await client.get(f"/api/cards/{card['id']}/calendar?user_id={owner['id']}")
+    empty.raise_for_status()
+    assert empty.json() == []
+
+
+async def test_card_calendar_fee_and_reversal_fields_are_source_labelled(client):
+    owner = await create_user(client, "calendar-fee")
+    card = await _account(client, owner["id"], "credit_card", "7788")
+    renewal = await client.post(
+        f"/api/cards/{card['id']}/calendar?user_id={owner['id']}",
+        json={
+            "event_type": "renewal",
+            "label": "Card renewal",
+            "event_date": date(2027, 1, 31).isoformat(),
+            "source_kind": "statement",
+            "source_label": "January statement",
+            "source_identifier": "statement:jan",
+        },
+    )
+    renewal.raise_for_status()
+    assert renewal.json()["source_label"] == "January statement"
+
+    fee = await client.post(
+        f"/api/cards/{card['id']}/calendar?user_id={owner['id']}",
+        json={
+            "event_type": "annual_fee",
+            "label": "Annual fee",
+            "event_date": date(2027, 2, 1).isoformat(),
+            "source_kind": "statement",
+            "source_label": "Fee row",
+            "annual_fee_amount": 999,
+        },
+    )
+    fee.raise_for_status()
+    assert fee.json()["annual_fee_amount"] == "999.00"
+
+    reversal = await client.post(
+        f"/api/cards/{card['id']}/calendar?user_id={owner['id']}",
+        json={
+            "event_type": "fee_reversal",
+            "label": "Fee waiver review",
+            "event_date": date(2027, 3, 1).isoformat(),
+            "source_kind": "manual",
+            "source_label": "User-entered issuer message",
+            "fee_reversal_condition": "User-entered: spend threshold confirmed by cardholder.",
+            "fee_reversal_status": "pending",
+        },
+    )
+    reversal.raise_for_status()
+    assert reversal.json()["fee_reversal_status"] == "pending"
 
 
 async def test_households_require_one_shared_ledger_currency(client):

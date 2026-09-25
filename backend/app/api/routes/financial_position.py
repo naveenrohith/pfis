@@ -22,9 +22,6 @@ from app.schemas.balance_forecast import (
 from app.schemas.financial_position import (
     AccountPositionResponse,
     BalanceReconciliationResponse,
-    CardCalendarEventCreate,
-    CardCalendarEventResponse,
-    CardCalendarEventUpdate,
     CardDueRunwayResponse,
     CardOverviewResponse,
     CardPaymentIntentCreate,
@@ -71,7 +68,12 @@ from app.schemas.financial_position import (
     StatementReviewItemResponse,
     StatementTextImport,
 )
-from app.security import get_current_user_optional, resolve_user_scope
+from app.schemas.roadmap import (
+    CardCalendarItemCreate,
+    CardCalendarItemResponse,
+    CardCalendarItemUpdate,
+)
+from app.security import ensure_user_owns_resource, get_current_user_optional, resolve_user_scope
 from app.services.balance_forecast_accountability_service import (
     BalanceForecastAccountabilityService,
 )
@@ -85,6 +87,7 @@ from app.services.card_upcoming_state_service import CardUpcomingStateService
 from app.services.card_utilization_history_service import CardUtilizationHistoryService
 from app.services.financial_position_service import FinancialPositionService
 from app.services.hdfc_statement_extractor import detect_hdfc_statement_document
+from app.services.roadmap_service import RoadmapService
 from app.services.statement_analysis import analyze_statement
 from app.services.statement_analysis_review_service import StatementAnalysisReviewService
 from app.services.statement_detection import detect_statement
@@ -92,6 +95,12 @@ from app.services.statement_pdf_extractor import StatementPdfText, extract_state
 
 router = APIRouter(tags=["Financial position"])
 logger = logging.getLogger(__name__)
+
+
+def _scoped_user_id(user_id: str, current_user: User | None) -> str:
+    scoped_user_id = resolve_user_scope(user_id, current_user)
+    ensure_user_owns_resource(scoped_user_id, current_user)
+    return scoped_user_id
 
 
 async def _extract_statement_pdf(payload: bytes) -> StatementPdfText:
@@ -677,19 +686,36 @@ async def update_card_payment_intent(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post(
-    "/cards/{account_id}/calendar", response_model=CardCalendarEventResponse, status_code=201
-)
-async def create_card_calendar_event(
+@router.get("/cards/{account_id}/calendar", response_model=list[CardCalendarItemResponse])
+async def list_card_calendar_events(
     account_id: str,
-    data: CardCalendarEventCreate,
     user_id: str,
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        return await FinancialPositionService(db).create_card_calendar_event(
-            resolve_user_scope(user_id, current_user), account_id, data
+        return await RoadmapService(db).list_card_calendar(
+            _scoped_user_id(user_id, current_user), account_id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/cards/{account_id}/calendar", response_model=CardCalendarItemResponse, status_code=201
+)
+async def create_card_calendar_event(
+    account_id: str,
+    data: CardCalendarItemCreate,
+    user_id: str,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await RoadmapService(db).create_card_calendar(
+            _scoped_user_id(user_id, current_user), account_id, data
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -699,20 +725,23 @@ async def create_card_calendar_event(
 
 @router.patch(
     "/cards/{account_id}/calendar/{event_id}",
-    response_model=CardCalendarEventResponse,
+    response_model=CardCalendarItemResponse,
 )
 async def update_card_calendar_event(
     account_id: str,
     event_id: str,
-    data: CardCalendarEventUpdate,
+    data: CardCalendarItemUpdate,
     user_id: str,
     current_user: User | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        return await FinancialPositionService(db).update_card_calendar_event(
-            resolve_user_scope(user_id, current_user), account_id, event_id, data
+        result = await RoadmapService(db).update_card_calendar(
+            _scoped_user_id(user_id, current_user), account_id, event_id, data
         )
+        if result is None:
+            raise HTTPException(status_code=404, detail="Card calendar event not found")
+        return result
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -728,11 +757,15 @@ async def delete_card_calendar_event(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        await FinancialPositionService(db).delete_card_calendar_event(
-            resolve_user_scope(user_id, current_user), account_id, event_id
+        deleted = await RoadmapService(db).delete_card_calendar(
+            _scoped_user_id(user_id, current_user), account_id, event_id
         )
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Card calendar event not found")
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/accounts/{account_id}/position", response_model=AccountPositionResponse)
