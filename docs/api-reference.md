@@ -284,13 +284,20 @@ flexible money.
 ### Current position and Cash Plan
 
 `GET /api/accounts/{account_id}/position` is the canonical account-position
-read model. `observed_balance` is the latest balance observation (verified or
-provisional); `estimated_balance` is that anchor plus eligible settled
+read model. `observed_balance` is the latest verified balance observation;
+newer provisional observations remain visible on account-list fields but do not
+anchor the estimate. `estimated_balance` is that anchor plus eligible settled
 movement after its effective cutoff. `pending_increase` and
-`pending_decrease` are reported separately. `position_status` and
-`position_reason_codes` expose whether the estimate is observed, estimated,
-stale, incomplete, or needs review. A date-only anchor does not silently
-include same-day activity without a reliable effective timestamp.
+`pending_decrease` are reported separately. The response now exposes the
+canonical BalancePosition contract fields: `account_id`, `product_type`,
+`balance_kind`, `currency`, observed/estimated balance fields, pending impact,
+`unlinked_count`, `unreviewed_count`, `duplicate_candidate_count`,
+coverage/reconciliation evidence, `status`, `confidence`, `reason_codes`, and
+`ruleset_version`. `status` is one of `observed`, `estimated`, `stale`,
+`incomplete`, `needs_review`, or `unsupported`; legacy `position_status` and
+`position_reason_codes` remain for backward-compatible clients. A date-only
+anchor does not silently include same-day activity without a reliable effective
+timestamp.
 When two verified observations exist, `reconciliation_delta` is the closing
 balance residual after eligible settled movement and `last_reconciled_at` marks
 the closing observation used for that check; a non-zero residual remains a
@@ -448,6 +455,7 @@ and progress remain null until a complete schedule is explicitly confirmed.
 | --- | --- | --- |
 | `GET`, `POST`, `PATCH` | `/api/bills`, `/api/bills/{bill_id}` | Bill/subscription reminders with due, paid, and skipped lifecycle. |
 | `GET`, `PUT` | `/api/health-checklist`, `/api/health-checklist/{item_type}` | User-maintained deterministic financial safety checklist. |
+| `GET`, `POST`, `PATCH`, `DELETE` | `/api/cards/{account_id}/calendar`, `/api/cards/{account_id}/calendar/{event_id}` | User-owned credit-card renewal, annual-fee, fee-reversal, and milestone-spend calendar items. |
 | `GET`, `POST` | `/api/households` | List or create privacy-scoped household workspaces. |
 | `POST`, `GET`, `PATCH`, `DELETE` | `/api/households/{id}/members`, `/api/households/{id}/members/{member_user_id}` | Explicit owner/member/viewer access, role changes, leave, and removal. |
 | `GET`, `POST` | `/api/households/{id}/expenses` | Shared annotations and participant allocations, never private transaction evidence. |
@@ -459,6 +467,13 @@ Household viewers are read-only. Removing a member or deleting a household is
 blocked while a planned settlement involving that member remains. Household
 expenses are purpose-built annotations and have no foreign key to a private
 ledger transaction.
+
+Card calendar entries are linked to an owned credit-card account and carry a
+required source label. Sources are either manual/user-entered or statement
+sourced; PFIS stores the user's explicit terms and never invents issuer waiver
+rules. Milestone progress is shown only from settled owned card purchase/refund
+transactions inside the stored period, with counted transaction evidence; no
+route performs an issuer or bank action.
 
 ## Health
 
@@ -700,16 +715,22 @@ requests are recorded as `manual`; client-supplied provenance values are ignored
 | `PATCH` | `/api/preferences/dashboard` | `user_id`, partial preferences | Validated, user-owned preferences, including `briefing_cadence: daily|weekly|monthly` |
 | `DELETE` | `/api/preferences/dashboard` | `user_id` | Reset defaults |
 
-Guidance is deterministic and allowlisted. Supported intents cover period totals,
-merchant/category spend, comparisons, recurring charges, budget status, card-due
-affordability, dated card-next-state and cross-card portfolio questions, and
-current bank/card/net-worth or safe-to-spend questions grounded in the position
-read models. Card-due
+Guidance is deterministic and allowlisted. A typed query planner first selects
+an explicit intent with required slots such as period, owned account/card scope,
+amount scope, merchant, comparison period, or risk scope. The planner assigns a
+deterministic confidence score, refuses ambiguous or unsupported prompts before
+reading financial data, and exposes the read models used in the response plan.
+Supported intents cover period totals, merchant/category spend, comparisons,
+recurring charges, budget status, card-due affordability, dated card-next-state
+and cross-card portfolio questions, and current bank/card/net-worth or
+safe-to-spend questions grounded in the position read models. Card-due
 affordability uses the conservative lower forecast band and fails closed when a
 statement, funding account, or position anchor is missing. Card-next-state
 questions compose the same upcoming timeline exposed by Cards, preserve the
 current-cycle temporal scope, and never submit a payment or claim live available
-credit. Raw queries are neither persisted nor logged by the guidance service.
+credit. Responses cite source-type IDs and as-of/cutoff dates, and the plan
+states ownership scoping plus arithmetic and temporal checks. Raw queries are
+neither persisted nor logged by the guidance service.
 
 Recommendation IDs alone are not trusted as decision evidence. Accept,
 not-relevant, dismiss, and snooze mutations recompute the selected period and
@@ -786,6 +807,16 @@ pocket; it never inflates spend while waiting.
 | `PATCH` | `/api/budgets/{budget_id}` | `BudgetUpdate` | `budget_id` | `200` | `404` | `{id, monthly_limit, status}` |
 | `DELETE` | `/api/budgets/{budget_id}` | — | `budget_id` | `204` | `404` | `{status}` |
 | `GET` | `/api/budgets/track` | — | `user_id`, `month` (1–12), `year` (2020–2030) | `200` | — | `list[BudgetTracker]` sorted by status |
+| `GET` | `/api/budgets/{budget_id}/drilldown` | — | `budget_id`, `month` (1–12), `year` (2020–2030), `limit` (1–500, default 100) | `200` | `403`, `404` | `BudgetDrilldown` |
+
+`BudgetDrilldown` returns `{budget: BudgetTracker, month, year, transaction_count, has_more,
+transactions}`. Each transaction is `{id, transaction_date, merchant, transaction_type, amount,
+spend_effect, currency}`, ordered newest first. Rows use the same spend semantics as
+`/track` (debits add, refunds subtract; transfers, card payments, accounting adjustments,
+ignored, non-settled, and non-ledger-currency rows are excluded), so the signed `spend_effect`
+values reconcile with `budget.actual_spend` and `budget.remaining`. `transaction_count` and the
+tracker totals cover the full month even when `limit` truncates the list. Access requires owning
+the budget.
 
 ## Insights
 
@@ -797,6 +828,26 @@ pocket; it never inflates spend while waiting.
 | `GET` | `/api/insights/anomaly-samples` | `user_id`, `month`, `year`, optional `limit` | `200` | Bounded ordinary category/merchant samples that did not trigger an alert, for balanced recall/false-positive adjudication |
 | `POST` | `/api/insights/anomaly-samples/{sample_id}/adjudication` | `user_id`, `month`, `year`, `AnomalyAdjudicationRequest{decision,note?}` | `201` | Server-derived append-only label for a non-alert calibration sample |
 | `GET` | `/api/insights/anomaly-adjudications` | `user_id`, optional `limit` | `200` | Owned anomaly decisions without raw source rows |
+
+## Subscriptions and recurring review
+
+| Method | Path | Query | Success | Returns |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/subscriptions/recurring-review` | `user_id?`, `as_of?` | `200` | `SubscriptionReviewListResponse` with per-merchant recurring items |
+| `POST` | `/api/subscriptions/recurring-review/{stream_key}/actions` | `user_id?`, `as_of?`, body `{action,note?}` | `201` | Upserted user-owned review action |
+
+The review list is a workflow layer over the shared recurring-pattern read model; it does
+not run a competing recurrence algorithm. Each item exposes `candidate`, `mature`,
+`missed`, or `inactive` lifecycle, cadence, typical amount, amount-change flag,
+`last_seen`, evidence transaction ids, and user action state. A stream becomes mature only
+with at least 3 observations and cadence confidence of at least `0.70`. For mature streams,
+PFIS advances the observed cadence once from `last_seen`; if the expected date is past by
+more than `max(7, round(0.50 * median_interval_days))` days the stream is `missed`, and if
+it is past by more than `max(30, round(2.00 * median_interval_days))` days it is
+`inactive`. `next_expected` is returned only while the lifecycle remains `mature`;
+candidate, missed, and inactive rows return `null` plus `next_expected_null_reason`.
+Actions are `confirm`, `mark_not_recurring`, and `cancelled`. `mark_not_recurring` and
+`cancelled` are persisted per user/stream and excluded from future candidate lists.
 
 ## Dashboard
 
@@ -870,7 +921,34 @@ bodies, tokens, passwords, or connector secrets.
 | `GET` | `/api/goals/` | `user_id`, `month`, `year` | `200` | `list[GoalResponse]` |
 | `POST` | `/api/goals/` | `user_id`, `GoalCreate` | `201` | Created `GoalResponse` |
 | `PATCH` | `/api/goals/{goal_id}` | `user_id`, `month`, `year`, `GoalUpdate` | `200` | Updated `GoalResponse` |
-| `POST` | `/api/ai/explain` | `ExplainRequest` | `200` | `ExplainResponse` with summary, drivers, next actions, safety note |
+| `POST` | `/api/ai/explain` | optional `user_id`, `ExplainRequest` | `200` | Evidence-backed `ExplainResponse` (`pfis-explain-1`); `401`/`403` on scope violations, `404` for an unknown user |
+
+`POST /api/ai/explain` is deterministic and uses no LLM. `ExplainRequest` keeps
+`surface`, `title`, `description`, and `metrics`, and optionally accepts `month`,
+`year` (both required for period verification), and `subject_id` (category id or
+merchant key; otherwise `title` is matched exactly, case-insensitively). The
+surface is normalized to an exact `surface_kind` (`category`, `budget`,
+`merchant`, `financial_health`, `cash_flow`, or `general`), not substring
+matching. The user scope is resolved with `resolve_user_scope` only when a
+`user_id` or authenticated user is present; anonymous calls without either stay
+available but return `evidence_status: unverified`, no coverage, and an explicit
+missing-evidence statement.
+
+Each supplied metric (first 12 keys) is returned in `metrics` with a status:
+`verified` or `mismatch` against the category intelligence, merchant, or
+financial-health read model for the period; `unverified` when no read model or
+scope is available, or the key is not a recognized aggregate; `invalid` for
+non-numeric, non-finite, nested, or out-of-range values; and `withheld` (value
+dropped) when the key suggests credentials, tokens, email bodies, or account
+numbers. `evidence_status` is `verified`, `partial`, `conflict` (any mismatch;
+the verified value is authoritative), or `unverified`. Scoped responses also
+include `source: pfis_read_model` when a subject matched, `as_of`,
+`period_month`/`period_year`, read-model `evidence`, the `source-coverage`
+`coverage_score` and `coverage` sources, `assumptions`, and `missing_evidence`.
+`actions` (at most four `{label, reason, target}`; mirrored as `next_actions`)
+come from verified values, data-confidence and source-coverage remediation, or
+the missing scope/period; `target` uses dashboard section ids when present.
+Existing `summary`, `drivers`, and `safety_note` fields are preserved.
 
 `financial_health.data_confidence_breakdown` is an ordered evidence ledger. Each
 dimension contains `key`, `label`, a 0–100 `score`, `status`, plain-language
@@ -1087,3 +1165,24 @@ the operational status.
 fallback rates with the preceding seven days. A source can alert only when both
 windows contain at least 20 observations and a rate crosses its documented
 delta threshold; otherwise it reports `stable` or `insufficient_history`.
+
+
+## Financial Horizon
+
+### `GET /api/horizon?user_id=&days=`
+
+Returns the deterministic, server-owned Financial Horizon read model for one user.
+`days` defaults to `30` and is validated from `7` through `90`. The route uses
+the standard optional-auth user scope: an authenticated caller can only request
+their own horizon; unauthenticated local/demo calls must supply `user_id`.
+
+The response is ruleset-versioned as `pfis-horizon-1` and composes existing
+PFIS services only: canonical balance positions, Cash Plan/safe-to-spend,
+commitments and liabilities, card upcoming/due-runway evidence, account balance
+forecast paths, and source freshness. Verified current positions are reported
+separately from provisional estimated positions. Lowest projected point is
+returned only when the balance forecast has enough evidence; otherwise it is
+`null` with `lowest_projected_point_unavailable_reason` and matching
+`missing_evidence`. The model fails closed: stale, incomplete, or review-needed
+sources produce attention/low-data/stale/deficit status instead of presenting
+estimates as verified.

@@ -55,5 +55,12 @@ themes; update snapshots intentionally with `npm run test:e2e:update`.
 
 ## Retired Static Dashboard
 
-- Retained temporarily as reference while its unique behavior is audited.
-- It is not routed or authenticated by FastAPI. Do not add features to it.
+- Removed after the retirement audit. FastAPI no longer mounts `/static`, and
+  the repository no longer carries `backend/app/static`.
+- Audit finding: the retired HTML/CSS/JS shell duplicated capabilities already
+  present in the React app and typed API client: authentication, Gmail connect
+  and sync, transaction lists and review edits, budgets, insights, CSV/monthly
+  report links, background jobs, and session messaging. No unique live behavior
+  remained.
+- Do not recreate a backend static dashboard or use it as an authentication,
+  availability, or no-build fallback.

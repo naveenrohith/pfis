@@ -50,8 +50,11 @@ PFIS uses async SQLAlchemy models under `backend/app/models`.
   never stored.
 - `Commitment`, `CashPlan`, `ReservePlan`, `Liability`, and `LiabilityScheduleItem`:
   source-labelled planning and debt records that supply confirmed financial obligations.
-- `RoadmapBill`, `HealthChecklistItem`, and `CardDispute`: user-owned daily
-  management records with explicit status and source fields.
+- `RoadmapBill`, `HealthChecklistItem`, `CardCalendarEvent`, and `CardDispute`:
+  user-owned daily card/safety management records with explicit status and
+  source fields. Card calendar records are linked to an owned credit-card
+  account and store only user-entered or statement-sourced renewal, fee,
+  reversal/waiver, and milestone-spend terms.
 - `Household`, `HouseholdMember`, `HouseholdExpense`, and `HouseholdSettlement`:
   the separate shared-expense domain. Shared expenses contain annotations and
   allocations, not links to private ledger evidence.
@@ -147,6 +150,16 @@ statement observations may share a date when their source identities/effective
 times differ. Net worth carries forward each account's most recent **verified**
 snapshot and calculates assets minus liabilities. It does not infer balances from
 cash flow.
+
+The canonical balance-position read model is account-scoped and user-owned. It
+uses only a verified observation as the observed anchor, rolls forward eligible
+settled movement with asset/liability signs, keeps pending impact separate, and
+reports unlinked, unreviewed, duplicate-candidate, coverage, and reconciliation
+evidence instead of silently trusting an unsafe estimate. The response includes
+the documented `BalancePosition` contract fields (`account_id`, `product_type`,
+`balance_kind`, `currency`, observed/estimated balance fields, coverage and
+reconciliation fields, `status`, `confidence`, `reason_codes`, and
+`ruleset_version`) while retaining legacy `position_*` aliases for clients.
 
 Migration `012_financial_rhythm` adds the non-null `briefing_cadence` preference
 with a backward-compatible `daily` default. Allowed API values are `daily`,
@@ -376,6 +389,14 @@ financial account; provider account identities are unique within that provider
 and cannot be silently shared by two local accounts. This prevents Gmail or
 another connector's legacy account identity from being mistaken for a bank or
 issuer account when live refresh is enabled.
+
+Migration `058_card_calendar_extensions` extends the existing card calendar
+table with a required source label, optional source identifier, annual fee
+amount, fee-reversal condition/status, and milestone target/period fields.
+Milestone progress remains a read model over settled owned card purchase/refund
+transactions in the explicit period, with evidence IDs returned to the caller;
+pending, failed, ignored, transfer, and accounting-adjustment rows do not
+contribute.
 
 Rejected HDFC statement attempts use the existing `connector_audit_events`
 table with `connector_type=statement` and stable reason codes only; uploaded

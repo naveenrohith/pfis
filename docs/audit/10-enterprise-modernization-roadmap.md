@@ -107,7 +107,7 @@ Objective: make reporting and UI easier to evolve.
 Affected subsystems:
 
 - `backend/app/api/routes/reports.py`
-- `backend/app/static/`
+- Historical retired dashboard path: `backend/app/static/`
 - `frontend/`
 - report tests
 
@@ -115,7 +115,7 @@ Work:
 
 - Move report HTML generation to template or renderer helpers.
 - Keep CSV export behavior unchanged.
-- Decide and document whether static dashboard or Svelte is canonical.
+- Keep React/Vite canonical and do not recreate the retired static dashboard.
 - Avoid duplicate data aggregation in frontend code.
 
 Validation:

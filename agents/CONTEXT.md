@@ -16,7 +16,7 @@ backend/
     models/                 SQLAlchemy ORM models
     schemas/                Pydantic request/response schemas
     services/               Gmail, parser, transaction, insights, jobs, seed services
-    static/                 dashboard HTML/CSS/JS
+    static/                 retired dashboard removed; do not recreate
   alembic/                  database migrations
 tests/pytest/               active pytest suite
 docs/                       PFIS architecture and workflow source of truth
@@ -56,4 +56,3 @@ agents/                     agent workflow instructions
 - Parser accuracy is more important than UI polish.
 - Every parser or dedup change needs regression coverage.
 - API route behavior must remain documented.
-

@@ -8,7 +8,7 @@
 > the detailed 85% domain reassessment and balance-position contract; report 13
 > remains the implementation history for the earlier 70% target.
 
-This audit is a repository-grounded modernization blueprint for PFIS. It is based on the current FastAPI backend, async SQLAlchemy persistence layer, Gmail ingestion services, parser pipeline, static dashboard, Svelte migration folder, docs, tests, and CI configuration in this repository.
+This audit is a repository-grounded modernization blueprint for PFIS. It was based on the FastAPI backend, async SQLAlchemy persistence layer, Gmail ingestion services, parser pipeline, the now-retired static dashboard, the frontend migration folder, docs, tests, and CI configuration in this repository.
 
 PFIS is currently best described as a structured MVP: the product has clear module boundaries and a useful test base, but production hardening, deeper domain boundaries, and operational maturity are still incomplete.
 
@@ -33,7 +33,7 @@ as described in the individual reports.
 | Per-email commit in pipeline loop | Intentional (won't change) | per-email durability is the correct resilience choice for ingestion |
 | Normalizer global cache correctness | Deferred | benign for single-user local; revisit before multi-user |
 | Durable job queue / worker | Out of scope | local/single-user profile |
-| Frontend cutover (retire static dashboard) | Out of scope (now) | needs Node + Svelte parity work |
+| Frontend cutover (retire static dashboard) | Done | React/Vite is canonical; `backend/app/static` removed after parity review |
 
 The last consolidated verification baseline (before the deferred latest
 issuer-history/recommendation/anomaly-evidence batch) was full `pytest` green
@@ -78,8 +78,8 @@ remain deferred until real reviewed cohorts are supplied.
 - Gmail integration: `backend/app/services/gmail/`
 - ORM models: `backend/app/models/`
 - Schemas: `backend/app/schemas/`
-- Static dashboard: `backend/app/static/`
-- Svelte migration: `frontend/`
+- Retired static dashboard: removed from `backend/app/static/`
+- Canonical React/Vite dashboard: `frontend/`
 - Tests: `tests/pytest/`
 - CI gate: `.github/workflows/ci.yml`
 - Source-of-truth docs: `docs/`
@@ -98,4 +98,3 @@ remain deferred until real reviewed cohorts are supplied.
 - High: likely production incident, major regression risk, or blocking architecture issue
 - Medium: meaningful maintainability, scalability, or quality risk
 - Low: cleanup, consistency, or local improvement
-

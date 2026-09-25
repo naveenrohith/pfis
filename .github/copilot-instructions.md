@@ -21,7 +21,7 @@ Skip FIX only when REVIEW finds no issues.
 - Database: async SQLAlchemy models and `AsyncSession`.
 - API routes: `backend/app/api/routes`, mounted under `/api`.
 - Services: Gmail sync, parser pipeline, transaction service, insights, jobs, reports.
-- Frontend: canonical React/Vite app under `frontend/`; `backend/app/static` is a no-build fallback.
+- Frontend: canonical React/Vite app under `frontend/`; the retired `backend/app/static` fallback is removed.
 - Tests: pytest under `tests/pytest`.
 - Core pipeline: raw email -> classify -> parse -> normalize -> categorize -> deduplicate -> store -> insights/dashboard/reports.
 

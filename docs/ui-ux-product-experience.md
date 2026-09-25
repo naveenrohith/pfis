@@ -205,6 +205,27 @@ Available frontend queries already provide the required inputs: workspace snapsh
 | Partial error | Keep usable sections visible and explain which signal could not be refreshed |
 | Full error | Give a human-readable recovery action and retain access to Data & settings |
 
+Implementation (`frontend/src/features/today/todayState.ts`) derives the state only from existing
+workspace, Cash Plan, guidance-decision, and sync values; it performs no new financial calculation.
+
+- **Low data:** zero transactions or `financial_health.data_sufficiency === 'low'`. The
+  projected month end is hidden and “Connect or import activity” opens Data & settings (`#inbox`).
+- **Deficit:** `snapshot.net_cash_flow < 0`. The Financial Horizon drops its jade surface.
+- **Attention:** a negative `projection.projected_net`, a budget at risk, recurring burden above
+  35%, or a warning/danger insight.
+- **Stale sync:** the latest sync run `failed`, or `sync_summary.last_synced_at` is more than
+  24 hours old while no sync is running. Values stay visible with their last-synced date and a
+  “Review data sources” action.
+- **Partial error:** the summary refresh, Safe to spend, or action status failed while other data
+  is usable. A notice names each unavailable signal and retries only those; Safe to spend shows
+  “unavailable” rather than a setup prompt.
+- **Full error / loading:** no workspace data yet. Full error never shows raw error text and offers
+  Retry summary plus Open Data & settings.
+
+The root element exposes `data-today-state`. When several apply, precedence is loading, full
+error, low data, stale sync, partial error, deficit, attention, healthy; stale and partial-error
+notices still render alongside the leading state.
+
 ## 11. Primary user journeys
 
 ### Daily check-in

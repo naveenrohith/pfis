@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-PFIS has a clean repository structure for its current size. The backend is organized around FastAPI routes, services, models, schemas, static assets, and docs. Tests are centralized under `tests/pytest`. The main repository-level gap is not chaos; it is that the project has two frontend directions and no dedicated infrastructure/deployment layer yet.
+PFIS has a clean repository structure for its current size. The backend is organized around FastAPI routes, services, models, schemas, and docs. Tests are centralized under `tests/pytest`. The original repository-level gap was not chaos; it was the earlier coexistence of two frontend directions and no dedicated infrastructure/deployment layer yet.
 
 ## Repository Structure
 
@@ -12,8 +12,8 @@ Evidence:
 - `backend/app/api/routes/` contains route modules for auth, budgets, categories, Gmail, health, insights, jobs, pipeline, reports, transactions, and users.
 - `backend/app/services/` contains transaction, seed, insights, job, Gmail, and parser services.
 - `backend/app/models/` contains user, transaction, sync, email, and category models.
-- `backend/app/static/` contains the served dashboard.
-- `frontend/` contains the Svelte/Vite migration.
+- Historical: `backend/app/static/` contained the served dashboard before retirement.
+- `frontend/` contains the canonical React/Vite dashboard.
 - `docs/` contains architecture, parser, data model, security, testing, workflow, and extension docs.
 - `tests/pytest/` contains API, parser, job, insight, report, budget, auth, config, and dedup tests.
 
@@ -29,7 +29,7 @@ Evidence:
 
 | Issue | Severity | Impact | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| Dual frontend direction | Medium | Product focus, duplicated UI work | `backend/app/static/` is active and `frontend/` is in migration | Define which UI is canonical and keep the other as migration-only |
+| Dual frontend direction | Medium | Product focus, duplicated UI work | Historical: `backend/app/static/` was active and `frontend/` was in migration | Resolved by making React/Vite canonical and removing the static dashboard |
 | Infrastructure layer is not explicit | Medium | Deployment readiness | No deployment directory or production runtime profile is present | Add deployment docs and config profile before hosted use |
 | Documentation is broad but not audit-oriented | Low | Planning | Existing docs describe system behavior, not modernization sequencing | Keep this audit under `docs/audit/` and link it from future planning docs if desired |
 | Migrations and startup table creation coexist | Medium | Schema control | `database.py` has `init_db()` create-all and Alembic exists | Keep create-all for local demo only; use Alembic for controlled environments |
@@ -72,4 +72,3 @@ Maintain the current layout for short-term work, but introduce new packages only
 ## Rollback Strategy
 
 Repository-level changes should be additive first. If a module move causes regressions, revert the move and keep extracted interfaces or tests that remain useful.
-

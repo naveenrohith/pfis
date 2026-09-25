@@ -53,6 +53,45 @@ The workspace regression suite also enforces a database-query budget for the
 zero-data dashboard path. This guards against accidentally invoking every
 analytics service during onboarding and for months without transactions.
 
+## Critical Read Query Budgets
+
+`tests\pytest\test_query_budgets.py` enforces SQL statement ceilings for
+representative critical reads. The helper in
+`tests\pytest\query_budget_helpers.py` attaches a SQLAlchemy
+`before_cursor_execute` listener to the sync engine underneath the async test
+engine and counts statements only while the request is executing.
+
+The representative fixture seeds one user with four financial accounts
+(including two cards), current balance and card-position evidence, cash-plan
+records, budgets, and 200 transactions. Budgets live in
+`tests\pytest\fixtures\query_budgets.json`; each ceiling is the measured count
+plus small headroom:
+
+| Budget key | Observed statements | Ceiling |
+| --- | ---: | ---: |
+| `accounts_balance_list` | 39 | 43 |
+| `account_position` | 8 | 10 |
+| `net_worth` | 34 | 38 |
+| `cash_plan` | 12 | 14 |
+| `card_portfolio_payment_plan` | 104 | 112 |
+| `card_overview` | 23 | 26 |
+| `workspace_dashboard_summary` | 75 | 81 |
+| `guidance_query` | 3 | 5 |
+| `readiness` | 58 | 63 |
+
+Run just this gate with:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests\pytest\test_query_budgets.py -p no:cacheprovider --basetemp .test-run\pytest-qb
+```
+
+Known hotspot to preserve for later work: account-list and current net-worth
+reads call the account-position read model once per account, and the card
+portfolio plan calls due-runway/forecast paths per active card. These are
+obvious N+1-style shapes, but this gate intentionally records current behavior
+without changing financial arithmetic in the financial-position or guidance
+services.
+
 In the managed Windows environment, set the test temp directory to a writable
 path if the default user temp directory is blocked:
 

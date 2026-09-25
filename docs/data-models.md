@@ -58,8 +58,16 @@ account response now also exposes the same settlement-aware estimate as
 confidence, and reason codes so account lists update when eligible history
 changes. The account-position response adds a transaction-derived estimate only
 after a verified anchor. Both surfaces report settled movement, pending impact,
-status, confidence, reason codes, and observation source/effective timestamps
-rather than presenting the estimate as a live provider balance. Connector
+review counters, status, confidence, reason codes, and observation
+source/effective timestamps rather than presenting the estimate as a live
+provider balance. The canonical `BalancePosition` fields are exposed alongside
+legacy aliases: `account_id`, `product_type`, `balance_kind`, `currency`,
+observed/estimated balances and cutoffs, `unlinked_count`,
+`unreviewed_count`, `duplicate_candidate_count`, coverage/reconciliation
+evidence, `status`, `confidence`, `reason_codes`, and `ruleset_version`.
+Canonical status values are `observed`, `estimated`, `stale`, `incomplete`,
+`needs_review`, and `unsupported`; older `position_*` fields remain for
+backward-compatible clients. Connector
 observations can also carry a source record identity for retry-safe ingestion.
 The card read model additionally separates the statement billed anchor from
 post-statement `paid_since_statement` and signed `unbilled_activity`, so a
