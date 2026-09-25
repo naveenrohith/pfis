@@ -772,7 +772,7 @@ test('Position visual baseline @visual', async ({ page }) => {
   await mockPositionVisualData(page);
   await openDemoWorkspace(page);
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
-  await page.getByRole('tab', { name: 'Position', exact: true }).click();
+  await page.getByRole('link', { name: /(?:Stand|Where do I stand)/ }).click();
   await expect(page.getByTestId('position-summary')).toBeVisible();
   const netWorthCurve = page.locator('[aria-label="Net-worth history"] .recharts-line-curve');
   await expect(netWorthCurve).toHaveCount(1);
@@ -879,7 +879,7 @@ test('all five destinations and their primary tabs are deep-linkable', async ({ 
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
   await expect(page).toHaveURL(/#cash-plan$/);
-  await page.getByRole('tab', { name: 'Position', exact: true }).click();
+  await page.getByRole('link', { name: /(?:Stand|Where do I stand)/ }).click();
   await expect(page).toHaveURL(/#networth$/);
 
   await page.getByRole('button', { name: 'Insights', exact: true }).click();
@@ -1062,13 +1062,20 @@ test('financial roadmap workspaces are responsive, keyboard reachable, and acces
   await openDemoWorkspace(page);
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
-  for (const tabName of ['Safe to spend', 'Position', 'Commitments', 'Outlook']) {
-    const tab = page.getByRole('tab', { name: tabName, exact: true });
+  for (const step of [
+    { name: /(?:Spend|Can I spend)/, url: /#cash-plan$/ },
+    { name: /(?:Stand|Where do I stand)/, url: /#networth$/ },
+    { name: /(?:Coming|What’s coming)/, url: /#obligations$/ },
+    { name: /(?:Change|What could change)/, url: /#analytics$/ },
+    { name: /(?:Protect|Protect & plan)/, url: /#budgets$/ },
+  ]) {
+    const tab = page.getByRole('link', { name: step.name });
     await tab.scrollIntoViewIfNeeded();
     await tab.focus();
     await page.keyboard.press('Enter');
-    await expect(tab).toHaveAttribute('aria-selected', 'true');
-    if (tabName === 'Position') {
+    await expect(page).toHaveURL(step.url);
+    await expect(tab).toHaveAttribute('aria-current', 'step');
+    if (String(step.name).includes('Stand')) {
       await expect(
         page.getByRole('heading', { name: 'Your financial position', exact: true }),
       ).toBeVisible({ timeout: 20_000 });
@@ -1089,7 +1096,7 @@ test('financial roadmap workspaces are responsive, keyboard reachable, and acces
     await expectNoHorizontalOverflow(page);
   }
 
-  await page.getByRole('tab', { name: 'Commitments', exact: true }).click();
+  await page.getByRole('link', { name: /(?:Coming|What’s coming)/ }).click();
   await expect(page).toHaveURL(/#obligations$/);
   await page.getByRole('button', { name: 'Card accounts', exact: true }).click();
   await expect(page).toHaveURL(/#cards$/);
@@ -1097,16 +1104,15 @@ test('financial roadmap workspaces are responsive, keyboard reachable, and acces
   await expect(page).toHaveURL(/#obligations$/);
   await page.getByRole('button', { name: 'Card accounts', exact: true }).click();
   await expect(page).toHaveURL(/#cards$/);
-  await page.getByRole('button', { name: /^Back to Commitments$/ }).click();
+  await page.getByRole('link', { name: /(?:Coming|What’s coming)/ }).click();
   await expect(page).toHaveURL(/#obligations$/);
-  await page.getByText('More commitment views').click();
   await page.getByRole('button', { name: 'All liabilities', exact: true }).click();
   await expect(page).toHaveURL(/#liabilities$/);
 
-  await page.getByRole('button', { name: /^Back to Commitments$/ }).click();
+  await page.getByRole('link', { name: /(?:Coming|What’s coming)/ }).click();
   await expect(page).toHaveURL(/#obligations$/);
 
-  await page.getByRole('tab', { name: 'Outlook', exact: true }).click();
+  await page.getByRole('link', { name: /(?:Change|What could change)/ }).click();
   await expect(page).toHaveURL(/#analytics$/);
   await page.getByRole('button', { name: 'Budgets and spending limits' }).click();
   await expect(page).toHaveURL(/#budgets$/);
@@ -1174,7 +1180,7 @@ test('missing net-worth data stays unavailable instead of displaying zero', asyn
   await openDemoWorkspace(page);
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
-  await page.getByRole('tab', { name: 'Position', exact: true }).click();
+  await page.getByRole('link', { name: /(?:Stand|Where do I stand)/ }).click();
   await expect.poll(() => positionFailureServed).toBe(true);
   await expect(page.getByRole('alert')).toContainText('Position data is unavailable', {
     timeout: 20_000,
