@@ -1,5 +1,6 @@
 import {
   ArrowRight,
+  CalendarDays,
   Check,
   CircleAlert,
   Clock3,
@@ -20,12 +21,24 @@ import { WorkspaceContextBar } from '@/components/system';
 import { useAuth } from '@/features/auth/AuthContext';
 import { RecommendationFollowUp } from '@/features/guidance/RecommendationFollowUp';
 import { useWorkspace } from '@/features/workspace/WorkspaceContext';
-import { queryKeys, useCashPlan, useWorkspaceSnapshot } from '@/features/workspace/queries';
+import {
+  queryKeys,
+  useCashPlan,
+  useFinancialHorizon,
+  useWorkspaceSnapshot,
+} from '@/features/workspace/queries';
 import { useSync } from '@/features/workspace/SyncContext';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDate, formatTime } from '@/lib/format';
-import type { CashPlan, RecommendationConsequence, RecommendationDecision } from '@/lib/types';
+import type {
+  CashPlan,
+  FinancialHorizonEvent,
+  FinancialHorizonResponse,
+  FinancialHorizonRiskSignal,
+  RecommendationConsequence,
+  RecommendationDecision,
+} from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { buildTodayBriefCopy } from './todayCopy';
 import {
@@ -46,6 +59,7 @@ export function TodayExperience() {
   const { notify } = useToast();
   const workspace = useWorkspaceSnapshot();
   const cashPlan = useCashPlan();
+  const horizon = useFinancialHorizon(30);
   const decisions = useQuery({
     queryKey: ['guidance', 'decisions', user?.id ?? 'signed-out'],
     queryFn: () => api.guidanceDecisions(user!.id),
@@ -349,7 +363,7 @@ export function TodayExperience() {
                         netMovement >= 0 ? 'higher' : 'lower'
                       } than last month`}
               </p>
-              <FinancialHorizon
+              <SafeToSpendHorizon
                 plan={cashPlan.data}
                 loading={cashPlan.isLoading}
                 unavailable={cashPlan.isError}
@@ -508,6 +522,13 @@ export function TodayExperience() {
               </div>
             </details>
           ) : null}
+
+          <NextThirtyDaysHorizon
+            horizon={horizon.data}
+            loading={horizon.isLoading}
+            error={horizon.isError}
+            onRetry={() => void horizon.refetch()}
+          />
 
           <section aria-labelledby="financial-pulse-title">
             <div className="mb-3 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-end">
@@ -875,7 +896,7 @@ function formatList(items: string[]) {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
-function FinancialHorizon({
+function SafeToSpendHorizon({
   plan,
   loading,
   unavailable,
@@ -1041,6 +1062,290 @@ function FinancialHorizon({
       </details>
     </figure>
   );
+}
+
+function NextThirtyDaysHorizon({
+  horizon,
+  loading,
+  error,
+  onRetry,
+}: {
+  horizon?: FinancialHorizonResponse;
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+}) {
+  const currency = horizon?.current_position.currency ?? 'INR';
+  const events = horizon?.events ?? [];
+  const risks = horizon?.risk_signals ?? [];
+  const missingEvidence = horizon?.missing_evidence ?? [];
+  const empty =
+    horizon &&
+    events.length === 0 &&
+    risks.length === 0 &&
+    missingEvidence.length === 0 &&
+    !horizon.lowest_projected_point &&
+    !horizon.lowest_projected_point_unavailable_reason;
+
+  return (
+    <section
+      aria-labelledby="next-30-days-title"
+      className="rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="max-w-2xl">
+          <p className="text-xs font-bold text-muted-foreground">Financial Horizon</p>
+          <h2 id="next-30-days-title" className="mt-1 text-xl font-extrabold">
+            Next 30 days
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            A dated view of upcoming money movement, projected pressure, and the evidence PFIS
+            still needs.
+          </p>
+        </div>
+        {horizon ? (
+          <Badge variant={horizonStatusVariant(horizon.status)}>
+            {horizonStatusLabel(horizon.status)}
+          </Badge>
+        ) : null}
+      </div>
+
+      {loading ? (
+        <div className="mt-5 grid gap-3" role="status" aria-label="Loading the next 30 days">
+          <Skeleton className="h-16" />
+          <Skeleton className="h-24" />
+          <span className="sr-only">Loading dated events and horizon evidence.</span>
+        </div>
+      ) : error ? (
+        <div
+          role="alert"
+          className="mt-5 flex flex-col gap-3 border-l-2 border-warning bg-warning/5 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <h3 className="font-extrabold">The Financial Horizon could not be refreshed</h3>
+            <p className="mt-1 text-muted-foreground">
+              Your Today brief stays visible. Retry to load the server-owned 30 day outlook.
+            </p>
+          </div>
+          <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+            <RefreshCw aria-hidden="true" className="h-4 w-4" /> Retry horizon
+          </Button>
+        </div>
+      ) : empty ? (
+        <EmptyState
+          icon={<CalendarDays aria-hidden="true" className="h-5 w-5" />}
+          title="No dated pressure in the next 30 days"
+          description="PFIS did not find upcoming commitments, card dates, or balance-forecast risks that need action in this horizon."
+        />
+      ) : horizon ? (
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,.9fr)]">
+          <div className="space-y-4">
+            <section aria-labelledby="horizon-events-title">
+              <h3 id="horizon-events-title" className="text-sm font-extrabold">
+                Dated upcoming events
+              </h3>
+              {events.length ? (
+                <ol className="mt-3 divide-y divide-border/70 border-y border-border/70">
+                  {events.slice(0, 5).map((event) => (
+                    <HorizonEventRow key={event.id} event={event} currency={currency} />
+                  ))}
+                </ol>
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  No dated events are available for this horizon.
+                </p>
+              )}
+            </section>
+
+            <section aria-labelledby="horizon-lowest-title">
+              <h3 id="horizon-lowest-title" className="text-sm font-extrabold">
+                Lowest projected point
+              </h3>
+              {horizon.lowest_projected_point ? (
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Expected balance reaches{' '}
+                  <span className="font-extrabold text-foreground">
+                    {formatCurrency(horizon.lowest_projected_point.expected_balance, currency)}
+                  </span>{' '}
+                  on {formatDate(horizon.lowest_projected_point.date)}.
+                </p>
+              ) : (
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {horizon.lowest_projected_point_unavailable_reason ||
+                    'PFIS needs more balance-forecast evidence before naming a lowest point.'}
+                </p>
+              )}
+            </section>
+          </div>
+
+          <div className="space-y-4">
+            <section aria-labelledby="horizon-risk-title">
+              <h3 id="horizon-risk-title" className="text-sm font-extrabold">
+                Risk signals
+              </h3>
+              {risks.length ? (
+                <ul className="mt-3 space-y-3">
+                  {risks.slice(0, 3).map((risk) => (
+                    <HorizonRiskRow key={risk.code} risk={risk} currency={currency} />
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  No risk signal needs attention in this horizon.
+                </p>
+              )}
+            </section>
+
+            <section aria-labelledby="horizon-evidence-title">
+              <h3 id="horizon-evidence-title" className="text-sm font-extrabold">
+                Missing evidence
+              </h3>
+              {missingEvidence.length ? (
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-6 text-muted-foreground">
+                  {missingEvidence.slice(0, 4).map((item) => (
+                    <li key={item}>{humanizeReason(item)}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  No missing evidence is blocking this horizon.
+                </p>
+              )}
+            </section>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function HorizonEventRow({
+  event,
+  currency,
+}: {
+  event: FinancialHorizonEvent;
+  currency: string;
+}) {
+  return (
+    <li className="grid gap-2 py-3 sm:grid-cols-[7.5rem_minmax(0,1fr)_auto] sm:items-center">
+      <time dateTime={event.date} className="text-sm font-extrabold">
+        {formatDate(event.date)}
+      </time>
+      <div className="min-w-0">
+        <p className="font-bold">{event.label}</p>
+        <p className="text-xs text-muted-foreground">
+          {sourceLabel(event.source)} · {statusLabel(event.status)}
+        </p>
+      </div>
+      {event.amount == null ? null : (
+        <p
+          className={cn(
+            'money-value text-sm',
+            event.direction === 'out' && 'text-danger',
+            event.direction === 'in' && 'text-success',
+          )}
+        >
+          {event.direction === 'out' ? '−' : event.direction === 'in' ? '+' : ''}
+          {formatCurrency(event.amount, currency)}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function HorizonRiskRow({
+  risk,
+  currency,
+}: {
+  risk: FinancialHorizonRiskSignal;
+  currency: string;
+}) {
+  const recovery = riskRecoveryLink(risk);
+  return (
+    <li className="rounded-xl border border-border/70 bg-background/60 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge
+          variant={
+            risk.severity === 'danger'
+              ? 'danger'
+              : risk.severity === 'warning'
+                ? 'warning'
+                : 'info'
+          }
+        >
+          {risk.severity}
+        </Badge>
+        {risk.date ? (
+          <time dateTime={risk.date} className="text-xs font-bold text-muted-foreground">
+            {formatDate(risk.date)}
+          </time>
+        ) : null}
+      </div>
+      <p className="mt-2 text-sm font-extrabold">{risk.label}</p>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+        {risk.detail}
+        {risk.amount == null ? '' : ` · ${formatCurrency(risk.amount, currency)}`}
+      </p>
+      <a href={recovery.href} className="focus-ring mt-2 inline-flex rounded text-sm font-bold text-primary">
+        {recovery.label} <ArrowRight aria-hidden="true" className="ml-1 h-4 w-4" />
+      </a>
+    </li>
+  );
+}
+
+function horizonStatusVariant(status: FinancialHorizonResponse['status']) {
+  if (status === 'healthy') return 'success';
+  if (status === 'deficit') return 'danger';
+  if (status === 'attention' || status === 'stale') return 'warning';
+  return 'outline';
+}
+
+function horizonStatusLabel(status: FinancialHorizonResponse['status']) {
+  const labels: Record<FinancialHorizonResponse['status'], string> = {
+    healthy: 'Clear',
+    attention: 'Attention',
+    deficit: 'Deficit',
+    low_data: 'Evidence needed',
+    stale: 'Stale evidence',
+  };
+  return labels[status];
+}
+
+function sourceLabel(source: FinancialHorizonEvent['source']) {
+  const labels: Record<FinancialHorizonEvent['source'], string> = {
+    balance_position: 'Balance position',
+    cash_plan: 'Cash Plan',
+    commitment: 'Commitment',
+    liability: 'Liability',
+    card_upcoming: 'Cards',
+    card_due_runway: 'Card runway',
+    balance_forecast: 'Balance forecast',
+  };
+  return labels[source];
+}
+
+function statusLabel(status: FinancialHorizonEvent['status']) {
+  const labels: Record<FinancialHorizonEvent['status'], string> = {
+    verified: 'verified',
+    planned: 'planned',
+    estimated: 'estimated',
+    risk: 'risk',
+    provisional: 'provisional',
+  };
+  return labels[status];
+}
+
+function riskRecoveryLink(risk: FinancialHorizonRiskSignal) {
+  const text = `${risk.source} ${risk.code}`.toLowerCase();
+  if (text.includes('card')) return { href: '#cards', label: 'Review cards' };
+  if (text.includes('plan') || text.includes('cash') || text.includes('forecast')) {
+    return { href: '#plan', label: 'Review plan' };
+  }
+  return { href: '#data', label: 'Review data' };
+}
+
+function humanizeReason(reason: string) {
+  return reason.replace(/[_-]+/g, ' ');
 }
 
 function Pulse({

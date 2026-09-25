@@ -12,6 +12,8 @@ const {
   todayUi,
   dataSufficiency,
   decisionQueryFails,
+  horizonRefetch,
+  horizonState,
   workspaceState,
   workspaceRefetch,
 } = vi.hoisted(() => ({
@@ -64,6 +66,55 @@ const {
   todayUi: { activeSection: 'overview' as 'overview' | 'guidance' | 'recommendations' },
   dataSufficiency: { value: 'high' as 'low' | 'medium' | 'high' },
   decisionQueryFails: { value: false },
+  horizonRefetch: vi.fn(),
+  horizonState: {
+    isLoading: false,
+    isError: false,
+    data: undefined as
+      | {
+          as_of: string;
+          horizon_days: number;
+          current_position: {
+            currency: string;
+            account_count: number;
+            verified: { assets: number; liabilities: number; net: number };
+            provisional: { assets: number; liabilities: number; net: number };
+            reason_codes: string[];
+          };
+          events: Array<{
+            id: string;
+            date: string;
+            label: string;
+            amount?: number | null;
+            direction: 'in' | 'out' | 'neutral';
+            source: 'cash_plan' | 'card_upcoming' | 'balance_forecast';
+            status: 'verified' | 'planned' | 'estimated' | 'risk' | 'provisional';
+            confidence: number;
+            reason_codes: string[];
+          }>;
+          lowest_projected_point?: {
+            date: string;
+            expected_balance: number;
+            confidence: number;
+            source_account_id: string;
+          } | null;
+          lowest_projected_point_unavailable_reason?: string | null;
+          risk_signals: Array<{
+            code: string;
+            severity: 'info' | 'warning' | 'danger';
+            label: string;
+            detail: string;
+            date?: string | null;
+            amount?: number | null;
+            source: string;
+          }>;
+          source_health: [];
+          status: 'healthy' | 'attention' | 'deficit' | 'low_data' | 'stale';
+          missing_evidence: string[];
+          ruleset_version: string;
+        }
+      | undefined,
+  },
 }));
 
 vi.mock('@/features/auth/AuthContext', () => ({
@@ -102,7 +153,16 @@ vi.mock('@/features/workspace/SyncContext', () => ({
 }));
 
 vi.mock('@/features/workspace/queries', () => ({
+  queryKeys: {
+    workspace: (...parts: unknown[]) => ['workspace', ...parts],
+  },
   useCashPlan: () => cashPlanState,
+  useFinancialHorizon: () => ({
+    isLoading: horizonState.isLoading,
+    isError: horizonState.isError,
+    data: horizonState.data,
+    refetch: horizonRefetch,
+  }),
   useWorkspaceSnapshot: () => ({
     isLoading: workspaceState.isLoading,
     isError: workspaceState.isError,
@@ -167,6 +227,30 @@ describe('Today Financial Horizon', () => {
     cashPlanState.refetch = vi.fn();
     recommendations.splice(0);
     decisions.splice(0);
+    horizonRefetch.mockReset();
+    Object.assign(horizonState, {
+      isLoading: false,
+      isError: false,
+      data: {
+        as_of: '2026-07-20',
+        horizon_days: 30,
+        current_position: {
+          currency: 'INR',
+          account_count: 2,
+          verified: { assets: 45000, liabilities: 5000, net: 40000 },
+          provisional: { assets: 3000, liabilities: 0, net: 3000 },
+          reason_codes: [],
+        },
+        events: [],
+        lowest_projected_point: null,
+        lowest_projected_point_unavailable_reason: 'Balance forecast needs a fresh anchor.',
+        risk_signals: [],
+        source_health: [],
+        status: 'healthy',
+        missing_evidence: [],
+        ruleset_version: 'pfis-horizon-1',
+      },
+    });
     setGuidanceState.mockReset();
     setGuidanceState.mockResolvedValue({ state: 'accepted' });
   });
@@ -230,6 +314,127 @@ describe('Today Financial Horizon', () => {
 
     fireEvent.click(screen.getByRole('link', { name: 'Why it changed' }));
     expect(scrollTo).toHaveBeenCalledWith('guidance');
+  });
+
+  it('renders the server-owned next 30 day horizon with dated evidence and recovery links', () => {
+    horizonState.data = {
+      ...horizonState.data!,
+      status: 'attention',
+      events: [
+        {
+          id: 'event-1',
+          date: '2026-07-28',
+          label: 'Credit card payment due',
+          amount: 4200,
+          direction: 'out',
+          source: 'card_upcoming',
+          status: 'verified',
+          confidence: 0.96,
+          reason_codes: [],
+        },
+        {
+          id: 'event-2',
+          date: '2026-08-01',
+          label: 'Salary expected',
+          amount: 50000,
+          direction: 'in',
+          source: 'cash_plan',
+          status: 'provisional',
+          confidence: 0.7,
+          reason_codes: [],
+        },
+      ],
+      lowest_projected_point: {
+        date: '2026-07-30',
+        expected_balance: 8800,
+        confidence: 0.82,
+        source_account_id: 'bank-1',
+      },
+      risk_signals: [
+        {
+          code: 'card_due_near',
+          severity: 'warning',
+          label: 'A card payment needs attention',
+          detail: 'Payment is due before the next income date.',
+          date: '2026-07-28',
+          amount: 4200,
+          source: 'card_upcoming',
+        },
+      ],
+      missing_evidence: ['fresh_balance_anchor'],
+    };
+
+    renderToday();
+
+    expect(screen.getByRole('heading', { name: 'Next 30 days' })).toBeInTheDocument();
+    expect(screen.getByText('Credit card payment due')).toBeInTheDocument();
+    expect(screen.getByText('Cards · verified')).toBeInTheDocument();
+    expect(screen.getByText('Cash Plan · provisional')).toBeInTheDocument();
+    expect(screen.getByText(/Expected balance reaches/)).toHaveTextContent('₹8,800');
+    expect(screen.getByText('A card payment needs attention')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Review cards/ })).toHaveAttribute('href', '#cards');
+    expect(screen.getByText('fresh balance anchor')).toBeInTheDocument();
+  });
+
+  it('renders loading, error, and empty states for the next 30 day horizon', () => {
+    horizonState.isLoading = true;
+    horizonState.data = undefined;
+    const { rerender } = renderToday();
+
+    expect(screen.getByRole('status', { name: 'Loading the next 30 days' })).toBeInTheDocument();
+
+    horizonState.isLoading = false;
+    horizonState.isError = true;
+    rerender(
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+          })
+        }
+      >
+        <TodayExperience />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'The Financial Horizon could not be refreshed',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry horizon' }));
+    expect(horizonRefetch).toHaveBeenCalledTimes(1);
+
+    horizonState.isError = false;
+    horizonState.data = {
+      as_of: '2026-07-20',
+      horizon_days: 30,
+      current_position: {
+        currency: 'INR',
+        account_count: 1,
+        verified: { assets: 1000, liabilities: 0, net: 1000 },
+        provisional: { assets: 0, liabilities: 0, net: 0 },
+        reason_codes: [],
+      },
+      events: [],
+      lowest_projected_point: null,
+      lowest_projected_point_unavailable_reason: null,
+      risk_signals: [],
+      source_health: [],
+      status: 'healthy',
+      missing_evidence: [],
+      ruleset_version: 'pfis-horizon-1',
+    };
+    rerender(
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+          })
+        }
+      >
+        <TodayExperience />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText('No dated pressure in the next 30 days')).toBeInTheDocument();
   });
 
   it('shows a data action and never invents flexible money for incomplete inputs', () => {

@@ -85,6 +85,10 @@ vi.mock('@/features/review/ReviewDetail', () => ({
   ReviewDetail: () => <div data-testid="review-detail" />,
 }));
 
+vi.mock('@/features/subscriptions/SubscriptionsReviewPanel', () => ({
+  SubscriptionsReviewPanel: () => <div>Subscriptions review</div>,
+}));
+
 vi.mock('@/lib/api', () => ({
   api: {
     bulkUpdate: vi.fn(),
@@ -144,7 +148,9 @@ describe('ReviewSection activity review follow-up', () => {
     renderSection();
 
     const content = document.body.textContent ?? '';
-    expect(content.indexOf('Primary transaction')).toBeLessThan(content.indexOf('Statement evidence'));
+    expect(content.indexOf('Primary transaction')).toBeLessThan(
+      content.indexOf('Statement evidence'),
+    );
     expect(content.indexOf('Transaction detail')).toBeLessThan(
       content.indexOf('Possible paired movements'),
     );
@@ -158,6 +164,12 @@ describe('ReviewSection activity review follow-up', () => {
 
     expect(screen.getAllByText('No transactions need review').length).toBeGreaterThan(0);
     expect(screen.queryByText('Everything is ready')).not.toBeInTheDocument();
+  });
+
+  it('includes the subscriptions review surface in Activity review', () => {
+    renderSection();
+
+    expect(screen.getByText('Subscriptions review')).toBeInTheDocument();
   });
 
   it('focuses and scrolls the detail heading after transaction selection', async () => {
@@ -184,9 +196,7 @@ describe('ReviewSection activity review follow-up', () => {
 
     await user.click(screen.getByRole('button', { name: /Primary transaction/ }));
     rerenderSection();
-    await waitFor(() =>
-      expect(heading).toHaveFocus(),
-    );
+    await waitFor(() => expect(heading).toHaveFocus());
 
     const search = screen.getByPlaceholderText('Search merchant, account, reference...');
     await user.type(search, 'Primary');

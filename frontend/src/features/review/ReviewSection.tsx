@@ -28,6 +28,7 @@ import type {
   TransactionType,
   TransferMatchCandidate,
 } from '@/lib/types';
+import { SubscriptionsReviewPanel } from '@/features/subscriptions/SubscriptionsReviewPanel';
 import { ReviewDetail } from './ReviewDetail';
 
 const THRESHOLD = 0.85;
@@ -194,6 +195,8 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
         </div>
       ) : null}
 
+      <SubscriptionsReviewPanel />
+
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Queue */}
         <Card className={items.length === 0 ? 'lg:col-span-3' : 'lg:col-span-2'}>
@@ -275,7 +278,9 @@ export function ReviewSection({ embedded = false }: { embedded?: boolean }) {
               <EmptyState
                 icon={<CheckCircle2 />}
                 title={
-                  supplementalPendingCount > 0 ? 'No transactions need review' : 'Everything is ready'
+                  supplementalPendingCount > 0
+                    ? 'No transactions need review'
+                    : 'Everything is ready'
                 }
                 description={
                   supplementalPendingCount > 0

@@ -30,9 +30,11 @@ export const FINANCIAL_CHANGE_QUERY_ROOTS: Record<FinancialChangeDomain, readonl
     'intelligenceReadiness',
     'reconciliationQuality',
     'learnedMerchantRules',
+    'subscriptionReview',
   ],
   today: [
     'workspace',
+    'horizon',
     'guidanceBrief',
     'goals',
     'cashPlan',
@@ -57,6 +59,7 @@ export const FINANCIAL_CHANGE_QUERY_ROOTS: Record<FinancialChangeDomain, readonl
     'goals',
     'intelligenceReadiness',
     'reconciliationQuality',
+    'subscriptionReview',
   ],
   accounts: [
     'accounts',
@@ -80,6 +83,7 @@ export const FINANCIAL_CHANGE_QUERY_ROOTS: Record<FinancialChangeDomain, readonl
   ],
   cards: [
     'cardOverview',
+    'horizon',
     'cardDueRunway',
     'cardUtilizationHistory',
     'cardPortfolioUpcoming',
@@ -101,6 +105,7 @@ export const FINANCIAL_CHANGE_QUERY_ROOTS: Record<FinancialChangeDomain, readonl
   ],
   planning: [
     'cashPlan',
+    'horizon',
     'commitments',
     'reserves',
     'liabilities',
@@ -118,6 +123,7 @@ export const FINANCIAL_CHANGE_QUERY_ROOTS: Record<FinancialChangeDomain, readonl
     'accounts',
     'netWorth',
     'balanceForecast',
+    'subscriptionReview',
   ],
   guidance: ['guidanceBrief', 'guidance', 'workspace', 'goals'],
   statements: [

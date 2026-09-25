@@ -39,6 +39,7 @@ export const queryKeys = {
   budgetDrilldown: (u: string, b: string, m: number, y: number, limit: number) =>
     ['budgetDrilldown', u, b, m, y, limit] as const,
   workspace: (u: string, m: number, y: number) => ['workspace', u, m, y] as const,
+  horizon: (u: string, days = 30) => ['horizon', u, days] as const,
   merchants: (u: string, m: number, y: number) => ['merchants', u, m, y] as const,
   learnedMerchantRules: (u: string) => ['learnedMerchantRules', u] as const,
   categoryIntelligence: (u: string, m: number, y: number) =>
@@ -332,6 +333,16 @@ export function useWorkspaceSnapshot() {
   return useQuery({
     queryKey: queryKeys.workspace(userId, month, year),
     queryFn: () => api.workspace(userId, month, year),
+    enabled: !!userId,
+    ...financialQueryPolicy,
+  });
+}
+
+export function useFinancialHorizon(days = 30) {
+  const userId = useUserId();
+  return useQuery({
+    queryKey: queryKeys.horizon(userId, days),
+    queryFn: () => api.horizon(userId, days),
     enabled: !!userId,
     ...financialQueryPolicy,
   });

@@ -14,6 +14,7 @@ import type {
   EmailsResponse,
   FinancialAccount,
   AccountIdentitySnapshot,
+  FinancialHorizonResponse,
   ExplainPayload,
   ExplainResponse,
   FinancialHealthScore,
@@ -322,6 +323,10 @@ export const api = {
   financialChanges: (userId: string, afterSequence: number, limit = 250) =>
     request<FinancialChangePage>('/sync/changes', {
       query: { user_id: userId, after_sequence: afterSequence, limit },
+    }),
+  horizon: (userId: string, days = 30) =>
+    request<FinancialHorizonResponse>('/horizon', {
+      query: { user_id: userId, days },
     }),
   logout: () => request<{ status: string }>('/auth/logout', { method: 'POST' }),
   startDemo: async () =>
@@ -1452,4 +1457,26 @@ export const api = {
     `${API_BASE}/reports/export/csv?user_id=${encodeURIComponent(userId)}&month=${month}&year=${year}`,
   reportUrl: (userId: string, month: number, year: number) =>
     `${API_BASE}/reports/monthly?user_id=${encodeURIComponent(userId)}&month=${month}&year=${year}`,
+};
+
+export const subscriptionReviewApi = {
+  recurringReview: (userId: string, asOf?: string) =>
+    request<import('./types').SubscriptionReviewListResponse>('/subscriptions/recurring-review', {
+      query: { user_id: userId, as_of: asOf },
+    }),
+  recordRecurringReviewAction: (
+    userId: string,
+    streamKey: string,
+    action: import('./types').SubscriptionReviewAction,
+    note?: string,
+    asOf?: string,
+  ) =>
+    request<import('./types').SubscriptionReviewActionResponse>(
+      `/subscriptions/recurring-review/${encodeURIComponent(streamKey)}/actions`,
+      {
+        method: 'POST',
+        query: { user_id: userId, as_of: asOf },
+        body: { action, note },
+      },
+    ),
 };
