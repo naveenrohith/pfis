@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import uuid
@@ -13,6 +14,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -103,8 +105,18 @@ async def test_session_factory(monkeypatch: pytest.MonkeyPatch):
         await engine.dispose()
         cleanup_engine = create_async_engine(normalized_url, pool_pre_ping=True)
         try:
-            async with cleanup_engine.begin() as connection:
-                await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+            # Background work from the test may still hold locks briefly; retry on deadlock.
+            for attempt in range(3):
+                try:
+                    async with cleanup_engine.begin() as connection:
+                        await connection.execute(
+                            text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
+                        )
+                    break
+                except DBAPIError as exc:
+                    if "deadlock" not in str(exc).lower() or attempt == 2:
+                        raise
+                    await asyncio.sleep(0.5 * (attempt + 1))
         finally:
             await cleanup_engine.dispose()
 
