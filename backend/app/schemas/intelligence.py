@@ -20,11 +20,25 @@ ForecastCalibrationStatus = Literal[
     "insufficient_history",
     "not_applicable",
 ]
+RecommendationRankStatus = Literal["ranked", "withheld", "excluded"]
+RecommendationConstraintStatus = Literal["passed", "failed"]
 
 
 class EvidenceItem(BaseModel):
     label: str
     value: str
+
+
+class RecommendationRankReason(BaseModel):
+    code: str
+    detail: str
+    weight: float
+
+
+class RecommendationConstraintCheck(BaseModel):
+    name: str
+    status: RecommendationConstraintStatus
+    reason: str
 
 
 class TransactionPreview(BaseModel):
@@ -441,11 +455,38 @@ class GoalResponse(BaseModel):
     created_at: datetime
 
 
+ExplainSurfaceKind = Literal[
+    "category", "budget", "merchant", "financial_health", "cash_flow", "general"
+]
+ExplainEvidenceStatus = Literal["verified", "partial", "conflict", "unverified"]
+ExplainMetricStatus = Literal["verified", "mismatch", "unverified", "invalid", "withheld"]
+
+
 class ExplainRequest(BaseModel):
     surface: str = Field(..., min_length=1, max_length=80)
     title: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(None, max_length=1000)
     metrics: dict = Field(default_factory=dict)
+    month: int | None = Field(None, ge=1, le=12)
+    year: int | None = Field(None, ge=2020, le=2030)
+    subject_id: str | None = Field(None, min_length=1, max_length=160)
+
+
+class ExplainMetric(BaseModel):
+    """One supplied aggregate and how PFIS qualified it."""
+
+    key: str
+    label: str
+    supplied_value: str | None = None
+    verified_value: str | None = None
+    status: ExplainMetricStatus
+    note: str
+
+
+class ExplainAction(BaseModel):
+    label: str
+    reason: str
+    target: str | None = None
 
 
 class ExplainResponse(BaseModel):
@@ -454,3 +495,17 @@ class ExplainResponse(BaseModel):
     drivers: list[str] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
     safety_note: str
+    ruleset_version: str = "pfis-explain-1"
+    surface_kind: ExplainSurfaceKind = "general"
+    evidence_status: ExplainEvidenceStatus = "unverified"
+    source: str = "client_supplied"
+    as_of: datetime | None = None
+    period_month: int | None = None
+    period_year: int | None = None
+    metrics: list[ExplainMetric] = Field(default_factory=list)
+    evidence: list[EvidenceItem] = Field(default_factory=list)
+    coverage_score: int | None = Field(default=None, ge=0, le=100)
+    coverage: list[SourceCoverage] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    actions: list[ExplainAction] = Field(default_factory=list)

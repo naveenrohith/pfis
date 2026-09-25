@@ -1,17 +1,16 @@
 """Transparent, deterministic personal-finance guidance."""
 
 import json
-import re
-from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Literal, cast
+from types import SimpleNamespace
+from typing import Any, Literal, cast
 
 from sqlalchemy import extract, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.account import FinancialAccount
+from app.models.account import AccountBalanceSnapshot, FinancialAccount
 from app.models.transaction import Transaction
 from app.models.workspace import RecommendationOutcome, RecommendationState
 from app.schemas.dashboard import RecommendationResolution, WorkspaceResponse
@@ -39,6 +38,14 @@ from app.services.card_upcoming_state_service import CardUpcomingStateService
 from app.services.dashboard_service import WorkspaceService
 from app.services.financial_clock import user_financial_today
 from app.services.financial_position_service import FinancialPositionService
+from app.services.guidance.query_planner import (
+    READ_MODELS,
+    GuidanceIntent,
+    GuidanceQueryRefusal,
+    TypedGuidanceQueryPlan,
+    normalize_query,
+    plan_guidance_query,
+)
 from app.services.insights_service import InsightsService
 from app.services.intelligence_service import IntelligenceService
 from app.services.knowledge.ruleset_registry import RECOMMENDATION_OUTCOME
@@ -68,59 +75,14 @@ SUPPORTED_EXAMPLES = [
 ]
 
 
-@dataclass(frozen=True)
-class GuidanceQueryPlan:
-    """The bounded execution plan selected before a query touches data."""
-
-    intent: str
-    temporal_scope: str = "selected_calendar_month"
-    evidence_sources: tuple[str, ...] = ()
-    merchant: str | None = None
+GuidanceQueryPlan = TypedGuidanceQueryPlan
 
 
 _QUERY_EVIDENCE_SOURCES: dict[str, tuple[str, ...]] = {
-    "monthly_spend": ("transactions",),
-    "monthly_income": ("transactions",),
-    "monthly_savings": ("transactions",),
-    "merchant_spend": ("transactions",),
-    "recurring_charges": ("transactions", "recurring_read_model"),
-    "budget_status": ("transactions", "budgets"),
-    "month_comparison": ("transactions",),
-    "bank_position": ("financial_accounts", "account_balance_snapshots"),
+    intent.value: sources for intent, sources in READ_MODELS.items()
+} | {
     "bank_position_blocked": ("financial_accounts", "account_balance_sources"),
-    "card_position": ("financial_accounts", "card_position_observations", "credit_card_statements"),
-    "card_positions": ("financial_accounts", "card_position_observations"),
-    "safe_to_spend": ("cash_plans", "financial_accounts", "account_balance_snapshots"),
     "safe_to_spend_blocked": ("cash_plans", "financial_accounts"),
-    "current_net_worth": ("financial_accounts", "account_balance_snapshots"),
-    "card_due_affordability": (
-        "credit_card_statements",
-        "card_position_observations",
-        "account_balance_forecast_snapshots",
-    ),
-    "card_upcoming_state": (
-        "credit_card_statements",
-        "card_position_observations",
-        "card_statement_projection",
-        "card_payment_intents",
-        "card_calendar_events",
-        "card_refund_tracker",
-    ),
-    "card_portfolio_upcoming": (
-        "credit_card_statements",
-        "card_position_observations",
-        "card_statement_projection",
-        "card_payment_intents",
-        "card_calendar_events",
-        "card_refund_tracker",
-    ),
-    "card_portfolio_payment_plan": (
-        "credit_card_statements",
-        "card_position_observations",
-        "account_balance_forecast_snapshots",
-        "card_payment_intents",
-        "financial_accounts",
-    ),
 }
 
 
@@ -206,27 +168,27 @@ class GuidanceService:
     async def query(
         self, user_id: str, raw_query: str, month: int, year: int, currency: str = "INR"
     ) -> GuidanceQueryResult:
-        query = " ".join(raw_query.lower().split())
-        plan = self._query_plan(query)
+        query = normalize_query(raw_query)
+        plan = self._query_plan(raw_query)
         if plan is None:
             return self._unsupported_query_result(month, year)
-        if plan.intent == "card_due_affordability":
-            return await self._card_due_affordability_query(user_id, query, month, year, currency)
-        if plan.intent == "card_upcoming_state":
+        if plan.intent == GuidanceIntent.CARD_DUE_AFFORDABILITY:
+            return await self._card_due_affordability_query(user_id, plan, month, year, currency)
+        if plan.intent == GuidanceIntent.CARD_UPCOMING_STATE:
             return await self._card_upcoming_state_query(user_id, month, year, currency)
-        if plan.intent == "card_portfolio_upcoming":
+        if plan.intent == GuidanceIntent.CARD_PORTFOLIO_UPCOMING:
             return await self._card_portfolio_upcoming_query(user_id, month, year, currency)
-        if plan.intent == "card_portfolio_payment_plan":
+        if plan.intent == GuidanceIntent.CARD_PORTFOLIO_PAYMENT_PLAN:
             return await self._card_portfolio_payment_plan_query(user_id, month, year, currency)
         if plan.intent in {
-            "safe_to_spend",
-            "current_net_worth",
-            "card_position",
-            "card_positions",
-            "bank_position",
+            GuidanceIntent.SAFE_TO_SPEND,
+            GuidanceIntent.CURRENT_NET_WORTH,
+            GuidanceIntent.CARD_POSITION,
+            GuidanceIntent.CARD_POSITIONS,
+            GuidanceIntent.BANK_POSITION,
         }:
             return await self._current_position_query(user_id, query, month, year, currency)
-        if plan.intent == "recurring_charges":
+        if plan.intent == GuidanceIntent.RECURRING_CHARGES:
             insights = await InsightsService(self.db).generate_insights(user_id, month, year)
             recurring = insights.get("recurring_payments", [])
             total = sum(
@@ -242,7 +204,7 @@ class GuidanceService:
                 ["Open recurring charges", "Review unused subscriptions"],
             )
 
-        if plan.intent == "budget_status":
+        if plan.intent == GuidanceIntent.BUDGET_STATUS:
             rows = await IntelligenceService(self.db)._budget_adherence(user_id, month, year)
             if rows is None:
                 return self._result(
@@ -262,7 +224,7 @@ class GuidanceService:
                 ["Open budgets", "Review categories over 80%"],
             )
 
-        if plan.intent == "month_comparison":
+        if plan.intent == GuidanceIntent.MONTH_COMPARISON:
             comparison = await IntelligenceService(self.db).month_comparison(user_id, month, year)
             change = comparison.spend_change_pct
             change_text = (
@@ -287,8 +249,8 @@ class GuidanceService:
                 ["Open insights", "Review the largest category changes"],
             )
 
-        if plan.intent == "merchant_spend" and plan.merchant:
-            merchant = plan.merchant
+        if plan.intent == GuidanceIntent.MERCHANT_SPEND and plan.slots.get("merchant"):
+            merchant = plan.slots["merchant"]
             total = await self._merchant_total(user_id, month, year, merchant)
             return self._result(
                 "merchant_spend",
@@ -299,12 +261,16 @@ class GuidanceService:
                 ["Open transactions", "Review merchant details"],
             )
 
-        if plan.intent in {"monthly_spend", "monthly_income", "monthly_savings"}:
+        if plan.intent in {
+            GuidanceIntent.MONTHLY_SPEND,
+            GuidanceIntent.MONTHLY_INCOME,
+            GuidanceIntent.MONTHLY_SAVINGS,
+        }:
             summary = await IntelligenceService(self.db).monthly_income_spend(user_id, month, year)
             income, spend = summary
-            if plan.intent == "monthly_income":
+            if plan.intent == GuidanceIntent.MONTHLY_INCOME:
                 intent, value, label = "monthly_income", income, "Income"
-            elif plan.intent == "monthly_savings":
+            elif plan.intent == GuidanceIntent.MONTHLY_SAVINGS:
                 intent, value, label = "monthly_savings", income - spend, "Savings"
             else:
                 intent, value, label = "monthly_spend", spend, "Spending"
@@ -674,81 +640,10 @@ class GuidanceService:
     def _query_plan(query: str) -> GuidanceQueryPlan | None:
         """Classify only named, auditable intents before touching read models."""
 
-        if GuidanceService._asks_card_portfolio_payment_plan(query):
-            return GuidanceQueryPlan(
-                "card_portfolio_payment_plan",
-                temporal_scope="current_card_cycle",
-                evidence_sources=_QUERY_EVIDENCE_SOURCES["card_portfolio_payment_plan"],
-            )
-        if GuidanceService._asks_card_due_affordability(query):
-            return GuidanceQueryPlan(
-                "card_due_affordability",
-                evidence_sources=_QUERY_EVIDENCE_SOURCES["card_due_affordability"],
-            )
-        if GuidanceService._asks_card_portfolio_upcoming(query):
-            return GuidanceQueryPlan(
-                "card_portfolio_upcoming",
-                temporal_scope="current_card_cycle",
-                evidence_sources=_QUERY_EVIDENCE_SOURCES["card_portfolio_upcoming"],
-            )
-        if GuidanceService._asks_card_upcoming_state(query):
-            return GuidanceQueryPlan(
-                "card_upcoming_state",
-                temporal_scope="current_card_cycle",
-                evidence_sources=_QUERY_EVIDENCE_SOURCES["card_upcoming_state"],
-            )
-        if GuidanceService._asks_current_position(query):
-            if any(term in query for term in ("safe to spend", "spendable", "available cash")):
-                intent = "safe_to_spend"
-            elif any(term in query for term in ("net worth", "financial position", "worth")):
-                intent = "current_net_worth"
-            elif any(term in query for term in ("card", "credit", "outstanding")):
-                intent = "card_position"
-            else:
-                intent = "bank_position"
-            return GuidanceQueryPlan(intent, evidence_sources=_QUERY_EVIDENCE_SOURCES[intent])
-        if any(term in query for term in ("recurring", "subscription", "subscriptions")):
-            return GuidanceQueryPlan(
-                "recurring_charges",
-                evidence_sources=_QUERY_EVIDENCE_SOURCES["recurring_charges"],
-            )
-        if "budget" in query:
-            return GuidanceQueryPlan(
-                "budget_status",
-                evidence_sources=_QUERY_EVIDENCE_SOURCES["budget_status"],
-            )
-        if any(term in query for term in ("compare", "last month", "previous month")):
-            return GuidanceQueryPlan(
-                "month_comparison",
-                evidence_sources=_QUERY_EVIDENCE_SOURCES["month_comparison"],
-            )
-        merchant_match = re.search(
-            r"(?:at|from)\s+(.+?)(?:\s+this month|\s+last month|\?|$)", query
-        )
-        if merchant_match and any(term in query for term in ("spend", "spent", "expense")):
-            merchant = merchant_match.group(1).strip()
-            if merchant:
-                return GuidanceQueryPlan(
-                    "merchant_spend",
-                    evidence_sources=_QUERY_EVIDENCE_SOURCES["merchant_spend"],
-                    merchant=merchant,
-                )
-        if any(term in query for term in ("spend", "spent", "expenses")):
-            return GuidanceQueryPlan(
-                "monthly_spend",
-                evidence_sources=_QUERY_EVIDENCE_SOURCES["monthly_spend"],
-            )
-        if "income" in query:
-            return GuidanceQueryPlan(
-                "monthly_income",
-                evidence_sources=_QUERY_EVIDENCE_SOURCES["monthly_income"],
-            )
-        if any(term in query for term in ("saved", "savings")):
-            return GuidanceQueryPlan(
-                "monthly_savings",
-                evidence_sources=_QUERY_EVIDENCE_SOURCES["monthly_savings"],
-            )
-        return None
+        result = plan_guidance_query(query)
+        if isinstance(result, GuidanceQueryRefusal):
+            return None
+        return result
 
     @staticmethod
     def _unsupported_query_result(month: int, year: int) -> GuidanceQueryResult:
@@ -775,99 +670,29 @@ class GuidanceService:
     def _asks_card_portfolio_payment_plan(query: str) -> bool:
         """Recognize explicit comparisons of minimum- and total-due plans."""
 
-        if "card" not in query and "credit" not in query:
-            return False
-        return any(
-            phrase in query
-            for phrase in (
-                "minimum vs total",
-                "minimum and total",
-                "minimum versus total",
-                "compare payment plans",
-                "compare card payment",
-                "card payment plan",
-                "payment plan across",
-                "pay all cards",
-                "which cards can i pay",
-            )
-        )
+        plan = GuidanceService._query_plan(query)
+        return plan is not None and plan.intent == GuidanceIntent.CARD_PORTFOLIO_PAYMENT_PLAN
 
     @staticmethod
     def _asks_card_due_affordability(query: str) -> bool:
         """Recognize card-payment questions that require a due-date runway."""
 
-        if "card" not in query and "credit" not in query:
-            return False
-        return any(
-            phrase in query
-            for phrase in (
-                "pay my card",
-                "pay the card",
-                "pay this card",
-                "pay card",
-                "card due",
-                "cover the card",
-                "cover my card",
-                "afford the card",
-                "afford my card",
-            )
-        )
+        plan = GuidanceService._query_plan(query)
+        return plan is not None and plan.intent == GuidanceIntent.CARD_DUE_AFFORDABILITY
 
     @staticmethod
     def _asks_card_portfolio_upcoming(query: str) -> bool:
         """Recognize explicit cross-card upcoming-state questions."""
 
-        if "card" not in query and "credit" not in query:
-            return False
-        return any(
-            phrase in query
-            for phrase in (
-                "all cards",
-                "all credit cards",
-                "across my cards",
-                "across all cards",
-                "my cards",
-                "card portfolio",
-                "which card is due",
-                "which cards are due",
-                "cards upcoming",
-            )
-        )
+        plan = GuidanceService._query_plan(query)
+        return plan is not None and plan.intent == GuidanceIntent.CARD_PORTFOLIO_UPCOMING
 
     @staticmethod
     def _asks_card_upcoming_state(query: str) -> bool:
         """Recognize dated card-next-state questions without broad generation."""
 
-        if "card" not in query and "credit" not in query:
-            return False
-        return any(
-            phrase in query
-            for phrase in (
-                "what happens next",
-                "what's next",
-                "whats next",
-                "what is next",
-                "coming up",
-                "upcoming",
-                "next card",
-                "next statement",
-                "statement close",
-                "next payment",
-                "when is my card payment",
-                "when is the card payment",
-                "utilization forecast",
-                "utilisation forecast",
-                "card forecast",
-                "card projection",
-                "utilization pressure",
-                "utilisation pressure",
-                "limit pressure",
-                "credit limit pressure",
-                "credit limit breach",
-                "go over my limit",
-                "exceed my limit",
-            )
-        )
+        plan = GuidanceService._query_plan(query)
+        return plan is not None and plan.intent == GuidanceIntent.CARD_UPCOMING_STATE
 
     async def _card_portfolio_upcoming_query(
         self,
@@ -1169,28 +994,19 @@ class GuidanceService:
     def _asks_current_position(query: str) -> bool:
         """Recognize questions that must use position evidence, not spend totals."""
 
-        return any(
-            term in query
-            for term in (
-                "current balance",
-                "bank balance",
-                "card balance",
-                "credit card balance",
-                "available cash",
-                "available credit",
-                "safe to spend",
-                "spendable",
-                "net worth",
-                "financial position",
-                "current outstanding",
-                "outstanding balance",
-            )
-        )
+        plan = GuidanceService._query_plan(query)
+        return plan is not None and plan.intent in {
+            GuidanceIntent.BANK_POSITION,
+            GuidanceIntent.CARD_POSITION,
+            GuidanceIntent.CARD_POSITIONS,
+            GuidanceIntent.SAFE_TO_SPEND,
+            GuidanceIntent.CURRENT_NET_WORTH,
+        }
 
     async def _card_due_affordability_query(
         self,
         user_id: str,
-        query: str,
+        query: str | GuidanceQueryPlan,
         month: int,
         year: int,
         currency: str,
@@ -1325,7 +1141,7 @@ class GuidanceService:
     async def _current_position_query(
         self,
         user_id: str,
-        query: str,
+        query: str | GuidanceQueryPlan,
         month: int,
         year: int,
         currency: str,
@@ -1337,8 +1153,18 @@ class GuidanceService:
         is incomplete; it never infers a provider-live balance from alerts.
         """
 
+        if isinstance(query, TypedGuidanceQueryPlan):
+            planned_intent = query.intent
+            normalized_query = ""
+        else:
+            selected = self._query_plan(query)
+            planned_intent = (
+                selected.intent if selected is not None else GuidanceIntent.BANK_POSITION
+            )
+            normalized_query = normalize_query(query)
+
         position_service = FinancialPositionService(self.db)
-        if "safe to spend" in query or "spendable" in query or "available cash" in query:
+        if planned_intent == GuidanceIntent.SAFE_TO_SPEND:
             plan = await position_service.cash_plan(user_id)
             if plan.readiness == "ready" and plan.flexible_money is not None:
                 return self._result(
@@ -1394,7 +1220,7 @@ class GuidanceService:
                 ["Open Safe to spend", "Review uncertain activity", "Record a fresh balance"],
             )
 
-        if "net worth" in query or "financial position" in query or "worth" in query:
+        if planned_intent == GuidanceIntent.CURRENT_NET_WORTH:
             series = await AccountService(self.db).net_worth(user_id)
             status = series.current_position_status
             if status in {"observed", "estimated"}:
@@ -1427,7 +1253,7 @@ class GuidanceService:
                 ["Open Net worth", "Review account positions"],
             )
 
-        if "card" in query or "credit" in query or "outstanding" in query:
+        if planned_intent in {GuidanceIntent.CARD_POSITION, GuidanceIntent.CARD_POSITIONS}:
             cards = list(
                 (
                     await self.db.scalars(
@@ -1472,7 +1298,7 @@ class GuidanceService:
                     overview.observed_balance_as_of is not None
                     and overview.observed_balance_as_of < date.fromordinal(today.toordinal() - 7)
                 )
-                if "available credit" in query:
+                if "available credit" in normalized_query:
                     if available_credit is None:
                         answer = (
                             "This card has no issuer-reported available-credit observation, "
@@ -1588,7 +1414,7 @@ class GuidanceService:
                     overviews, estimates, provider_values, strict=True
                 )
             )
-            if "available credit" in query:
+            if "available credit" in normalized_query:
                 answer = (
                     f"PFIS found {len(cards)} cards. Available credit is shown per issuer "
                     "statement; it is not safely totaled as a live amount."
@@ -1649,7 +1475,42 @@ class GuidanceService:
             )
         today = await user_financial_today(self.db, user_id)
         stale_cutoff = date.fromordinal(today.toordinal() - 7)
-        positions = [await position_service.account_position(user_id, bank.id) for bank in banks]
+        try:
+            positions: list[Any] = [
+                await position_service.account_position(user_id, bank.id) for bank in banks
+            ]
+        except ValueError:
+            positions = []
+            for bank in banks:
+                snapshot = await self.db.scalar(
+                    select(AccountBalanceSnapshot)
+                    .where(
+                        AccountBalanceSnapshot.user_id == user_id,
+                        AccountBalanceSnapshot.financial_account_id == bank.id,
+                        AccountBalanceSnapshot.verified.is_(True),
+                    )
+                    .order_by(
+                        AccountBalanceSnapshot.as_of.desc(),
+                        AccountBalanceSnapshot.effective_at.desc().nulls_last(),
+                        AccountBalanceSnapshot.observed_at.desc(),
+                        AccountBalanceSnapshot.created_at.desc(),
+                    )
+                    .limit(1)
+                )
+                positions.append(
+                    SimpleNamespace(
+                        estimated_balance=float(snapshot.amount),
+                        position_status=(
+                            "observed" if snapshot.source == "connector" else "estimated"
+                        ),
+                        observed_as_of=snapshot.as_of,
+                        position_reason_codes=[],
+                        observed_source=snapshot.source,
+                        coverage_complete=snapshot.source == "connector",
+                    )
+                    if snapshot is not None
+                    else None
+                )
         eligible = [
             item
             for item in positions
@@ -1752,9 +1613,9 @@ class GuidanceService:
         evidence = [
             GuidanceEvidence(
                 source_type=source_type,
-                source_id=None,
+                source_id=f"{source_type}:{period}",
                 label="Grounded source",
-                value=f"{source_type} read model for {period}",
+                value=f"{source_type} read model for {period} as of {evidence_cutoff or date(year, month, 1)}",
                 cutoff=evidence_cutoff or date(year, month, 1),
             )
             for source_type in source_types
@@ -1785,9 +1646,10 @@ class GuidanceService:
             metrics=metrics,
             filters={"month": month, "year": year},
             plan=[
-                "Classify a typed financial intent",
-                f"Read {', '.join(source_types)} with a {period} cutoff",
-                "Apply deterministic arithmetic and uncertainty labels",
+                f"Classify typed intent {intent}",
+                f"Read models: {', '.join(source_types)} with a {period} cutoff",
+                "Constrain reads to the resolved owner scope",
+                "Check arithmetic totals against returned metrics and selected temporal scope",
                 "Return an actionable next step without performing a money movement",
             ],
             evidence=evidence,

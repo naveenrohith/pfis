@@ -14,7 +14,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.schemas.intelligence import CashFlowProjection, FinancialHealthScore, MonthComparison
+from app.schemas.intelligence import (
+    CashFlowProjection,
+    FinancialHealthScore,
+    MonthComparison,
+    RecommendationConstraintCheck,
+    RecommendationRankReason,
+    RecommendationRankStatus,
+)
 
 
 class WorkspaceSnapshot(BaseModel):
@@ -125,6 +132,14 @@ class WorkspaceRecommendation(BaseModel):
     freshness_as_of: date | None = None
     urgency: Literal["now", "this_period", "monitor"] = "monitor"
     reversibility: Literal["reversible", "review_required"] = "reversible"
+    ruleset_version: str | None = None
+    ranker_ruleset_version: str | None = None
+    rank_score: float | None = None
+    rank_reasons: list[RecommendationRankReason] = Field(default_factory=list)
+    constraint_checks: list[RecommendationConstraintCheck] = Field(default_factory=list)
+    evidence_cutoff: date | None = None
+    recommendation_status: RecommendationRankStatus = "ranked"
+    missing_evidence: list[str] = Field(default_factory=list)
 
 
 class ReviewSummary(BaseModel):
