@@ -82,7 +82,6 @@ function transactionContext(transaction: Transaction) {
 export function TransactionsSection({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
   const { month, year } = useWorkspace();
-  const transactions = useTransactions();
   const {
     categoryDrill,
     setCategoryDrill,
@@ -93,6 +92,13 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
   } = useDashboardUi();
   const { running, runSync } = useSync();
   const currency = user?.currency ?? 'INR';
+  const [noteSearch, setNoteSearch] = useState(
+    () => new URLSearchParams(window.location.search).get('note') ?? '',
+  );
+  const [debouncedNoteSearch, setDebouncedNoteSearch] = useState(noteSearch);
+  const [selectedTags, setSelectedTags] = useState<string[]>(() =>
+    new URLSearchParams(window.location.search).getAll('tag').filter(Boolean),
+  );
 
   const [type, setType] = useState<TypeFilter>(() => {
     const value = new URLSearchParams(window.location.search).get('type') as TypeFilter | null;
@@ -105,6 +111,23 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
     const direction = params.get('direction');
     return [{ id: field, desc: direction !== 'asc' }];
   });
+  const hasServerFilters = debouncedNoteSearch.trim() !== '' || selectedTags.length > 0;
+  const transactions = useTransactions(
+    hasServerFilters
+      ? {
+          note: debouncedNoteSearch.trim() || undefined,
+          tags: selectedTags,
+        }
+      : undefined,
+  );
+  const tagSourceTransactions = useTransactions();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedNoteSearch(noteSearch);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [noteSearch]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -114,6 +137,13 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
     const query = explorerSearch.trim();
     if (query) params.set('q', query);
     else params.delete('q');
+
+    const note = debouncedNoteSearch.trim();
+    if (note) params.set('note', note);
+    else params.delete('note');
+
+    params.delete('tag');
+    for (const tag of selectedTags) params.append('tag', tag);
 
     if (categoryDrill?.categoryId) params.set('category', categoryDrill.categoryId);
     else params.delete('category');
@@ -133,7 +163,18 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
       '',
       `${window.location.pathname}${queryString ? `?${queryString}` : ''}${window.location.hash}`,
     );
-  }, [categoryDrill, explorerSearch, sorting, type]);
+  }, [categoryDrill, debouncedNoteSearch, explorerSearch, selectedTags, sorting, type]);
+
+  const availableTags = useMemo(() => {
+    const tagSet = new Set<string>(selectedTags);
+    for (const transaction of tagSourceTransactions.data ?? []) {
+      for (const tag of transaction.tags ?? []) {
+        const normalized = tag.trim();
+        if (normalized) tagSet.add(normalized);
+      }
+    }
+    return Array.from(tagSet).sort((a, b) => a.localeCompare(b));
+  }, [selectedTags, tagSourceTransactions.data]);
 
   const filtered = useMemo(() => {
     let list = transactions.data ?? [];
@@ -241,7 +282,12 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
     initialState: { pagination: { pageSize: 12 } },
   });
 
-  const hasFilters = !!categoryDrill || type !== 'all' || explorerSearch.trim() !== '';
+  const hasFilters =
+    !!categoryDrill ||
+    type !== 'all' ||
+    explorerSearch.trim() !== '' ||
+    debouncedNoteSearch.trim() !== '' ||
+    selectedTags.length > 0;
   const exportActions = user ? (
     <div className="flex gap-2">
       <a href={api.csvUrl(user.id, month, year)}>
@@ -301,15 +347,62 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-9"
+                aria-label="Search transactions by merchant, account, or reference"
+                name="transaction-ledger-search"
+                autoComplete="off"
                 placeholder="Search transactions…"
                 value={explorerSearch}
                 onChange={(e) => setExplorerSearch(e.target.value)}
               />
             </div>
+            <div className="relative min-w-[12rem] flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                aria-label="Search transaction notes"
+                name="transaction-note-search"
+                autoComplete="off"
+                placeholder="Search notes…"
+                value={noteSearch}
+                onChange={(event) => setNoteSearch(event.target.value)}
+              />
+            </div>
           </div>
 
+          {availableTags.length > 0 ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2" aria-label="Filter by tags">
+              <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Tags
+              </span>
+              {availableTags.map((tag) => {
+                const active = selectedTags.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() =>
+                      setSelectedTags((current) =>
+                        current.includes(tag)
+                          ? current.filter((value) => value !== tag)
+                          : [...current, tag],
+                      )
+                    }
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      active
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border bg-muted text-muted-foreground hover:bg-accent'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
           {hasFilters && (
-            <div className="mb-3 flex flex-wrap gap-2">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
               {categoryDrill && (
                 <FilterChip
                   label={`Category: ${categoryDrill.label}`}
@@ -325,8 +418,46 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
                   onClear={() => setExplorerSearch('')}
                 />
               )}
+              {debouncedNoteSearch.trim() && (
+                <FilterChip
+                  label={`Note: ${debouncedNoteSearch}`}
+                  onClear={() => {
+                    setNoteSearch('');
+                    setDebouncedNoteSearch('');
+                  }}
+                />
+              )}
+              {selectedTags.map((tag) => (
+                <FilterChip
+                  key={tag}
+                  label={`Tag: ${tag}`}
+                  onClear={() =>
+                    setSelectedTags((current) => current.filter((value) => value !== tag))
+                  }
+                />
+              ))}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setCategoryDrill(null);
+                  setType('all');
+                  setExplorerSearch('');
+                  setNoteSearch('');
+                  setDebouncedNoteSearch('');
+                  setSelectedTags([]);
+                }}
+              >
+                Clear all
+              </Button>
             </div>
           )}
+
+          <p className="sr-only" role="status" aria-live="polite">
+            {transactions.isLoading
+              ? 'Refreshing transaction results.'
+              : `${filtered.length} transaction${filtered.length === 1 ? '' : 's'} shown.`}
+          </p>
 
           {transactions.isLoading ? (
             <div className="grid gap-2">
@@ -351,6 +482,9 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
                       setCategoryDrill(null);
                       setType('all');
                       setExplorerSearch('');
+                      setNoteSearch('');
+                      setDebouncedNoteSearch('');
+                      setSelectedTags([]);
                     }}
                   >
                     Clear filters
@@ -425,7 +559,7 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
                                 onClick={header.column.getToggleSortingHandler()}
                               >
                                 {flexRender(header.column.columnDef.header, header.getContext())}
-                                <ArrowUpDown className="h-3 w-3" />
+                                <ArrowUpDown className="h-3 w-3" aria-hidden="true" />
                               </button>
                             ) : (
                               flexRender(header.column.columnDef.header, header.getContext())
@@ -472,7 +606,7 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
                       disabled={!table.getCanPreviousPage()}
                       aria-label="Previous transaction page"
                     >
-                      <ChevronLeft className="h-4 w-4" />
+                      <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                     </Button>
                     <Button
                       variant="outline"
@@ -481,7 +615,7 @@ export function TransactionsSection({ embedded = false }: { embedded?: boolean }
                       disabled={!table.getCanNextPage()}
                       aria-label="Next transaction page"
                     >
-                      <ChevronRight className="h-4 w-4" />
+                      <ChevronRight className="h-4 w-4" aria-hidden="true" />
                     </Button>
                   </div>
                 </div>
@@ -498,8 +632,8 @@ function FilterChip({ label, onClear }: { label: string; onClear: () => void }) 
   return (
     <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-2.5 py-1 text-xs">
       {label}
-      <button onClick={onClear} aria-label={`Clear ${label}`}>
-        <X className="h-3 w-3" />
+      <button type="button" onClick={onClear} aria-label={`Clear ${label}`}>
+        <X className="h-3 w-3" aria-hidden="true" />
       </button>
     </span>
   );
