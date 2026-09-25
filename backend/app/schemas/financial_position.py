@@ -10,6 +10,12 @@ from app.schemas.intelligence import EvidenceItem
 
 SourceKind = Literal["manual", "email", "statement", "connector"]
 ReviewOutcome = Literal["matched", "newly_imported", "ignored_by_rule", "needs_review"]
+BalancePositionStatus = Literal[
+    "observed", "estimated", "stale", "incomplete", "needs_review", "unsupported"
+]
+BalancePositionProductType = Literal[
+    "bank", "credit_card", "loan", "pay_later", "cash", "investment", "unknown"
+]
 
 
 class CommitmentCreate(BaseModel):
@@ -274,6 +280,8 @@ class ReconciliationItem(BaseModel):
 
 class AccountPositionResponse(BaseModel):
     financial_account_id: str
+    account_id: str
+    product_type: BalancePositionProductType
     currency: str
     balance_kind: Literal["asset", "liability"]
     verified_balance: float | None
@@ -298,12 +306,19 @@ class AccountPositionResponse(BaseModel):
     settled_movement_since_observation: float | None = None
     pending_increase: float = 0.0
     pending_decrease: float = 0.0
+    unlinked_count: int = Field(default=0, ge=0)
+    unreviewed_count: int = Field(default=0, ge=0)
+    duplicate_candidate_count: int = Field(default=0, ge=0)
     position_status: Literal[
         "needs_observation", "observed", "estimated", "stale", "incomplete", "needs_review"
     ] = "needs_observation"
     position_confidence: float = Field(default=0.0, ge=0, le=1)
     position_reason_codes: list[str] = Field(default_factory=list)
     position_ruleset_version: str = "pfis-balance-position-1"
+    status: BalancePositionStatus = "incomplete"
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    reason_codes: list[str] = Field(default_factory=list)
+    ruleset_version: str = "pfis-balance-position-1"
     opening_balance: float | None = None
     opening_as_of: date | None = None
     known_movement: float | None = None
@@ -630,15 +645,37 @@ class CardPaymentIntentUpdate(BaseModel):
 
 
 class CardCalendarEventCreate(BaseModel):
-    event_type: Literal["renewal", "annual_fee", "fee_reversal", "milestone"]
+    event_type: Literal["renewal", "annual_fee", "fee_reversal", "milestone", "milestone_spend"]
     label: str = Field(..., min_length=1, max_length=160)
     event_date: date
+    source_label: str = Field("User-entered", min_length=1, max_length=160)
+    source_identifier: str | None = Field(None, max_length=128)
+    annual_fee_amount: Decimal | None = Field(None, gt=0, max_digits=18, decimal_places=2)
+    fee_reversal_condition: str | None = Field(None, max_length=500)
+    fee_reversal_status: (
+        Literal["unknown", "pending", "waived", "reversed", "not_eligible"] | None
+    ) = None
+    milestone_spend_target: Decimal | None = Field(None, gt=0, max_digits=18, decimal_places=2)
+    milestone_period_start: date | None = None
+    milestone_period_end: date | None = None
 
 
 class CardCalendarEventUpdate(BaseModel):
-    event_type: Literal["renewal", "annual_fee", "fee_reversal", "milestone"] | None = None
+    event_type: (
+        Literal["renewal", "annual_fee", "fee_reversal", "milestone", "milestone_spend"] | None
+    ) = None
     label: str | None = Field(None, min_length=1, max_length=160)
     event_date: date | None = None
+    source_label: str | None = Field(None, min_length=1, max_length=160)
+    source_identifier: str | None = Field(None, max_length=128)
+    annual_fee_amount: Decimal | None = Field(None, gt=0, max_digits=18, decimal_places=2)
+    fee_reversal_condition: str | None = Field(None, max_length=500)
+    fee_reversal_status: (
+        Literal["unknown", "pending", "waived", "reversed", "not_eligible"] | None
+    ) = None
+    milestone_spend_target: Decimal | None = Field(None, gt=0, max_digits=18, decimal_places=2)
+    milestone_period_start: date | None = None
+    milestone_period_end: date | None = None
 
 
 class CardCalendarEventResponse(CardCalendarEventCreate):
