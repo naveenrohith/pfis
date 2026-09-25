@@ -22,7 +22,7 @@ from app.config import get_settings
 from app.database import Base
 from app.models.user import User
 
-PORTABLE_EXPORT_SCHEMA_VERSION = 16
+PORTABLE_EXPORT_SCHEMA_VERSION = 17
 
 # Every table containing owned, derived, or shared user-visible data is explicit.
 # The inventory test fails when a new model is added without an export decision.
@@ -72,6 +72,7 @@ PORTABLE_EXPORT_TABLES = frozenset(
         "raw_emails",
         "recommendation_states",
         "recommendation_outcomes",
+        "user_preference_policy_versions",
         "reserve_plans",
         "roadmap_bills",
         "statement_imports",

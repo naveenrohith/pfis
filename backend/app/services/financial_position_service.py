@@ -240,15 +240,251 @@ class FinancialPositionService:
                 )
             ).all()
         )
+        all_transactions = list(
+            (
+                await self.db.scalars(
+                    select(Transaction).where(
+                        Transaction.user_id == user_id,
+                        Transaction.financial_account_id == account_id,
+                        Transaction.review_outcome != "ignored_by_rule",
+                        Transaction.transaction_date <= financial_today,
+                    )
+                )
+            ).all()
+        )
         verified_snapshots = [snapshot for snapshot in snapshots if snapshot.verified]
         latest = verified_snapshots[0] if verified_snapshots else None
-        statement = select(Transaction).where(
-            Transaction.user_id == user_id,
-            Transaction.financial_account_id == account_id,
-            Transaction.review_outcome != "ignored_by_rule",
-            Transaction.transaction_date <= financial_today,
+        anchor_transactions = [
+            transaction
+            for transaction in all_transactions
+            if transaction.currency == account.currency
+            and latest is not None
+            and self._transaction_after_snapshot(transaction, latest)
+        ]
+        source_coverage_incomplete = (
+            await self._source_coverage_incomplete(user_id, account, anchor_transactions)
+            if as_of is None and latest is not None
+            else False
         )
-        all_transactions = list((await self.db.scalars(statement)).all())
+        source_state = (
+            await self._balance_source_state(user_id, account_id)
+            if as_of is None and latest is not None
+            else None
+        )
+        return self._account_position_from_loaded(
+            user_id,
+            account,
+            snapshots,
+            all_transactions,
+            financial_today,
+            period_start=period_start,
+            period_end=period_end,
+            as_of=as_of,
+            source_coverage_incomplete=source_coverage_incomplete,
+            source_state=source_state,
+        )
+
+    async def account_positions(
+        self,
+        user_id: str,
+        account_ids: list[str],
+        period_start: date | None = None,
+        period_end: date | None = None,
+        *,
+        as_of: date | None = None,
+    ) -> dict[str, AccountPositionResponse | None]:
+        ordered_ids = list(dict.fromkeys(account_ids))
+        if not ordered_ids:
+            return {}
+        accounts = list(
+            (
+                await self.db.scalars(
+                    select(FinancialAccount).where(
+                        FinancialAccount.user_id == user_id,
+                        FinancialAccount.id.in_(ordered_ids),
+                    )
+                )
+            ).all()
+        )
+        accounts_by_id = {account.id: account for account in accounts}
+        financial_today = as_of or await user_financial_today(self.db, user_id)
+        snapshots_by_account: dict[str, list[AccountBalanceSnapshot]] = {
+            account_id: [] for account_id in ordered_ids
+        }
+        transactions_by_account: dict[str, list[Transaction]] = {
+            account_id: [] for account_id in ordered_ids
+        }
+        if accounts_by_id:
+            snapshots = list(
+                (
+                    await self.db.scalars(
+                        select(AccountBalanceSnapshot)
+                        .where(
+                            AccountBalanceSnapshot.user_id == user_id,
+                            AccountBalanceSnapshot.financial_account_id.in_(accounts_by_id),
+                            AccountBalanceSnapshot.as_of <= financial_today,
+                        )
+                        .order_by(
+                            AccountBalanceSnapshot.financial_account_id,
+                            AccountBalanceSnapshot.as_of.desc(),
+                            AccountBalanceSnapshot.effective_at.desc().nulls_last(),
+                            AccountBalanceSnapshot.observed_at.desc(),
+                            AccountBalanceSnapshot.created_at.desc(),
+                        )
+                    )
+                ).all()
+            )
+            for snapshot in snapshots:
+                snapshots_by_account.setdefault(snapshot.financial_account_id, []).append(snapshot)
+
+            transactions = list(
+                (
+                    await self.db.scalars(
+                        select(Transaction).where(
+                            Transaction.user_id == user_id,
+                            Transaction.financial_account_id.in_(accounts_by_id),
+                            Transaction.review_outcome != "ignored_by_rule",
+                            Transaction.transaction_date <= financial_today,
+                        )
+                    )
+                ).all()
+            )
+            for transaction in transactions:
+                if transaction.financial_account_id is not None:
+                    transactions_by_account.setdefault(transaction.financial_account_id, []).append(
+                        transaction
+                    )
+
+        mapped_account_ids: set[str] = set()
+        latest_sync: SyncRun | None = None
+        source_states_by_account: dict[str, AccountBalanceSource] = {}
+        if as_of is None and accounts_by_id:
+            mapped_account_ids = set(
+                (
+                    await self.db.scalars(
+                        select(BalanceProviderAccountMapping.financial_account_id).where(
+                            BalanceProviderAccountMapping.user_id == user_id,
+                            BalanceProviderAccountMapping.financial_account_id.in_(accounts_by_id),
+                        )
+                    )
+                ).all()
+            )
+            source_states = list(
+                (
+                    await self.db.scalars(
+                        select(AccountBalanceSource)
+                        .where(
+                            AccountBalanceSource.user_id == user_id,
+                            AccountBalanceSource.financial_account_id.in_(accounts_by_id),
+                            AccountBalanceSource.source == "connector",
+                        )
+                        .order_by(
+                            AccountBalanceSource.financial_account_id,
+                            AccountBalanceSource.updated_at.desc(),
+                        )
+                    )
+                ).all()
+            )
+            for state in source_states:
+                source_states_by_account.setdefault(state.financial_account_id, state)
+            connector_backed_account_ids = {
+                account.id
+                for account in accounts_by_id.values()
+                if account.connector_account_id is not None or account.id in mapped_account_ids
+            }
+            for account_id, transactions in transactions_by_account.items():
+                account = accounts_by_id.get(account_id)
+                latest_snapshot = next(
+                    (
+                        snapshot
+                        for snapshot in snapshots_by_account.get(account_id, [])
+                        if snapshot.verified
+                    ),
+                    None,
+                )
+                if account is not None and any(
+                    transaction.currency == account.currency
+                    and transaction.source_kind in {"email", "connector"}
+                    and self._transaction_after_snapshot(transaction, latest_snapshot)
+                    for transaction in transactions
+                ):
+                    connector_backed_account_ids.add(account_id)
+            if connector_backed_account_ids:
+                latest_sync = await self.db.scalar(
+                    select(SyncRun)
+                    .where(
+                        SyncRun.user_id == user_id,
+                        SyncRun.status.in_((SyncStatus.COMPLETED.value, SyncStatus.FAILED.value)),
+                    )
+                    .order_by(SyncRun.end_time.desc().nulls_last(), SyncRun.start_time.desc())
+                    .limit(1)
+                )
+
+        positions: dict[str, AccountPositionResponse | None] = {}
+        for account_id in ordered_ids:
+            account = accounts_by_id.get(account_id)
+            if account is None:
+                positions[account_id] = None
+                continue
+            anchor_transactions = [
+                transaction
+                for transaction in transactions_by_account.get(account_id, [])
+                if transaction.currency == account.currency
+                and snapshots_by_account.get(account_id)
+                and any(snapshot.verified for snapshot in snapshots_by_account[account_id])
+                and self._transaction_after_snapshot(
+                    transaction,
+                    next(
+                        (
+                            snapshot
+                            for snapshot in snapshots_by_account[account_id]
+                            if snapshot.verified
+                        ),
+                        None,
+                    ),
+                )
+            ]
+            connector_backed = (
+                account.connector_account_id is not None
+                or account.id in mapped_account_ids
+                or any(
+                    transaction.source_kind in {"email", "connector"}
+                    for transaction in anchor_transactions
+                )
+            )
+            source_coverage_incomplete = bool(
+                connector_backed and latest_sync is not None and not latest_sync.coverage_complete
+            )
+            positions[account_id] = self._account_position_from_loaded(
+                user_id,
+                account,
+                snapshots_by_account.get(account_id, []),
+                transactions_by_account.get(account_id, []),
+                financial_today,
+                period_start=period_start,
+                period_end=period_end,
+                as_of=as_of,
+                source_coverage_incomplete=source_coverage_incomplete,
+                source_state=source_states_by_account.get(account_id),
+            )
+        return positions
+
+    def _account_position_from_loaded(
+        self,
+        user_id: str,
+        account: FinancialAccount,
+        snapshots: list[AccountBalanceSnapshot],
+        all_transactions: list[Transaction],
+        financial_today: date,
+        period_start: date | None = None,
+        period_end: date | None = None,
+        *,
+        as_of: date | None = None,
+        source_coverage_incomplete: bool = False,
+        source_state: AccountBalanceSource | None = None,
+    ) -> AccountPositionResponse:
+        verified_snapshots = [snapshot for snapshot in snapshots if snapshot.verified]
+        latest = verified_snapshots[0] if verified_snapshots else None
         transactions = all_transactions
         if period_start:
             transactions = [
@@ -392,14 +628,10 @@ class FinancialPositionService:
             if duplicate_candidate_count:
                 position_reason_codes.append("duplicate_candidate_activity")
                 position_confidence -= 0.12
-            if as_of is None and await self._source_coverage_incomplete(
-                user_id, account, anchor_transactions
-            ):
+            if as_of is None and source_coverage_incomplete:
                 position_reason_codes.append("source_coverage_incomplete")
                 position_confidence -= 0.18
-            source_state = (
-                await self._balance_source_state(user_id, account_id) if as_of is None else None
-            )
+            source_state = source_state if as_of is None else None
             if source_state is not None:
                 coverage_start = source_state.coverage_start
                 coverage_end = source_state.coverage_end
@@ -2142,21 +2374,31 @@ class FinancialPositionService:
                 ],
             )
         position = await self.account_position(user_id, account.id)
-        snapshot = await self.db.scalar(
-            select(AccountBalanceSnapshot)
-            .where(
-                AccountBalanceSnapshot.user_id == user_id,
-                AccountBalanceSnapshot.financial_account_id == account.id,
-                AccountBalanceSnapshot.verified.is_(True),
+        if position is not None and hasattr(position, "verified_balance"):
+            snapshot_amount = (
+                Decimal(str(position.verified_balance))
+                if position.verified_balance is not None
+                else None
             )
-            .order_by(
-                AccountBalanceSnapshot.as_of.desc(),
-                AccountBalanceSnapshot.effective_at.desc().nulls_last(),
-                AccountBalanceSnapshot.observed_at.desc(),
-                AccountBalanceSnapshot.created_at.desc(),
+            snapshot_as_of = position.balance_as_of
+        else:
+            snapshot = await self.db.scalar(
+                select(AccountBalanceSnapshot)
+                .where(
+                    AccountBalanceSnapshot.user_id == user_id,
+                    AccountBalanceSnapshot.financial_account_id == account.id,
+                    AccountBalanceSnapshot.verified.is_(True),
+                )
+                .order_by(
+                    AccountBalanceSnapshot.as_of.desc(),
+                    AccountBalanceSnapshot.effective_at.desc().nulls_last(),
+                    AccountBalanceSnapshot.observed_at.desc(),
+                    AccountBalanceSnapshot.created_at.desc(),
+                )
+                .limit(1)
             )
-            .limit(1)
-        )
+            snapshot_amount = snapshot.amount if snapshot is not None else None
+            snapshot_as_of = snapshot.as_of if snapshot is not None else None
         position_fields: _CashPlanPositionFields = {
             "estimated_balance": position.estimated_balance if position else None,
             "estimated_balance_as_of": position.estimated_as_of if position else None,
@@ -2190,7 +2432,7 @@ class FinancialPositionService:
             "pending_increase": position.pending_increase if position else 0.0,
             "pending_decrease": position.pending_decrease if position else 0.0,
         }
-        if snapshot is None:
+        if snapshot_amount is None:
             return CashPlanResponse(
                 primary_financial_account_id=account.id,
                 currency=account.currency,
@@ -2206,12 +2448,12 @@ class FinancialPositionService:
                 **position_fields,
                 assumptions=["Record a verified balance before PFIS calculates flexible money."],
             )
-        if snapshot.as_of < date.fromordinal(today.toordinal() - 7):
+        if snapshot_as_of is not None and snapshot_as_of < date.fromordinal(today.toordinal() - 7):
             return CashPlanResponse(
                 primary_financial_account_id=account.id,
                 currency=account.currency,
-                verified_balance=float(snapshot.amount),
-                balance_as_of=snapshot.as_of,
+                verified_balance=float(snapshot_amount),
+                balance_as_of=snapshot_as_of,
                 next_income_date=plan.next_income_date,
                 confirmed_commitments=[],
                 commitment_total=0,
@@ -2228,8 +2470,8 @@ class FinancialPositionService:
             return CashPlanResponse(
                 primary_financial_account_id=account.id,
                 currency=account.currency,
-                verified_balance=float(snapshot.amount),
-                balance_as_of=snapshot.as_of,
+                verified_balance=float(snapshot_amount),
+                balance_as_of=snapshot_as_of,
                 next_income_date=plan.next_income_date,
                 confirmed_commitments=[],
                 commitment_total=0,
@@ -2247,8 +2489,8 @@ class FinancialPositionService:
             return CashPlanResponse(
                 primary_financial_account_id=account.id,
                 currency=account.currency,
-                verified_balance=float(snapshot.amount),
-                balance_as_of=snapshot.as_of,
+                verified_balance=float(snapshot_amount),
+                balance_as_of=snapshot_as_of,
                 next_income_date=None,
                 confirmed_commitments=[],
                 commitment_total=0,
@@ -2263,8 +2505,8 @@ class FinancialPositionService:
             return CashPlanResponse(
                 primary_financial_account_id=account.id,
                 currency=account.currency,
-                verified_balance=float(snapshot.amount),
-                balance_as_of=snapshot.as_of,
+                verified_balance=float(snapshot_amount),
+                balance_as_of=snapshot_as_of,
                 next_income_date=plan.next_income_date,
                 confirmed_commitments=[],
                 commitment_total=0,
@@ -2317,8 +2559,8 @@ class FinancialPositionService:
         return CashPlanResponse(
             primary_financial_account_id=account.id,
             currency=account.currency,
-            verified_balance=float(snapshot.amount),
-            balance_as_of=snapshot.as_of,
+            verified_balance=float(snapshot_amount),
+            balance_as_of=snapshot_as_of,
             next_income_date=plan.next_income_date,
             confirmed_commitments=[CommitmentResponse.model_validate(item) for item in commitments],
             commitment_total=float(commitment_total),

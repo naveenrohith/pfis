@@ -13,8 +13,8 @@
     "accounts_balance_list": {
       "method": "GET",
       "path_template": "/api/accounts",
-      "observed_statements": 39,
-      "max_statements": 43
+      "observed_statements": 10,
+      "max_statements": 12
     },
     "account_position": {
       "method": "GET",
@@ -25,20 +25,20 @@
     "net_worth": {
       "method": "GET",
       "path_template": "/api/net-worth",
-      "observed_statements": 34,
-      "max_statements": 38
+      "observed_statements": 12,
+      "max_statements": 14
     },
     "cash_plan": {
       "method": "GET",
       "path_template": "/api/cash-plan",
-      "observed_statements": 12,
-      "max_statements": 14
+      "observed_statements": 11,
+      "max_statements": 13
     },
     "card_portfolio_payment_plan": {
       "method": "GET",
       "path_template": "/api/cards/portfolio/payment-plan",
-      "observed_statements": 104,
-      "max_statements": 112
+      "observed_statements": 87,
+      "max_statements": 92
     },
     "card_overview": {
       "method": "GET",
@@ -49,8 +49,8 @@
     "workspace_dashboard_summary": {
       "method": "GET",
       "path_template": "/api/dashboard/workspace",
-      "observed_statements": 75,
-      "max_statements": 81
+      "observed_statements": 74,
+      "max_statements": 78
     },
     "guidance_query": {
       "method": "POST",
@@ -61,8 +61,8 @@
     "readiness": {
       "method": "GET",
       "path_template": "/api/analytics/intelligence-readiness",
-      "observed_statements": 58,
-      "max_statements": 63
+      "observed_statements": 36,
+      "max_statements": 40
     }
   }
 }

@@ -33,9 +33,12 @@ from app.schemas.balance_forecast import (
     ForecastRisk,
     ForecastStatus,
 )
+from app.schemas.financial_position import AccountPositionResponse
+from app.schemas.forecast_drift import ForecastDriftHorizonStatus, ForecastDriftStatusResponse
 from app.schemas.intelligence import DataSufficiency, EvidenceItem
 from app.services.financial_clock import user_financial_today
 from app.services.financial_position_service import FinancialPositionService
+from app.services.forecast_drift_guard import FORECAST_DRIFT_REASON_CODE, ForecastDriftGuard
 from app.services.transaction_aggregates import (
     balance_transaction_eligible,
     signed_balance_movement,
@@ -60,6 +63,11 @@ class BalanceForecastService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        self._account_cache: dict[tuple[str, str], FinancialAccount | None] = {}
+        self._position_cache: dict[tuple[str, str, date | None], AccountPositionResponse | None] = (
+            {}
+        )
+        self._today_cache: dict[str, date] = {}
 
     async def forecast(
         self,
@@ -69,22 +77,14 @@ class BalanceForecastService:
         horizon_days: int = 30,
         as_of: date | None = None,
     ) -> AccountBalanceForecastResponse | None:
-        account = await self.db.scalar(
-            select(FinancialAccount).where(
-                FinancialAccount.id == account_id,
-                FinancialAccount.user_id == user_id,
-                FinancialAccount.is_active.is_(True),
-            )
-        )
+        account = await self._account(user_id, account_id)
         if account is None:
             return None
 
         horizon_days = max(1, min(horizon_days, 180))
-        horizon_start = as_of or await user_financial_today(self.db, user_id)
+        horizon_start = as_of or await self._financial_today(user_id)
         horizon_end = horizon_start + timedelta(days=horizon_days)
-        position = await FinancialPositionService(self.db).account_position(
-            user_id, account_id, as_of=as_of
-        )
+        position = await self._position(user_id, account_id, as_of=as_of)
         starting_balance: Decimal | None = None
         starting_basis: str | None = None
         starting_as_of: date | None = None
@@ -116,6 +116,11 @@ class BalanceForecastService:
             if position_status in {"observed", "estimated"}:
                 position_status = "stale"
         forecast_status = self._forecast_status(starting_balance, position_status)
+        drift_status = await ForecastDriftGuard(self.db).account_balance_status(user_id, account_id)
+        if drift_status.degraded:
+            forecast_status = "needs_review"
+            if FORECAST_DRIFT_REASON_CODE not in position_reasons:
+                position_reasons.append(FORECAST_DRIFT_REASON_CODE)
 
         history_start = horizon_start - timedelta(days=HISTORY_WINDOW_DAYS)
         transactions = list(
@@ -205,6 +210,7 @@ class BalanceForecastService:
                 confidence=0.0,
                 data_sufficiency="low",
                 position_reason_codes=position_reasons,
+                drift_status=self._drift_response(drift_status),
                 assumptions=[
                     "A verified or provider-observed balance is required before PFIS can draw a numeric future path.",
                     "Transaction history and dated obligations remain visible as evidence but do not become a balance without an anchor.",
@@ -397,6 +403,7 @@ class BalanceForecastService:
             confidence=self._required_float(confidence),
             data_sufficiency=cast(DataSufficiency, history_sufficiency),
             position_reason_codes=position_reasons,
+            drift_status=self._drift_response(drift_status),
             assumptions=assumptions,
             evidence=[
                 EvidenceItem(
@@ -419,6 +426,33 @@ class BalanceForecastService:
             points=points,
             ruleset_version=RULESET_VERSION,
         )
+
+    async def _account(self, user_id: str, account_id: str) -> FinancialAccount | None:
+        key = (user_id, account_id)
+        if key not in self._account_cache:
+            self._account_cache[key] = await self.db.scalar(
+                select(FinancialAccount).where(
+                    FinancialAccount.id == account_id,
+                    FinancialAccount.user_id == user_id,
+                    FinancialAccount.is_active.is_(True),
+                )
+            )
+        return self._account_cache[key]
+
+    async def _financial_today(self, user_id: str) -> date:
+        if user_id not in self._today_cache:
+            self._today_cache[user_id] = await user_financial_today(self.db, user_id)
+        return self._today_cache[user_id]
+
+    async def _position(
+        self, user_id: str, account_id: str, *, as_of: date | None
+    ) -> AccountPositionResponse | None:
+        key = (user_id, account_id, as_of)
+        if key not in self._position_cache:
+            self._position_cache[key] = await FinancialPositionService(self.db).account_position(
+                user_id, account_id, as_of=as_of
+            )
+        return self._position_cache[key]
 
     async def _dated_events(
         self,
@@ -594,6 +628,27 @@ class BalanceForecastService:
         if position_status in {"needs_review", "incomplete", "stale", "needs_observation"}:
             return "needs_review"
         return "ready"
+
+    @staticmethod
+    def _drift_response(drift_status) -> ForecastDriftStatusResponse:
+        return ForecastDriftStatusResponse(
+            ruleset_version=drift_status.ruleset_version,
+            status=drift_status.status,
+            reason_code=drift_status.reason_code,
+            minimum_outcomes=drift_status.minimum_outcomes,
+            maximum_mape_pct=drift_status.maximum_mape_pct,
+            minimum_interval_coverage_pct=drift_status.minimum_interval_coverage_pct,
+            horizons=[
+                ForecastDriftHorizonStatus(
+                    horizon=item.horizon,
+                    matured_outcomes=item.matured_outcomes,
+                    mean_absolute_percentage_error=item.mean_absolute_percentage_error,
+                    interval_coverage_pct=item.interval_coverage_pct,
+                    status=item.status,
+                )
+                for item in drift_status.horizons
+            ],
+        )
 
     @staticmethod
     def _data_sufficiency(

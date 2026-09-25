@@ -170,8 +170,18 @@ class ReconciliationQualityService:
             "unexplained": 0,
         }
         service = FinancialPositionService(self.db)
+        positions = (
+            await service.account_positions(user_id, [account.id for account in accounts])
+            if hasattr(self.db, "scalars")
+            and type(service).account_position.__name__ == "account_position"
+            else {}
+        )
         for account in accounts:
-            position = await service.account_position(user_id, account.id)
+            position = (
+                positions.get(account.id)
+                if positions
+                else await service.account_position(user_id, account.id)
+            )
             if position is None:
                 counts["not_ready"] += 1
                 continue

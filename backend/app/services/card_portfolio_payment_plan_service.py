@@ -80,7 +80,8 @@ class CardPortfolioPaymentPlanService:
                 ruleset_version=RULESET_VERSION,
             )
 
-        runway_service = CardDueRunwayService(self.db)
+        forecast_service = BalanceForecastService(self.db)
+        runway_service = CardDueRunwayService(self.db, forecast_service=forecast_service)
         rows: list[_CardPlanRow] = []
         for account in accounts:
             runway = await runway_service.runway(user_id, account.id)
@@ -96,7 +97,9 @@ class CardPortfolioPaymentPlanService:
                 )
             )
 
-        forecasts = await self._funding_forecasts(rows, as_of=as_of, user_id=user_id)
+        forecasts = await self._funding_forecasts(
+            rows, as_of=as_of, user_id=user_id, service=forecast_service
+        )
         minimum_plan = await self._build_strategy(
             rows,
             "minimum_due",
@@ -188,6 +191,7 @@ class CardPortfolioPaymentPlanService:
         *,
         as_of: date,
         user_id: str,
+        service: BalanceForecastService | None = None,
     ) -> dict[str, AccountBalanceForecastResponse | None]:
         horizons: dict[str, int] = {}
         for row in rows:
@@ -197,10 +201,10 @@ class CardPortfolioPaymentPlanService:
                 continue
             horizon = max(1, (due_date - as_of).days)
             horizons[funding_id] = min(180, max(horizons.get(funding_id, 1), horizon))
-        service = BalanceForecastService(self.db)
+        forecast_service = service or BalanceForecastService(self.db)
         forecasts: dict[str, AccountBalanceForecastResponse | None] = {}
         for funding_id, horizon in horizons.items():
-            forecasts[funding_id] = await service.forecast(
+            forecasts[funding_id] = await forecast_service.forecast(
                 user_id,
                 funding_id,
                 horizon_days=horizon,
