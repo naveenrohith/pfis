@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useInsights } from '@/features/workspace/queries';
+import { useMonthlySnapshot } from './monthlySnapshotQueries';
 import { InsightsSection } from './InsightsSection';
 
 const longMerchant = 'DAD CAR Loan Adjustment With A Very Long Merchant Descriptor';
@@ -92,10 +93,80 @@ vi.mock('@/features/workspace/queries', () => ({
   }),
 }));
 
+vi.mock('./monthlySnapshotQueries', () => ({
+  useMonthlySnapshot: vi.fn(() => ({
+    isLoading: false,
+    data: {
+      month: 8,
+      year: 2026,
+      month_label: '2026-08',
+      income: 43200,
+      spend: 63804,
+      net: -20604,
+      transaction_count: 7,
+      top_categories: [
+        {
+          category_id: 'category-food',
+          name: 'An unusually long category name for a narrow panel',
+          total: 12000,
+          count: 4,
+        },
+      ],
+      top_merchants: [{ name: longMerchant, total: 25000, count: 1 }],
+      budget_status: [
+        {
+          category: 'Dining',
+          limit: 10000,
+          actual: 12000,
+          usage_pct: 120,
+          status: 'over_budget',
+        },
+      ],
+      recurring_changes: [
+        {
+          merchant: longRecurringMerchant,
+          status: 'mature',
+          cadence: 'monthly',
+          monthly_equivalent: 19750,
+          confidence: 0.94,
+          data_sufficiency: 'high',
+        },
+      ],
+      notable_anomalies: [
+        {
+          id: 'anomaly-food',
+          kind: 'category',
+          label: 'Dining',
+          current_amount: 12000,
+          baseline_amount: 7000,
+          delta_amount: 5000,
+          delta_pct: 71.4,
+          confidence: 0.9,
+          data_sufficiency: 'high',
+        },
+      ],
+      coverage: {
+        incomplete_month: true,
+        latest_transaction_date: '2026-08-11',
+        data_freshness_days: 2,
+        latest_sync_status: 'success',
+        last_synced_at: '2026-08-11T08:00:00Z',
+      },
+    },
+  })),
+}));
+
 describe('Insights investigation layout', () => {
   it('pairs the daily trend with one ranked, ledger-linked driver list', () => {
     render(<InsightsSection embedded />);
 
+    expect(screen.getByRole('heading', { name: /negative net movement/i })).toBeInTheDocument();
+    expect(screen.getByText('Incomplete month')).toBeInTheDocument();
+    expect(screen.getByText(/latest ledger activity/)).toBeInTheDocument();
+    expect(screen.getByText(/Top categories/)).toBeInTheDocument();
+    expect(screen.getByText(/Budget status/)).toBeInTheDocument();
+    expect(screen.getByText(/Recurring changes/)).toBeInTheDocument();
+    expect(screen.getByText(/Anomalies/)).toBeInTheDocument();
     expect(screen.getByText('MONTHLY INVESTIGATION')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Largest measured drivers' })).toBeInTheDocument();
     const leadingDriver = screen.getByRole('button', {
@@ -111,8 +182,12 @@ describe('Insights investigation layout', () => {
       screen.getByRole('table', { name: 'Daily observed debit spend and entry count' }),
     ).toBeInTheDocument();
     expect(screen.getByText('Merchant concentration')).toBeInTheDocument();
-    expect(screen.getByText(longMerchant)).toHaveClass('truncate');
-    expect(screen.getByText(longRecurringMerchant)).toHaveClass('truncate');
+    expect(screen.getAllByText(longMerchant).some((node) => node.classList.contains('truncate'))).toBe(
+      true,
+    );
+    expect(
+      screen.getAllByText(longRecurringMerchant).some((node) => node.classList.contains('truncate')),
+    ).toBe(true);
   });
 
   it('renders an honest empty state when the period only contains zero-filled days', () => {
@@ -125,6 +200,24 @@ describe('Insights investigation layout', () => {
         anomalies: [],
       },
     } as unknown as ReturnType<typeof useInsights>);
+    vi.mocked(useMonthlySnapshot).mockReturnValueOnce({
+      isLoading: false,
+      data: {
+        month: 8,
+        year: 2026,
+        month_label: '2026-08',
+        income: 0,
+        spend: 0,
+        net: 0,
+        transaction_count: 0,
+        top_categories: [],
+        top_merchants: [],
+        budget_status: [],
+        recurring_changes: [],
+        notable_anomalies: [],
+        coverage: { incomplete_month: true },
+      },
+    } as unknown as ReturnType<typeof useMonthlySnapshot>);
 
     render(<InsightsSection embedded />);
 
