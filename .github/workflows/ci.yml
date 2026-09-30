@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "30 20 * * *"
+  workflow_dispatch:
 
 jobs:
   backend:
@@ -247,13 +250,13 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_DB: pfis_e2e
+          POSTGRES_DB: pfis_e2e_bootstrap
           POSTGRES_USER: pfis
           POSTGRES_PASSWORD: pfis_test_password
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U pfis -d pfis_e2e"
+          --health-cmd "pg_isready -U pfis -d pfis_e2e_bootstrap"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -261,6 +264,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v5
@@ -278,49 +283,56 @@ jobs:
       - name: Install backend dependencies
         run: pip install -r backend/requirements-dev.txt
 
-      - name: Install and build frontend
+      - name: Install frontend dependencies
         working-directory: frontend
-        run: |
-          npm ci
-          npm run build
+        run: npm ci
 
       - name: Install Chromium
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
-      - name: Apply browser database migrations
-        working-directory: backend
-        env:
-          DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@localhost:5432/pfis_e2e
-          SECRET_KEY: ci-e2e-secret-key-not-used-outside-tests
-        run: alembic upgrade head
+      - name: Detect frontend changes
+        id: changes
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --quiet "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" -- frontend; then
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Verify browser migration parity
+      - name: Run authenticated browser smoke
         env:
-          DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@localhost:5432/pfis_e2e
-          SECRET_KEY: ci-e2e-secret-key-not-used-outside-tests
-        run: python scripts/check_migration_parity.py --database pfis_e2e --output migration-parity-e2e.json
+          PFIS_E2E_ADMIN_DATABASE_URL: postgresql://pfis:pfis_test_password@127.0.0.1:5432/pfis_e2e_bootstrap
+        run: python scripts/e2e_runner.py --mode smoke --allow-disposable-database --skip-install
 
-      - name: Run functional browser regression
-        working-directory: frontend
+      - name: Run full browser journeys and nightly restart recovery
+        if: ${{ github.event_name == 'schedule' || steps.changes.outputs.frontend == 'true' }}
         env:
-          DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@localhost:5432/pfis_e2e
-          SECRET_KEY: ci-e2e-secret-key-not-used-outside-tests
-          TOKEN_ENCRYPTION_KEY: ""
-          AUTH_REQUIRED: "false"
-          ALLOW_DEMO_LOGIN: "true"
-        run: npm run test:e2e:ci
+          PFIS_E2E_ADMIN_DATABASE_URL: postgresql://pfis:pfis_test_password@127.0.0.1:5432/pfis_e2e_bootstrap
+        run: >-
+          python scripts/e2e_runner.py --mode full --allow-disposable-database --skip-install
+          ${{ github.event_name == 'schedule' && '--nightly-restart' || '' }}
 
-      - name: Upload Playwright report
-        if: always()
+      - name: Run focused pipeline transaction and recovery regressions
+        env:
+          DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@127.0.0.1:5432/pfis_e2e_bootstrap
+          TEST_DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@127.0.0.1:5432/pfis_e2e_bootstrap
+          POSTGRES_TEST_DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@127.0.0.1:5432/pfis_e2e_bootstrap
+          SECRET_KEY: ci-e2e-integration-secret-not-used-outside-tests
+        run: pytest -q tests/pytest/test_jobs_pipeline.py tests/pytest/test_ingestion_safety.py tests/pytest/test_pipeline_metadata.py
+
+      - name: Upload sanitized Playwright reports and traces
+        if: ${{ always() && hashFiles('.test-run/e2e-*/reports/SAFE_TO_UPLOAD') != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: frontend/playwright-report
-
-      - name: Upload browser migration parity
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: migration-parity-e2e
-          path: migration-parity-e2e.json
+          name: e2e-reports-and-traces
+          path: |
+            .test-run/e2e-*/reports
+            .test-run/e2e-*/test-results
+          if-no-files-found: error
+          retention-days: 14
