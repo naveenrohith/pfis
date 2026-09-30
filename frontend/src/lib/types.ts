@@ -313,10 +313,10 @@ export type BudgetStatus = 'under' | 'warning' | 'over';
 
 export interface BudgetTracker {
   id: string;
-  category_id?: string;
-  category: string;
+  category_id: string;
+  category_name: string;
   category_icon?: string | null;
-  limit: number;
+  monthly_limit: number;
   actual_spend: number;
   remaining: number;
   usage_pct: number;

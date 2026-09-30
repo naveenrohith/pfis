@@ -127,11 +127,11 @@ export function BudgetsSection({ embedded = false }: { embedded?: boolean } = {}
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate font-bold">
-                            {b.category_icon} {b.category}
+                            {b.category_icon} {b.category_name}
                           </p>
                           <p className="mt-1 text-sm text-muted-foreground">
                             {formatCurrency(b.actual_spend, currency)} of{' '}
-                            {formatCurrency(b.limit, currency)}
+                            {formatCurrency(b.monthly_limit, currency)}
                           </p>
                         </div>
                         <Badge variant={STATUS_VARIANT[b.status]} className="capitalize">
@@ -172,7 +172,7 @@ export function BudgetsSection({ embedded = false }: { embedded?: boolean } = {}
                       variant="link"
                       size="sm"
                       onClick={() => {
-                        setCategoryDrill({ categoryId: b.category, label: b.category });
+                        setCategoryDrill({ categoryId: b.category_id, label: b.category_name });
                         scrollTo('transactions');
                       }}
                     >
@@ -208,7 +208,7 @@ export function BudgetsSection({ embedded = false }: { embedded?: boolean } = {}
       >
         <p className="text-sm leading-6 text-muted-foreground">
           {deleteTarget
-            ? `${deleteTarget.category} spending will no longer be compared with a limit.`
+            ? `${deleteTarget.category_name} spending will no longer be compared with a limit.`
             : 'The selected budget will no longer be used for comparisons.'}
         </p>
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

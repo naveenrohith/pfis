@@ -21,7 +21,7 @@ export function BudgetDrilldownDialog({ budget, currency }: BudgetDrilldownDialo
   const [open, setOpen] = useState(false);
   const drilldown = useBudgetDrilldown(budget.id, open);
   const details = drilldown.data;
-  const label = details?.budget.category_name ?? budget.category;
+  const label = details?.budget.category_name ?? budget.category_name;
   const remaining = details?.budget.remaining ?? budget.remaining;
 
   return (

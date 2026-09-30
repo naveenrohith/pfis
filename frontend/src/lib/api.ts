@@ -192,8 +192,8 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
-  if (response.status === 401 && !tolerate401) {
-    if (auth && typeof window !== 'undefined') {
+  if (response.status === 401 && auth && !tolerate401) {
+    if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event(AUTH_SESSION_ENDED_EVENT));
     }
     throw new ApiError('Session expired', 401);

@@ -15,9 +15,9 @@ vi.mock('@/features/workspace/queries', () => ({
 const budget: BudgetTracker = {
   id: 'budget-food',
   category_id: 'food',
-  category: 'Food',
+  category_name: 'Food',
   category_icon: '🍽️',
-  limit: 12000,
+  monthly_limit: 12000,
   actual_spend: 4500,
   remaining: 7500,
   usage_pct: 37.5,
