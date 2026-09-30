@@ -18,7 +18,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:ci": "playwright test --grep-invert @visual",
+    "test:e2e:smoke": "playwright test --grep @smoke --retries=0 --project=desktop --project=mobile-360",
+    "test:e2e:full": "playwright test --grep-invert @visual",
+    "test:e2e:visual": "playwright test --grep @visual",
+    "test:e2e:ci": "npm run test:e2e:smoke",
     "test:e2e:update": "playwright test --update-snapshots",
     "quality:bundle": "node scripts/check-bundle-budget.mjs",
     "quality:lighthouse": "npx --yes @lhci/cli@0.15.1 autorun"
