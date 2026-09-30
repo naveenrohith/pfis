@@ -46,6 +46,21 @@ describe('API session handling', () => {
     );
   });
 
+  it('keeps Gmail statement source references in request bodies', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ status: 'password_required' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.detectGmailStatement('user-1', 'opaque-source-ref', 'one-time-password');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/statements/gmail/detect?user_id=user-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ source_ref: 'opaque-source-ref', password: 'one-time-password' }),
+      }),
+    );
+  });
+
   it('downloads a portable copy with CSRF protection and the server filename', async () => {
     document.cookie = 'pfis_csrf=portable-csrf; Path=/';
     const fetchMock = vi.fn(

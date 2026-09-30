@@ -101,6 +101,8 @@ import type {
   DepositStatementLineReviewResponse,
   DepositStatementReviewItem,
   StatementDetection,
+  GmailStatementCandidatesResponse,
+  GmailStatementDetectionResponse,
   StatementAnalysisReview,
   StatementImportResult,
   StatementReviewItem,
@@ -1321,6 +1323,38 @@ export const api = {
     uploadStatementPdf<StatementAnalysisReview>('/statements/review/upload', userId, file),
   importStatement: (userId: string, accountId: string, file: File) =>
     uploadStatementPdf<StatementImportResult>('/statements/import/upload', userId, file, accountId),
+  gmailStatementCandidates: (
+    userId: string,
+    params: { startDate: string; endDate: string; cursor?: string | null },
+  ) =>
+    request<GmailStatementCandidatesResponse>('/statements/gmail/candidates', {
+      query: {
+        user_id: userId,
+        start_date: params.startDate,
+        end_date: params.endDate,
+        cursor: params.cursor,
+      },
+    }),
+  detectGmailStatement: (userId: string, sourceRef: string, password?: string) =>
+    request<GmailStatementDetectionResponse>('/statements/gmail/detect', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: { source_ref: sourceRef, ...(password ? { password } : {}) },
+    }),
+  importGmailStatement: (
+    userId: string,
+    payload: {
+      source_ref: string;
+      password?: string;
+      financial_account_id: string;
+      document_fingerprint: string;
+    },
+  ) =>
+    request<StatementImportResult>('/statements/gmail/import', {
+      method: 'POST',
+      query: { user_id: userId },
+      body: payload,
+    }),
   statementReviewItems: (userId: string) =>
     request<StatementReviewItem[]>('/review/statement-lines', {
       query: { user_id: userId },
@@ -1554,4 +1588,3 @@ export const activityLedgerApi = {
       { query: { user_id: userId } },
     ),
 };
-

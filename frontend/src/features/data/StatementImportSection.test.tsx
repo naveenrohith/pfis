@@ -68,6 +68,7 @@ vi.mock('@/features/workspace/queries', () => ({
   useAccountLinkRules: () => ({ data: [] }),
   useStatementAnalysisReviews: () => ({ data: [], isLoading: false, error: null }),
   useDepositStatementReviewItems: () => ({ data: [], isLoading: false, error: null }),
+  useAutoSyncStatus: () => ({ isSuccess: true, data: null }),
 }));
 
 vi.mock('@/lib/api', () => ({
