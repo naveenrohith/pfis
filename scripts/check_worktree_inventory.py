@@ -25,7 +25,7 @@ PACKET_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "IR-1",
         re.compile(
-            r"^tests/parser_corpus/|"
+            r"^tests/parser_corpus/|^tests/fixtures/e2e/|"
             r"^tests/fixtures/hdfc_deposit_statement_reviewed\.txt$|"
             r"^backend/\.env\.example$|"
             r"^backend/app/services/(classification|connectors|gmail|ingestion|parser)/|"
