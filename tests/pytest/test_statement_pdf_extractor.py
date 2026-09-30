@@ -9,11 +9,35 @@ from app.services import statement_pdf_extractor
 from app.services.statement_pdf_extractor import (
     StatementPdfOcrError,
     StatementPdfOcrUnavailableError,
+    StatementPdfPasswordError,
     extract_statement_pdf_text,
 )
 
 from tests.pytest.helpers import create_user
 from tests.pytest.test_generic_credit_card_statement_extractor import GENERIC_CARD_STATEMENT
+
+
+@pytest.mark.parametrize("encryption", [2, 4, 5])
+def test_real_encrypted_pdf_needs_correct_ephemeral_password(encryption):
+    import fitz
+
+    with fitz.open() as document:
+        page = document.new_page(width=1200, height=800)
+        page.insert_text((20, 20), GENERIC_CARD_STATEMENT, fontname="cour", fontsize=10)
+        payload = document.tobytes(
+            encryption=encryption, owner_pw="test-owner", user_pw="statement-secret"
+        )
+    with pytest.raises(StatementPdfPasswordError) as missing:
+        extract_statement_pdf_text(payload)
+    assert missing.value.code == "password_required"
+    with pytest.raises(StatementPdfPasswordError) as incorrect:
+        extract_statement_pdf_text(payload, password="wrong-secret")
+    assert incorrect.value.code == "incorrect_password"
+    assert "wrong-secret" not in str(incorrect.value)
+    extracted = extract_statement_pdf_text(payload, password="statement-secret")
+    assert extracted.extraction_mode == "embedded_text"
+    assert "ICICI CREDIT CARD STATEMENT" in extracted.text
+    assert "statement-secret" not in extracted.text
 
 
 def _patch_empty_pdf(monkeypatch):

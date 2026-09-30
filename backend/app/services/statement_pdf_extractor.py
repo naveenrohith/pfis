@@ -18,6 +18,26 @@ from typing import Literal
 from app.config import get_settings
 
 PDF_TEXT_MINIMUM = 40
+MAX_DIGITAL_PAGES = 200
+MAX_TEXT_CHARACTERS = 1_000_000
+
+
+class StatementPdfLimitError(ValueError):
+    """The statement exceeds bounded PDF extraction limits."""
+
+
+class StatementPdfPasswordError(ValueError):
+    """A PDF needs a password or rejected the supplied password."""
+
+    def __init__(self, *, supplied: bool) -> None:
+        self.code: Literal["incorrect_password", "password_required"] = (
+            "incorrect_password" if supplied else "password_required"
+        )
+        super().__init__(
+            "The PDF password is incorrect; try again"
+            if supplied
+            else "Enter the password for this encrypted statement"
+        )
 
 
 class StatementPdfOcrUnavailableError(ValueError):
@@ -39,17 +59,18 @@ def extract_statement_pdf_text(
     payload: bytes,
     *,
     allow_ocr: bool = True,
+    password: str | None = None,
 ) -> StatementPdfText:
     """Extract digital text, then bounded OCR text, without writing source bytes."""
 
-    embedded_text = _extract_embedded_text(payload)
+    embedded_text = _extract_embedded_text(payload, password=password)
     if len(embedded_text.strip()) >= PDF_TEXT_MINIMUM:
         return StatementPdfText(text=embedded_text, extraction_mode="embedded_text")
     if not allow_ocr or not get_settings().STATEMENT_OCR_ENABLED:
         raise StatementPdfOcrUnavailableError(
             "PFIS supports digitally generated statements, not scanned PDFs"
         )
-    ocr_text, page_count = _extract_ocr_text(payload)
+    ocr_text, page_count = _extract_ocr_text(payload, password=password)
     if len(ocr_text.strip()) < PDF_TEXT_MINIMUM:
         raise StatementPdfOcrError("OCR could not recover enough statement text for a safe review")
     return StatementPdfText(
@@ -59,29 +80,43 @@ def extract_statement_pdf_text(
     )
 
 
-def _extract_embedded_text(payload: bytes) -> str:
+def _extract_embedded_text(payload: bytes, *, password: str | None = None) -> str:
     import pdfplumber
+    from pdfminer.pdfdocument import PDFPasswordIncorrect
 
     try:
-        with pdfplumber.open(io.BytesIO(payload), password=None) as pdf:
-            if bool(getattr(getattr(pdf, "doc", None), "is_encrypted", False)):
-                raise ValueError(
-                    "Encrypted statements are not supported; upload an unencrypted digital statement"
-                )
-            return "\n".join(
-                page.extract_text(layout=True, x_tolerance=2, y_tolerance=3) or ""
-                for page in pdf.pages
-            )
-    except ValueError:
+        with pdfplumber.open(io.BytesIO(payload), password=password) as pdf:
+            if len(pdf.pages) > MAX_DIGITAL_PAGES:
+                raise StatementPdfLimitError("The statement exceeds the 200-page reading limit")
+            pages = []
+            characters = 0
+            for page in pdf.pages:
+                text = page.extract_text(layout=True, x_tolerance=2, y_tolerance=3) or ""
+                characters += len(text)
+                if characters > MAX_TEXT_CHARACTERS:
+                    raise StatementPdfLimitError(
+                        "The statement exceeds the safe text reading limit"
+                    )
+                pages.append(text)
+            return "\n".join(pages)
+    except PDFPasswordIncorrect:
+        raise StatementPdfPasswordError(supplied=bool(password)) from None
+    except StatementPdfLimitError:
         raise
-    except Exception:
+    except Exception as exc:
+        # pdfplumber wraps pdfminer exceptions in PdfminerException. Preserve
+        # password recovery rather than incorrectly sending encrypted PDFs to OCR.
+        if isinstance(exc.__context__, PDFPasswordIncorrect) or any(
+            isinstance(argument, PDFPasswordIncorrect) for argument in exc.args
+        ):
+            raise StatementPdfPasswordError(supplied=bool(password)) from None
         # Some image-only or malformed PDFs make pdfplumber fail before it can
         # expose pages.  Let the bounded renderer decide whether OCR can still
         # recover a safe statement; it will fail closed when it cannot.
         return ""
 
 
-def _extract_ocr_text(payload: bytes) -> tuple[str, int]:
+def _extract_ocr_text(payload: bytes, *, password: str | None = None) -> tuple[str, int]:
     settings = get_settings()
     tesseract = shutil.which("tesseract")
     if not tesseract:
@@ -100,6 +135,8 @@ def _extract_ocr_text(payload: bytes) -> tuple[str, int]:
     except Exception as exc:
         raise StatementPdfOcrError("OCR could not open the statement PDF") from exc
     try:
+        if getattr(document, "needs_pass", False) and not document.authenticate(password or ""):
+            raise StatementPdfPasswordError(supplied=bool(password))
         page_count = len(document)
         if page_count == 0:
             raise StatementPdfOcrError("OCR could not find a statement page")
@@ -110,6 +147,12 @@ def _extract_ocr_text(payload: bytes) -> tuple[str, int]:
         matrix = fitz.Matrix(settings.STATEMENT_OCR_DPI / 72, settings.STATEMENT_OCR_DPI / 72)
         pages: list[str] = []
         for page in document:
+            rect = getattr(page, "rect", None)
+            if (
+                rect is not None
+                and rect.width * rect.height * (settings.STATEMENT_OCR_DPI / 72) ** 2 > 20_000_000
+            ):
+                raise StatementPdfLimitError("The statement page exceeds the safe OCR image limit")
             try:
                 image = page.get_pixmap(matrix=matrix, alpha=False).tobytes("png")
                 result = subprocess.run(

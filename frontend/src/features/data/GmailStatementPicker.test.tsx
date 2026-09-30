@@ -94,6 +94,10 @@ describe('GmailStatementPicker', () => {
     fireEvent.click(submit);
     fireEvent.click(submit);
     expect(mocks.import).toHaveBeenCalledOnce();
+    expect(mocks.import).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ password: 'secret' }),
+    );
     release({
       product_type: 'credit_card',
       detection: { product_type: 'credit_card', support_status: 'supported' },
@@ -107,9 +111,9 @@ describe('GmailStatementPicker', () => {
       .mockResolvedValueOnce({
         candidates: [candidate],
         next_cursor: 'next',
-        coverage_complete: true,
-        message_failures: 0,
-        truncated: false,
+        coverage_complete: false,
+        message_failures: 1,
+        truncated: true,
       })
       .mockResolvedValueOnce({
         candidates: [second],
@@ -143,13 +147,12 @@ describe('GmailStatementPicker', () => {
         20,
       ),
     );
-    mocks.detect
-      .mockReturnValueOnce(slow)
-      .mockResolvedValueOnce({
-        status: 'detected',
-        detection: { institution: 'new', product_type: 'credit_card', support_status: 'supported' },
-        document_fingerprint: 'new',
-      });
+    expect(screen.getByText(/Some messages could not be checked/)).toBeInTheDocument();
+    mocks.detect.mockReturnValueOnce(slow).mockResolvedValueOnce({
+      status: 'detected',
+      detection: { institution: 'new', product_type: 'credit_card', support_status: 'supported' },
+      document_fingerprint: 'new',
+    });
     fireEvent.click(first);
     fireEvent.click(await screen.findByRole('button', { name: /older\.pdf/i }));
     await waitFor(() => expect(screen.getByText(/NEW/)).toBeInTheDocument());

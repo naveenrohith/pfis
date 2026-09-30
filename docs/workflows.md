@@ -677,3 +677,13 @@ or false-positive rate and therefore remains deferred by the evaluator.
 8. Payoff comparison uses only liabilities with explicit balance, annual rate,
    and minimum payment, and always exposes excluded incomplete records and
    assumptions.
+
+## Import a statement already in Gmail
+
+1. Open Data & settings → Statements and choose **From Gmail**. Connect or reconnect Gmail if requested.
+2. Choose dates and **Search Gmail**. Use **Show older candidates** for another page. If coverage is incomplete, narrow the dates and search again.
+3. Select a PDF. If encrypted, enter its password and choose **Unlock and detect**. Incorrect passwords can be retried.
+4. Review the detected issuer, product, bounded redacted row preview, and support status. Unsupported or ambiguous layouts remain read-only.
+5. Choose an owned compatible account and **Import verified statement**. Import refetches the PDF, verifies the detected fingerprint and connection, then uses the existing atomic statement importer. A retry of the same fingerprint returns the existing import.
+
+The password remains only in component memory until import or selection/source change/unmount; it is sent again because the server retains no source PDF. Search/date changes reset the selection. A stale or changed source requires detection again. Manual upload remains available. Real bank layout support is unchanged: an encrypted document can be unlocked without its layout becoming importable.

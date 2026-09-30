@@ -1,6 +1,8 @@
 # Gmail statement import: requirements and implementation plan
 
-Status: planning only. Prepared on `codex/gmail-statement-import`; no core implementation has started.
+Status: implementation in progress on `codex/gmail-statement-import`. Local verification and integrated review precede PR CI; merge requires approval.
+
+Implementation decisions: candidates use encrypted, user/mailbox/generation-bound `source_ref` values rather than browser-visible message IDs. References expire after 30 minutes. Discovery reads 20 messages and returns at most 100 attachments per page, with explicit partial-coverage fields. PDF passwords remain in component memory through detection and import; each server request downloads/decrypts again. Shared standard manual/Gmail import dispatch takes the user lock before fingerprint persistence. No migration or dependency change is required. Exact contracts are maintained in `docs/api-reference.md`, `docs/integrations.md`, and `docs/security.md`.
 
 ## Goal and first-release boundary
 

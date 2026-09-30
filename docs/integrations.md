@@ -178,3 +178,11 @@ FastAPI. It consumes `/api` routes and must not bypass backend ownership rules.
 ## External Dependencies
 
 Primary dependencies are listed in `backend/requirements.txt`. New dependencies require a clear need, tests, and documentation.
+
+## User-triggered Gmail statement intake
+
+Statement attachment search is independent of transaction email sync and does not advance its Gmail cursor. `GmailStatementAttachments` uses the connected account's existing read-only scope to list candidate messages and fetch nested MIME PDFs, including inline base64 data and external attachment IDs. Metadata is shortened and long numeric identifiers are masked; message bodies are never sent to the browser.
+
+Provider calls use detached credential snapshots, execute off the async event loop, and have a 20-second socket timeout with one retry. A candidate operation has a 60-second deadline; attachment fetching has a 45-second deadline. Detached I/O may finish after cancellation within the socket limit. Refreshed credentials are persisted only if the connection generation and original encrypted credential references still match. Deleted messages produce partial coverage; provider and authorization failures return safe recovery messages. MIME traversal is capped at 200 parts and depth 10. Oversized attachments are skipped with `truncated=true` during discovery and rejected before parsing during import.
+
+No new OAuth scope, database migration, dependency, background attachment job, or issuer parser is introduced. Production Gmail access still depends on the deployment's existing Google OAuth consent and restricted-scope compliance setup. A mailbox connection and compatible supported statement are prerequisites.

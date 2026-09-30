@@ -32,6 +32,9 @@ class _Db:
     async def rollback(self):
         self.rollbacks += 1
 
+    async def scalar(self, _query):
+        return SimpleNamespace(is_active=True, deletion_started_at=None)
+
     def add(self, item):
         self.added.append(item)
 

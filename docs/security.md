@@ -174,3 +174,11 @@ Local/demo mode uses local Supabase PostgreSQL and may keep authentication
 optional for fast development. Production mode is explicit and fail-closed. Do
 not disable production validation to work around deployment misconfiguration;
 fix the environment values instead.
+
+## Gmail statement attachment boundary
+
+Only the authenticated user's connected mailbox can be searched. Opaque Fernet references contain the user, Gmail account, connection generation, purpose and message/part or page coordinates, expire after 30 minutes, and cannot be substituted for access tokens. Email bodies and PDF bytes are never returned to the browser. Returned sender/subject/filename metadata is bounded and long numeric identifiers are masked.
+
+Passwords use `SecretStr` in request models, never appear in validation input/context or responses, and are never written to application storage, logs, URL parameters or query caches. The UI holds a password in memory only for detection plus explicit import and clears it when changing source/attachment or leaving the component. Transport security must be supplied by the existing HTTPS deployment. PDF extraction occurs in memory and has limits of 10 MB, 200 digital pages and one million text characters; OCR keeps its configured page/time limits plus a 20-million-pixel page cap.
+
+Network/PDF work holds no database row locks. A short User → GmailAccount lock protects credential compare-and-set. A separate User lock validates connection generation and account availability before final detection or ledger writes; disconnect/deletion races cannot rely on process-local cancellation alone. Gmail, standard manual imports and both legacy HDFC import routes serialize on the same user lock to preserve fingerprint retry behavior. Import errors roll back staged ledger writes. Gmail additionally checks an active owned destination and HDFC issuer compatibility before the existing parser's identity, currency and product gates. Legacy issuer-specific entry points retain their prior account policy.

@@ -2446,7 +2446,7 @@ export interface GmailStatementCandidatesResponse {
 
 export interface GmailStatementDetectionResponse {
   status: 'detected' | 'password_required' | 'incorrect_password';
-  detection?: StatementDetection | null;
+  detection?: (StatementDetection & { analysis?: StatementAnalysis | null }) | null;
   document_fingerprint?: string | null;
 }
 

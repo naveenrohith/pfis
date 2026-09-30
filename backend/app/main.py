@@ -51,6 +51,7 @@ from app.api.routes import (
     categories,
     dashboard,
     financial_position,
+    gmail_statements,
     guidance,
     health,
     horizon,
@@ -368,6 +369,7 @@ app.include_router(knowledge.router, prefix="/api")
 app.include_router(preferences.router, prefix="/api")
 app.include_router(accounts.router, prefix="/api")
 app.include_router(financial_position.router, prefix="/api")
+app.include_router(gmail_statements.router, prefix="/api")
 app.include_router(roadmap.router, prefix="/api")
 app.include_router(subscriptions.router, prefix="/api")
 

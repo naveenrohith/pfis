@@ -185,12 +185,11 @@ export function StatementImportSection() {
         </div>
       </FinancialHero>
 
-      <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Statement source">
+      <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Statement source">
         <Button
           type="button"
           variant={source === 'gmail' ? 'primary' : 'outline'}
-          role="tab"
-          aria-selected={source === 'gmail'}
+          aria-pressed={source === 'gmail'}
           onClick={() => {
             setSource('gmail');
             setGmailResult(null);
@@ -201,8 +200,7 @@ export function StatementImportSection() {
         <Button
           type="button"
           variant={source === 'upload' ? 'primary' : 'outline'}
-          role="tab"
-          aria-selected={source === 'upload'}
+          aria-pressed={source === 'upload'}
           onClick={() => {
             setSource('upload');
             setGmailResult(null);
@@ -214,6 +212,7 @@ export function StatementImportSection() {
       {source === 'gmail' ? (
         <div className="mb-6">
           <GmailStatementPicker
+            key={user?.id}
             userId={user?.id ?? ''}
             accounts={accounts.data ?? []}
             onImported={async (imported, targetAccountId) => {
