@@ -1,0 +1,28 @@
+{
+  "version": "pfis-financial-source-v1",
+  "financial_date_rule": "user financial day at fixture creation",
+  "classification": "transaction",
+  "source": {
+    "sender": "alerts@hdfcbank.net",
+    "subject": "Alert : Update on your HDFC Bank A/c XX1234",
+    "body_template": "Dear Customer, Rs. 450.00 has been debited from your A/c XX1234 on {date} by a UPI txn. UPI Ref No 412345678901. If not done by you, call 18002586161. - HDFC Bank",
+    "provider_identity_rule": "demo_<uuid5-dns(body first 50 characters)>"
+  },
+  "expected_transaction": {
+    "amount": "450.00",
+    "currency": "INR",
+    "transaction_type": "debit",
+    "merchant_raw": "UPI TRANSFER",
+    "date_rule": "user financial day",
+    "account_last4": "1234"
+  },
+  "expected_journey": {
+    "eligible_source_count": 13,
+    "initial_source_collision_count": 1,
+    "stored_source_count_after_sync": 13,
+    "sync_new_source_count": 12,
+    "stored_transaction_count": 13,
+    "gross_ledger_amount": "50175.00",
+    "pipeline_duplicate_count": 0
+  }
+}

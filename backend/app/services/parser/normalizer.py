@@ -4,6 +4,8 @@ Maps raw merchant names to clean, normalized versions.
 Includes TTL-based caching to avoid full table scans on every parse.
 """
 
+from __future__ import annotations
+
 import logging
 import re
 import time
@@ -18,12 +20,33 @@ from app.models.category import Category, Merchant, UserMerchantRule, parse_merc
 logger = logging.getLogger(__name__)
 
 # Cache for merchant data (TTL-based)
-_merchant_cache: list = []
+_merchant_cache: list[CachedMerchant] = []
 _merchant_cache_time: float = 0.0
-_user_rule_cache: dict[str, tuple[float, list[UserMerchantRule]]] = {}
+_user_rule_cache: dict[str, tuple[float, list[CachedUserMerchantRule]]] = {}
 _MERCHANT_CACHE_TTL: float = 60.0  # seconds
 _USER_RULE_CACHE_MAX_USERS = 256
 MERCHANT_RESOLVER_VERSION = 3
+
+
+@dataclass(frozen=True)
+class CachedMerchant:
+    """Plain values safe to retain beyond the database session that loaded them."""
+
+    id: str
+    normalized_name: str
+    category_default_id: str | None
+    aliases: str | None
+
+
+@dataclass(frozen=True)
+class CachedUserMerchantRule:
+    """User correction values safe to retain beyond their loading session."""
+
+    id: str
+    descriptor_key: str
+    normalized_name: str
+    category_id: str | None
+    confidence: float
 
 
 @dataclass(frozen=True)
@@ -201,14 +224,26 @@ def normalize_descriptor_key(raw: str) -> str:
     return re.sub(r"\s+", " ", normalized).strip()
 
 
-async def _get_cached_merchants(db: AsyncSession) -> list:
+async def _get_cached_merchants(db: AsyncSession) -> list[CachedMerchant]:
     """Return cached merchant list, refreshing if TTL expired."""
     global _merchant_cache, _merchant_cache_time
     now = time.time()
     if _merchant_cache and (now - _merchant_cache_time) < _MERCHANT_CACHE_TTL:
         return _merchant_cache
-    result = await db.execute(select(Merchant))
-    _merchant_cache = list(result.scalars().all())
+    result = await db.execute(
+        select(
+            Merchant.id, Merchant.normalized_name, Merchant.category_default_id, Merchant.aliases
+        )
+    )
+    _merchant_cache = [
+        CachedMerchant(
+            id=row.id,
+            normalized_name=row.normalized_name,
+            category_default_id=row.category_default_id,
+            aliases=row.aliases,
+        )
+        for row in result
+    ]
     _merchant_cache_time = now
     return _merchant_cache
 
@@ -226,13 +261,30 @@ def invalidate_user_merchant_rule_cache(user_id: str) -> None:
     _user_rule_cache.pop(user_id, None)
 
 
-async def _get_cached_user_rules(db: AsyncSession, user_id: str) -> list[UserMerchantRule]:
+async def _get_cached_user_rules(db: AsyncSession, user_id: str) -> list[CachedUserMerchantRule]:
     now = time.time()
     cached = _user_rule_cache.get(user_id)
     if cached and (now - cached[0]) < _MERCHANT_CACHE_TTL:
         return cached[1]
-    result = await db.execute(select(UserMerchantRule).where(UserMerchantRule.user_id == user_id))
-    rules = list(result.scalars().all())
+    result = await db.execute(
+        select(
+            UserMerchantRule.id,
+            UserMerchantRule.descriptor_key,
+            UserMerchantRule.normalized_name,
+            UserMerchantRule.category_id,
+            UserMerchantRule.confidence,
+        ).where(UserMerchantRule.user_id == user_id)
+    )
+    rules = [
+        CachedUserMerchantRule(
+            id=row.id,
+            descriptor_key=row.descriptor_key,
+            normalized_name=row.normalized_name,
+            category_id=row.category_id,
+            confidence=row.confidence,
+        )
+        for row in result
+    ]
     if user_id not in _user_rule_cache and len(_user_rule_cache) >= _USER_RULE_CACHE_MAX_USERS:
         oldest_user_id = min(_user_rule_cache, key=lambda key: _user_rule_cache[key][0])
         _user_rule_cache.pop(oldest_user_id, None)
@@ -240,7 +292,7 @@ async def _get_cached_user_rules(db: AsyncSession, user_id: str) -> list[UserMer
     return rules
 
 
-def _candidate_aliases(merchant: Merchant) -> list[str]:
+def _candidate_aliases(merchant: CachedMerchant) -> list[str]:
     candidates = [merchant.normalized_name]
     candidates.extend(parse_merchant_aliases(merchant.aliases))
     return [candidate.strip() for candidate in candidates if candidate and candidate.strip()]
@@ -318,7 +370,7 @@ async def resolve_merchant(
             0.0,
         )
 
-    contained_matches: dict[str, tuple[Merchant, float, str]] = {}
+    contained_matches: dict[str, tuple[CachedMerchant, float, str]] = {}
     for merchant in merchants:
         for alias in parse_merchant_aliases(merchant.aliases):
             if _contains_candidate(candidate_value, alias):

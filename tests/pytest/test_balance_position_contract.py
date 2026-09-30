@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from tests.pytest.helpers import create_user
+from tests.pytest.helpers import create_user, user_today
 
 
 async def _account(client, user_id: str, account_type: str, suffix: str) -> dict:
@@ -132,8 +132,9 @@ async def test_balance_position_contract_fields_for_bank_cash_and_card(
     expected_kind: str,
 ):
     user = await create_user(client, f"position-contract-{account_type}")
+    today = user_today(user)
     account = await _account(client, user["id"], account_type, account_type[-4:])
-    await _balance(client, user["id"], account["id"], 1000, date.today())
+    await _balance(client, user["id"], account["id"], 1000, today)
 
     body = await _position(client, user["id"], account["id"])
 
@@ -147,7 +148,7 @@ async def test_balance_position_contract_fields_for_bank_cash_and_card(
     assert body["observed_source"] == "manual"
     assert body["settled_movement_since_observation"] == 0
     assert body["estimated_balance"] == 1000
-    assert body["estimated_as_of"] == date.today().isoformat()
+    assert body["estimated_as_of"] == today.isoformat()
     assert body["pending_increase"] == 0
     assert body["pending_decrease"] == 0
     assert body["unlinked_count"] == 0

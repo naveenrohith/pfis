@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 from app.models.email import RawEmail
+from app.models.financial_change import FinancialChangeEvent
 from app.models.sync import ParseFailure, PipelineEvent
 from app.models.transaction import Transaction
 from app.services.domain_events import domain_event_dispatcher
-from app.services.parser.pipeline import process_raw_emails
+from app.services.financial_change_capture import TRANSACTION_CHANGE_DOMAINS
+from app.services.parser.pipeline import process_raw_emails, retry_parse_failure_by_id
 from sqlalchemy import select
 
 from tests.pytest.helpers import create_user
@@ -130,6 +132,7 @@ async def test_pipeline_rolls_back_ledger_when_post_parse_step_fails(
     user = await create_user(client, "pipelineatomic")
 
     secret = "simulated-event-secret-must-not-leak"
+    publish = domain_event_dispatcher.publish
 
     async def fail_publish(_event):
         raise RuntimeError(secret)
@@ -150,20 +153,66 @@ async def test_pipeline_rolls_back_ledger_when_post_parse_step_fails(
         db.add(email)
         await db.commit()
 
+        events_before = set(
+            (
+                await db.scalars(
+                    select(FinancialChangeEvent.event_id).where(
+                        FinancialChangeEvent.user_id == user["id"]
+                    )
+                )
+            ).all()
+        )
+
         stats = await process_raw_emails(db, user["id"])
         transactions = list((await db.scalars(select(Transaction))).all())
         failures = list((await db.scalars(select(ParseFailure))).all())
+        events_after_failure = list(
+            (
+                await db.scalars(
+                    select(FinancialChangeEvent).where(FinancialChangeEvent.user_id == user["id"])
+                )
+            ).all()
+        )
         await db.refresh(email)
 
     assert stats["stored"] == 0
     assert stats["parsed_failed"] == 1
     assert transactions == []
+    new_failure_events = [
+        event for event in events_after_failure if event.event_id not in events_before
+    ]
+    assert all(
+        not TRANSACTION_CHANGE_DOMAINS.intersection(event.domains) for event in new_failure_events
+    )
     assert len(failures) == 1
     assert failures[0].error_message == "Pipeline processing failed"
     assert stats["results"][0]["error"] == "pipeline_processing_failed"
     assert secret not in str(stats)
     assert secret not in failures[0].error_message
     assert email.processed_flag is True
+
+    monkeypatch.setattr(domain_event_dispatcher, "publish", publish)
+    async with test_session_factory() as db:
+        retried = await retry_parse_failure_by_id(db, user["id"], failures[0].id)
+        transactions = list((await db.scalars(select(Transaction))).all())
+        events_after_retry = list(
+            (
+                await db.scalars(
+                    select(FinancialChangeEvent).where(FinancialChangeEvent.user_id == user["id"])
+                )
+            ).all()
+        )
+        failure = await db.get(ParseFailure, failures[0].id)
+
+    assert retried is not None
+    assert retried["stored"] == 1
+    assert retried["parsed_failed"] == 0
+    assert len(transactions) == 1
+    new_retry_events = [
+        event for event in events_after_retry if event.event_id not in events_before
+    ]
+    assert any(TRANSACTION_CHANGE_DOMAINS.intersection(event.domains) for event in new_retry_events)
+    assert failure is not None and failure.resolved is True
 
 
 async def test_pipeline_duplicate_result_preserves_parse_metadata(

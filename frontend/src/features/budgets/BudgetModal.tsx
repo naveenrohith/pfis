@@ -25,7 +25,7 @@ export function BudgetModal({ open, onClose, editing, categories, onSaved }: Bud
   useEffect(() => {
     if (open) {
       setCategoryId(editing?.category_id ?? categories[0]?.id ?? '');
-      setLimit(editing ? String(editing.limit) : '');
+      setLimit(editing ? String(editing.monthly_limit) : '');
     }
   }, [open, editing, categories]);
 

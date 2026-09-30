@@ -1,19 +1,19 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-let demoCookies: Awaited<
-  ReturnType<import('@playwright/test').APIRequestContext['storageState']>
->['cookies'] = [];
-
-test.beforeAll(async ({ request }) => {
-  const response = await request.post('/api/auth/demo');
-  expect(response.ok()).toBe(true);
-  demoCookies = (await request.storageState()).cookies;
-});
+const fixtureRunDirectory = process.env.PFIS_E2E_RUN_DIR;
+if (!fixtureRunDirectory) {
+  throw new Error('PFIS_E2E_RUN_DIR must point to the authenticated E2E fixture run');
+}
+const demoStorageState = JSON.parse(
+  readFileSync(join(fixtureRunDirectory, 'storage', 'mock_demo.storage-state.json'), 'utf8'),
+) as { cookies: import('@playwright/test').Cookie[] };
 
 async function openDemoWorkspace(page: import('@playwright/test').Page) {
   await page.clock.setFixedTime(new Date('2026-07-16T09:00:00+05:30'));
-  await page.context().addCookies(demoCookies);
+  await page.context().addCookies(demoStorageState.cookies);
   await page.goto('/dashboard/');
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 20_000 });
   await page.evaluate(async () => {
@@ -788,7 +788,7 @@ test('Position visual baseline @visual', async ({ page }) => {
 test('Cards visual baselines @visual', async ({ page }) => {
   await mockCardVisualData(page);
   await page.clock.setFixedTime(new Date('2026-07-16T09:00:00+05:30'));
-  await page.context().addCookies(demoCookies);
+  await page.context().addCookies(demoStorageState.cookies);
   await page.goto('/dashboard/#cards');
   await expect(page.getByRole('heading', { name: 'Card accounts', exact: true })).toBeVisible({
     timeout: 20_000,
@@ -1032,7 +1032,7 @@ test('Safe-to-spend setup stays compact and keeps focused fields above mobile na
 
 test('Cards direct hash settles on a stable target across lazy loading', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-07-16T09:00:00+05:30'));
-  await page.context().addCookies(demoCookies);
+  await page.context().addCookies(demoStorageState.cookies);
   const viewport = page.viewportSize();
   if (viewport) await page.setViewportSize({ width: viewport.width, height: 480 });
   await page.goto('/dashboard/#cards');

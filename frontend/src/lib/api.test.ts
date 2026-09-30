@@ -21,6 +21,29 @@ describe('API session handling', () => {
     window.removeEventListener(AUTH_SESSION_ENDED_EVENT, listener);
   });
 
+  it('preserves invalid-credential details without ending a session on login', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          { error: { code: 'invalid_credentials', message: 'Invalid email or password' } },
+          { status: 401 },
+        ),
+      ),
+    );
+    const listener = vi.fn();
+    window.addEventListener(AUTH_SESSION_ENDED_EVENT, listener);
+
+    await expect(api.login('person@example.com', 'incorrect-password')).rejects.toMatchObject({
+      status: 401,
+      message: 'Invalid email or password',
+      code: 'invalid_credentials',
+    } satisfies Partial<ApiError>);
+    expect(listener).not.toHaveBeenCalled();
+
+    window.removeEventListener(AUTH_SESSION_ENDED_EVENT, listener);
+  });
+
   it('does not report a normal signed-out bootstrap as an expired session', async () => {
     vi.stubGlobal(
       'fetch',
