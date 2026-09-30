@@ -11,7 +11,7 @@ from app.services.parser.normalizer import resolve_merchant
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from tests.pytest.helpers import create_user
+from tests.pytest.helpers import create_user, user_today
 
 
 async def _seed_transaction(client: AsyncClient, user_id: str, category_id: str, **overrides):
@@ -186,7 +186,7 @@ async def test_cash_flow_projection_consumes_dated_events_and_surfaces_conflict_
 ):
     user = await create_user(client, "event-timed-cash-flow")
     category_id = (await client.get("/api/categories/")).json()[0]["id"]
-    today = date.today()
+    today = user_today(user)
     await _seed_transaction(
         client,
         user["id"],
@@ -195,6 +195,7 @@ async def test_cash_flow_projection_consumes_dated_events_and_surfaces_conflict_
         transaction_type="debit",
         merchant_normalized="Observed flexible spend",
         reference_id="event-timed-observed-spend",
+        transaction_date=today.isoformat(),
     )
     bill = await client.post(
         f"/api/bills?user_id={user['id']}",
@@ -253,7 +254,7 @@ async def test_cash_flow_backtest_reports_error_coverage_and_honest_limitations(
 ):
     user = await create_user(client, "cash-flow-backtest")
     category_id = (await client.get("/api/categories/")).json()[0]["id"]
-    cursor = date.today().replace(day=1)
+    cursor = user_today(user).replace(day=1)
     completed_months: list[tuple[int, int]] = []
     for _ in range(12):
         cursor = (cursor - timedelta(days=1)).replace(day=1)

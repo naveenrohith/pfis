@@ -31,7 +31,13 @@ async def _transaction(client, user_id: str, **overrides):
 async def test_transaction_filters_and_deterministic_guidance(client):
     user = await create_user(client, "guidance")
     today = user_today(user)
-    await _transaction(client, user["id"], amount=250, reference_id="coffee")
+    await _transaction(
+        client,
+        user["id"],
+        amount=250,
+        reference_id="coffee",
+        transaction_date=today.isoformat(),
+    )
     await _transaction(
         client,
         user["id"],
@@ -40,6 +46,7 @@ async def test_transaction_filters_and_deterministic_guidance(client):
         merchant_normalized="Grocery Store",
         payment_method="credit_card",
         reference_id="grocery",
+        transaction_date=today.isoformat(),
     )
 
     response = await client.get(

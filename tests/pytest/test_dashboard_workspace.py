@@ -7,7 +7,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import event
 
-from tests.pytest.helpers import create_user
+from tests.pytest.helpers import create_user, user_today
 
 
 async def _seed_transaction(client: AsyncClient, user_id: str, category_id: str, **overrides):
@@ -227,7 +227,7 @@ async def test_monthly_snapshot_composes_existing_services_and_labels_incomplete
     user = await create_user(client, "monthly-snapshot")
     cats = (await client.get(f"/api/categories/?user_id={user['id']}")).json()
     cat_id = cats[0]["id"]
-    today = date.today()
+    today = user_today(user)
     await client.post(
         f"/api/budgets/?user_id={user['id']}",
         json={"category_id": cat_id, "monthly_limit": 1000.0},
@@ -240,6 +240,7 @@ async def test_monthly_snapshot_composes_existing_services_and_labels_incomplete
         transaction_type="credit",
         merchant_normalized="Employer",
         reference_id="snapshot-income",
+        transaction_date=today.isoformat(),
     )
     await _seed_transaction(
         client,
@@ -249,6 +250,7 @@ async def test_monthly_snapshot_composes_existing_services_and_labels_incomplete
         transaction_type="debit",
         merchant_normalized="Coffee Bar",
         reference_id="snapshot-spend",
+        transaction_date=today.isoformat(),
     )
 
     response = await client.get(
