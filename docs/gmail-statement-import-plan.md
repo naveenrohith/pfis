@@ -1,6 +1,8 @@
 # Gmail statement import: requirements and implementation plan
 
-Status: implementation in progress on `codex/gmail-statement-import`. Local verification and integrated review precede PR CI; merge requires approval.
+Status: implemented on `codex/gmail-statement-import` in [draft PR #10](https://github.com/naveenrohith/pfis/pull/10). Local verification and integrated review passed. All four CI jobs must pass on the final head before merge; merge requires approval.
+
+CI repair: the first draft PR run failed the existing Python dependency audit on PyJWT 2.13.0. Update the existing pin to 2.14.0, which contains [upstream security fixes](https://github.com/jpadilla/pyjwt/blob/2.14.0/CHANGELOG.rst), and verify authentication regressions plus all four jobs. This adds no new library or migration.
 
 Implementation decisions: candidates use encrypted, user/mailbox/generation-bound `source_ref` values rather than browser-visible message IDs. References expire after 30 minutes. Discovery reads 20 messages and returns at most 100 attachments per page, with explicit partial-coverage fields. PDF passwords remain in component memory through detection and import; each server request downloads/decrypts again. Shared standard manual/Gmail import dispatch takes the user lock before fingerprint persistence. No migration or dependency change is required. Exact contracts are maintained in `docs/api-reference.md`, `docs/integrations.md`, and `docs/security.md`.
 
