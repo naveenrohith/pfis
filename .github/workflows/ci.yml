@@ -250,13 +250,13 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_DB: pfis_e2e_bootstrap
+          POSTGRES_DB: pfis_ci_bootstrap
           POSTGRES_USER: pfis
           POSTGRES_PASSWORD: pfis_test_password
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U pfis -d pfis_e2e_bootstrap"
+          --health-cmd "pg_isready -U pfis -d pfis_ci_bootstrap"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -307,22 +307,28 @@ jobs:
 
       - name: Run authenticated browser smoke
         env:
-          PFIS_E2E_ADMIN_DATABASE_URL: postgresql://pfis:pfis_test_password@127.0.0.1:5432/pfis_e2e_bootstrap
+          PFIS_E2E_ADMIN_DATABASE_URL: postgresql://pfis:pfis_test_password@127.0.0.1:5432/pfis_ci_bootstrap
         run: python scripts/e2e_runner.py --mode smoke --allow-disposable-database --skip-install
 
       - name: Run full browser journeys and nightly restart recovery
         if: ${{ github.event_name == 'schedule' || steps.changes.outputs.frontend == 'true' }}
         env:
-          PFIS_E2E_ADMIN_DATABASE_URL: postgresql://pfis:pfis_test_password@127.0.0.1:5432/pfis_e2e_bootstrap
+          PFIS_E2E_ADMIN_DATABASE_URL: postgresql://pfis:pfis_test_password@127.0.0.1:5432/pfis_ci_bootstrap
         run: >-
           python scripts/e2e_runner.py --mode full --allow-disposable-database --skip-install
           ${{ github.event_name == 'schedule' && '--nightly-restart' || '' }}
 
+      - name: Apply pipeline regression migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@127.0.0.1:5432/pfis_ci_bootstrap
+        run: alembic upgrade head
+
       - name: Run focused pipeline transaction and recovery regressions
         env:
-          DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@127.0.0.1:5432/pfis_e2e_bootstrap
-          TEST_DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@127.0.0.1:5432/pfis_e2e_bootstrap
-          POSTGRES_TEST_DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@127.0.0.1:5432/pfis_e2e_bootstrap
+          DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@127.0.0.1:5432/pfis_ci_bootstrap
+          TEST_DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@127.0.0.1:5432/pfis_ci_bootstrap
+          POSTGRES_TEST_DATABASE_URL: postgresql+asyncpg://pfis:pfis_test_password@127.0.0.1:5432/pfis_ci_bootstrap
           SECRET_KEY: ci-e2e-integration-secret-not-used-outside-tests
         run: pytest -q tests/pytest/test_jobs_pipeline.py tests/pytest/test_ingestion_safety.py tests/pytest/test_pipeline_metadata.py
 
@@ -334,5 +340,6 @@ jobs:
           path: |
             .test-run/e2e-*/reports
             .test-run/e2e-*/test-results
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
