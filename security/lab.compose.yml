@@ -585,6 +585,7 @@ services:
     - apparmor=unconfined
   greenbone-control:
     image: pfis-security-greenbone-control:community
+    user: "1000:1000"
     volumes:
     - gvmd_socket_vol:/run/gvmd:ro
     depends_on:

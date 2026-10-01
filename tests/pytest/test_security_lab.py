@@ -637,6 +637,7 @@ def test_lab_compose_keeps_scanners_and_greenbone_managers_internal() -> None:
         else:
             assert "feed-egress" not in attached
     assert set(services["greenbone-control"]["networks"]) == {"default", "scanner"}
+    assert services["greenbone-control"]["user"] == "1000:1000"
     assert set(services["ospd-openvas"]["networks"]) == {"default", "scanner"}
     assert services["ospd-openvas"].get("privileged", False) is False
     assert services["ospd-openvas"]["cap_add"] == ["NET_ADMIN", "NET_RAW"]
