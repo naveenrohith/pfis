@@ -829,6 +829,59 @@ def test_greenbone_status_reason_uses_only_safe_categories() -> None:
     assert "secret-value" not in greenbone_adapter._safe_gmp_status_reason(response)
 
 
+def test_greenbone_scan_uses_only_the_registered_target_and_port_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml.etree.ElementTree as ET
+
+    config_id = "9db05c58-d768-4b46-a6a5-485f3c9b4c91"
+    scanner_id = "a23e1f00-bc30-4d9d-b3a0-011a6e02fa45"
+    port_list_id = "4f6d4d5c-50c2-4f6a-9012-011a6e02fa45"
+    target_id = "8e667439-b1d6-4a35-a66b-c071898071a4"
+    task_id = "d3861dd1-7f23-4ea2-9a55-7d3176a812fd"
+    report_id = "794f63c1-3a1d-4e22-94c2-43c05fb7dd2b"
+    responses = iter(
+        [
+            f'<get_configs_response><config id="{config_id}"><name>Full and fast</name>'
+            "</config></get_configs_response>",
+            f'<get_scanners_response><scanner id="{scanner_id}"><name>OpenVAS Default</name>'
+            "</scanner></get_scanners_response>",
+            f'<get_port_lists_response><port_list id="{port_list_id}">'
+            "<name>All IANA assigned TCP</name></port_list></get_port_lists_response>",
+            f'<create_target_response status="201" id="{target_id}"/>',
+            f'<create_task_response status="201" id="{task_id}"/>',
+            f'<start_task_response status="202"><report_id>{report_id}</report_id>'
+            "</start_task_response>",
+            f'<get_tasks_response><task id="{task_id}"><status>Done</status></task>'
+            "</get_tasks_response>",
+            f'<get_reports_response><report id="{report_id}"/></get_reports_response>',
+        ]
+    )
+    requests: list[str] = []
+
+    def fake_send(command: str) -> ET.Element:
+        requests.append(command)
+        return ET.fromstring(next(responses))
+
+    monkeypatch.setenv("LAB_GENERATION", "0123456789ab")
+    monkeypatch.setenv("LAB_SECURITY_TARGET_ID", "pfis-web")
+    monkeypatch.setattr(
+        greenbone_adapter.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(None, None, None, None, ("172.20.0.3", 0))],
+    )
+    monkeypatch.setattr(greenbone_adapter, "_send", fake_send)
+
+    report = greenbone_adapter.scan("pfis-web")
+
+    assert report.tag == "get_reports_response"
+    assert requests[2] == "<get_port_lists/>"
+    assert requests[3] == (
+        f"<create_target><name>PFIS 0123456789ab</name><hosts>172.20.0.3</hosts>"
+        f'<port_list id="{port_list_id}"/></create_target>'
+    )
+
+
 def test_network_verification_allows_named_greenbone_volumes_but_rejects_host_binds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

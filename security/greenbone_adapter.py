@@ -218,9 +218,11 @@ def scan(target_id: str) -> ET.Element:
     host = _registered_address()
     config_id = _find_id(_send("<get_configs/>"), "config", "Full and fast")
     scanner_id = _find_id(_send("<get_scanners/>"), "scanner", "OpenVAS Default")
+    port_list_id = _find_id(_send("<get_port_lists/>"), "port_list", "All IANA assigned TCP")
     task_name = f"PFIS {generation}"
     target_response = _send(
-        f"<create_target><name>{task_name}</name><hosts>{host}</hosts></create_target>"
+        f"<create_target><name>{task_name}</name><hosts>{host}</hosts>"
+        f'<port_list id="{port_list_id}"/></create_target>'
     )
     target_uuid = target_response.get("id")
     if not target_uuid or not UUID_RE.fullmatch(target_uuid):
