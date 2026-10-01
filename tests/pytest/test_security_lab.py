@@ -21,6 +21,7 @@ from security.auth_boundary import (
 from security.controller import COOKIE_NAME, create_controller
 from security.executor import (
     ComposeToolExecutor,
+    ProcessOutcome,
     _is_authentication_failure,
     _is_missing_image_error,
     _safe_process_environment,
@@ -39,7 +40,7 @@ from security.parsers import (
     sanitize_evidence,
 )
 from security.process_lock import ProcessLock
-from security.registry import PROFILE_TOOL_IDS
+from security.registry import PROFILE_TOOL_IDS, TARGETS, TOOLS
 from security.scope import ScopeViolation, resolve_targets, resolve_url, validate_redirect
 from security.store import SecurityStore
 from security.tools import NMAP_SCRIPT_ALLOWLIST, build_tool_command, commands_for_profile
@@ -626,8 +627,38 @@ def test_lab_compose_keeps_scanners_and_greenbone_managers_internal() -> None:
     )
     assert networks["feed-egress"].get("internal", False) is False
     assert services["zap-api"]["healthcheck"] == {"disable": True}
-    assert "entrypoint" not in services["metasploit"]
+    greenbone_images = [
+        service["image"]
+        for service in services.values()
+        if isinstance(service.get("image"), str)
+        and service["image"].startswith("registry.community.greenbone.net/")
+    ]
+    assert greenbone_images
+    assert all(
+        re.fullmatch(r"[0-9a-f]{64}", image.partition("@sha256:")[2]) for image in greenbone_images
+    )
+    assert services["metasploit"]["build"]["dockerfile"] == (
+        "security/docker/metasploit.Dockerfile"
+    )
+    assert services["metasploit"]["image"] == "pfis-security-metasploit:6.5.5"
+    assert services["metasploit"]["entrypoint"] == []
+    assert services["metasploit"]["user"] == "1000:1000"
+    assert services["metasploit"]["environment"]["HOME"] == "/tmp"
+    assert services["metasploit"]["read_only"] is True
+    assert services["metasploit"]["cap_drop"] == ["ALL"]
+    assert services["metasploit"]["security_opt"] == ["no-new-privileges:true"]
+    assert services["metasploit"]["networks"] == ["scanner"]
+    assert "volumes" not in services["metasploit"]
     assert services["metasploit"]["command"] == ["./msfconsole", "--version"]
+    metasploit_image = Path("security/docker/metasploit.Dockerfile").read_text(encoding="utf-8")
+    assert (
+        "metasploit-framework:6.5.5@sha256:a05bb5cac4c4d95b2ebeb972813ce17b2da022d7647c4f17e9537bffa2906ed6"
+        in metasploit_image
+    )
+    assert "setcap -r /usr/local/bin/ruby" in metasploit_image
+    assert "setcap -r /usr/bin/nmap" in metasploit_image
+    assert "chmod a-s /usr/bin/abuild-sudo" in metasploit_image
+    assert "ENTRYPOINT []" in metasploit_image
     for service_name, service in services.items():
         attached = service.get("networks", [])
         if isinstance(attached, dict):
@@ -1272,6 +1303,64 @@ def test_exploit_validators_require_positive_fixture_evidence() -> None:
     assert sqlmap_control.target_id == "sqli-fixture"
     assert metasploit_control.control is True
     assert metasploit_control.target_id == "metasploit-fixture"
+
+
+def test_metasploit_target_uses_fixture_port_and_pinned_runtime_image() -> None:
+    command = build_tool_command("metasploit", "metasploit-fixture", "exploit-validation")
+    assert TARGETS["metasploit-fixture"].port == 21
+    assert TOOLS["metasploit"].image.endswith(
+        "@sha256:a05bb5cac4c4d95b2ebeb972813ce17b2da022d7647c4f17e9537bffa2906ed6"
+    )
+    assert TOOLS["metasploit"].runtime_image == "pfis-security-metasploit:6.5.5"
+    assert "set RHOSTS metasploit-fixture; set RPORT 21;" in command.argv[3]
+
+
+def test_metasploit_fixture_is_restarted_before_and_after_failed_attempt() -> None:
+    class RecordingLab:
+        def __init__(self) -> None:
+            self.calls: list[tuple[list[str], int]] = []
+
+        def run_compose(self, args: list[str], *, timeout: int) -> None:
+            self.calls.append((args, timeout))
+
+    lab = RecordingLab()
+    coordinator = AssessmentCoordinator.__new__(AssessmentCoordinator)
+    coordinator.lab = lab
+    with (
+        pytest.raises(RuntimeError, match="fixture probe failed"),
+        coordinator._tool_fixture_scope("metasploit"),
+    ):
+        raise RuntimeError("fixture probe failed")
+    assert lab.calls == [
+        (["restart", "metasploit-fixture"], 90),
+        (["restart", "metasploit-fixture"], 90),
+    ]
+
+
+def test_sqlmap_missing_positive_control_keeps_sanitized_bounded_diagnostic() -> None:
+    class RegisteredTargets:
+        @staticmethod
+        def registered_target_hosts(_target_id: str) -> tuple[str, ...]:
+            return ()
+
+    coordinator = AssessmentCoordinator.__new__(AssessmentCoordinator)
+    coordinator.lab = RegisteredTargets()
+    status, findings, detail = coordinator._parse_outcome(
+        "sqlmap",
+        "sqli-fixture",
+        ProcessOutcome(
+            status="completed",
+            exit_code=0,
+            output=("No injectable parameters found.\nAuthorization: Bearer secret-token-value\n"),
+            duration_seconds=1.0,
+        ),
+    )
+    assert status == "incomplete"
+    assert findings == []
+    assert "positive SQLi control was not detected" in detail
+    assert "Authorization: [redacted]" in detail
+    assert "secret-token-value" not in detail
+    assert len(detail) <= 620
 
 
 def test_assessment_process_lock_and_store_reads_preserve_live_run(tmp_path: Path) -> None:

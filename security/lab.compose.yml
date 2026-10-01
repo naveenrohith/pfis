@@ -217,6 +217,10 @@ services:
     - scanner
     labels: *id001
   metasploit:
+    build:
+      context: ..
+      dockerfile: security/docker/metasploit.Dockerfile
+    image: pfis-security-metasploit:6.5.5
     read_only: true
     cap_drop:
     - ALL
@@ -227,7 +231,10 @@ services:
     cpus: 2
     tmpfs:
     - /tmp:rw,noexec,nosuid,size=512m
-    image: metasploitframework/metasploit-framework:latest@sha256:a05bb5cac4c4d95b2ebeb972813ce17b2da022d7647c4f17e9537bffa2906ed6
+    user: 1000:1000
+    environment:
+      HOME: /tmp
+    entrypoint: []
     command:
     - ./msfconsole
     - --version
@@ -255,7 +262,7 @@ services:
     - scanner
     labels: *id001
   vulnerability-tests:
-    image: registry.community.greenbone.net/community/vulnerability-tests@sha256:6358c847411c73e057338e45742724881553b4e11d1c0224b1a452368647183c
+    image: registry.community.greenbone.net/community/vulnerability-tests:latest@sha256:86a44fb7a9f9b982d521f98914aba98846f573b4f9ec9e8c1007c4866ec943af
     environment:
       FEED_RELEASE: '24.10'
       KEEP_ALIVE: 1
@@ -270,7 +277,7 @@ services:
     - default
     - feed-egress
   notus-data:
-    image: registry.community.greenbone.net/community/notus-data@sha256:e2669644e080227916c99272726a76c7581884bec9ebeecfab078032f9d37889
+    image: registry.community.greenbone.net/community/notus-data:latest@sha256:f53836e6ac0eb3abb7f5ab74ccf93b8317fedd2ba5cd293473cd307c148fc4c3
     environment:
       KEEP_ALIVE: 1
     volumes:
@@ -284,7 +291,7 @@ services:
     - default
     - feed-egress
   scap-data:
-    image: registry.community.greenbone.net/community/scap-data@sha256:22dc84622f89a6a65d5ebd07d3663275fd137965febc020d8dc92b4335a18944
+    image: registry.community.greenbone.net/community/scap-data:latest@sha256:54c9c81d70e0072e6e31ef62de94326546081b6d888d443fcbb2c5dfde5c59a8
     environment:
       KEEP_ALIVE: 1
     volumes:
@@ -298,7 +305,7 @@ services:
     - default
     - feed-egress
   cert-bund-data:
-    image: registry.community.greenbone.net/community/cert-bund-data@sha256:501ff81724b8296dfcb409f3b8934ff883f4bdbe47f64e8add9388f441fdd512
+    image: registry.community.greenbone.net/community/cert-bund-data:latest@sha256:735b786ccb113e8ef437c6328cda15acdf74478bfcd4c0ec39031b79960635e8
     environment:
       KEEP_ALIVE: 1
     volumes:
@@ -312,7 +319,7 @@ services:
     - default
     - feed-egress
   dfn-cert-data:
-    image: registry.community.greenbone.net/community/dfn-cert-data@sha256:930b9336c0060338ac828ceb6cdb06f3151e868b24a23a59453f898c067a40ee
+    image: registry.community.greenbone.net/community/dfn-cert-data:latest@sha256:4926366038df2e655f7de04ca10733984cf46fce7f44d205a7b2393a10f0f148
     environment:
       KEEP_ALIVE: 1
     volumes:
@@ -329,7 +336,7 @@ services:
     - default
     - feed-egress
   data-objects:
-    image: registry.community.greenbone.net/community/data-objects@sha256:ebf950c49c0f96fe102d55c23cc5fb5a948bca46c572d6ab9c2ebb28093ad88f
+    image: registry.community.greenbone.net/community/data-objects:latest@sha256:3ef69ac56aca55981f164e228eceab4116aa8e1a855e1a83d108f3621a83445f
     environment:
       FEED_RELEASE: '24.10'
       KEEP_ALIVE: 1
@@ -344,7 +351,7 @@ services:
     - default
     - feed-egress
   report-formats:
-    image: registry.community.greenbone.net/community/report-formats@sha256:dddd3932743b0f43ef3c30f4fcaebc4cb8eef26e3144d3fa4eef617917680c76
+    image: registry.community.greenbone.net/community/report-formats:latest@sha256:3b1352bec64190d2f8716fe1044d03d61da5b4863a99f78e856762bbf77e9d45
     environment:
       FEED_RELEASE: '24.10'
       KEEP_ALIVE: 1

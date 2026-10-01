@@ -141,6 +141,18 @@ class AssessmentCoordinator:
         if thread is not None:
             thread.join(timeout)
 
+    @contextmanager
+    def _tool_fixture_scope(self, tool_id: str) -> Iterator[None]:
+        """Reset destructive exploit fixtures both before and after execution."""
+        if tool_id != "metasploit":
+            yield
+            return
+        self.lab.run_compose(["restart", "metasploit-fixture"], timeout=90)
+        try:
+            yield
+        finally:
+            self.lab.run_compose(["restart", "metasploit-fixture"], timeout=90)
+
     def _execute(
         self,
         run_id: str,
@@ -204,13 +216,23 @@ class AssessmentCoordinator:
                     raise ScopeViolation("resolved command target is outside the requested profile")
                 spec = TOOLS[command.tool_id]
                 run_command = command
-                if command.tool_id == "greenbone":
-                    try:
-                        self.lab.start_greenbone(cancel)
-                    except LabCancelled:
-                        outcome = ProcessOutcome(
-                            "cancelled", None, "", 0, "operator cancellation requested"
-                        )
+                with self._tool_fixture_scope(command.tool_id):
+                    if command.tool_id == "greenbone":
+                        try:
+                            self.lab.start_greenbone(cancel)
+                        except LabCancelled:
+                            outcome = ProcessOutcome(
+                                "cancelled", None, "", 0, "operator cancellation requested"
+                            )
+                        else:
+                            outcome = executor.execute(
+                                command.service or spec.service,
+                                run_command.argv,
+                                timeout_seconds=run_command.timeout_seconds,
+                                cancel=cancel,
+                            )
+                        finally:
+                            self.lab.stop_greenbone()
                     else:
                         outcome = executor.execute(
                             command.service or spec.service,
@@ -218,15 +240,6 @@ class AssessmentCoordinator:
                             timeout_seconds=run_command.timeout_seconds,
                             cancel=cancel,
                         )
-                    finally:
-                        self.lab.stop_greenbone()
-                else:
-                    outcome = executor.execute(
-                        command.service or spec.service,
-                        run_command.argv,
-                        timeout_seconds=run_command.timeout_seconds,
-                        cancel=cancel,
-                    )
                 status, findings, detail = self._parse_outcome(
                     command.tool_id, command.target_id, outcome
                 )
@@ -260,16 +273,6 @@ class AssessmentCoordinator:
                     if "scope" in detail.lower() or "identity" in detail.lower():
                         stop_reason = detail
                         break
-                if profile_id == "full" and command.target_id in {
-                    "sqli-fixture",
-                    "metasploit-fixture",
-                }:
-                    fixture = (
-                        "sqli-fixture"
-                        if command.target_id == "sqli-fixture"
-                        else "metasploit-fixture"
-                    )
-                    self.lab.run_compose(["restart", fixture], timeout=90)
             if cancel.is_set():
                 overall_state = "cancelled"
                 stop_reason = stop_reason or "operator cancellation requested"
@@ -348,11 +351,19 @@ class AssessmentCoordinator:
             elif tool_id == "sqlmap":
                 findings = parse_sqlmap_output(outcome.output, target_id=target_id)
                 if not findings:
-                    return "incomplete", [], "positive SQLi control was not detected"
+                    diagnostic = sanitize_evidence(outcome.output[-2_000:])[-500:]
+                    detail = "positive SQLi control was not detected"
+                    if diagnostic:
+                        detail = f"{detail}; sanitized scanner output: {diagnostic}"
+                    return "incomplete", [], detail
             elif tool_id == "metasploit":
                 findings = parse_metasploit_output(outcome.output)
                 if not findings:
-                    return "incomplete", [], "known-vulnerable Metasploit control did not execute"
+                    diagnostic = sanitize_evidence(outcome.output[-2_000:])[-500:]
+                    detail = "known-vulnerable Metasploit control did not execute"
+                    if diagnostic:
+                        detail = f"{detail}; sanitized scanner output: {diagnostic}"
+                    return "incomplete", [], detail
             else:
                 return "not_applicable", [], "no parser is registered for this scanner"
         except (ValueError, json.JSONDecodeError) as exc:

@@ -132,11 +132,11 @@ def build_tool_command(tool_id: str, target_id: str, profile_id: str) -> ToolCom
     if tool_id == "metasploit" and target_id == "metasploit-fixture":
         resource_commands = (
             "use exploit/unix/ftp/vsftpd_234_backdoor; "
-            "set RHOSTS metasploit-fixture; set RPORT 21; "
+            f"set RHOSTS {target.host}; set RPORT {target.port}; "
             "set WfsDelay 1; exploit -j; sleep 2; sessions -K; exit -y"
         )
-        # The pinned Rapid7 image entrypoint drops privileges and expects its
-        # command to include the working-directory-relative console executable.
+        # Target and module are fixed; the derived image clears Rapid7's
+        # writable account-setup entrypoint and runs this command directly.
         return ToolCommand(tool_id, target_id, ("./msfconsole", "-q", "-x", resource_commands), 180)
 
     if tool_id == "greenbone" and target_id == "pfis-web":

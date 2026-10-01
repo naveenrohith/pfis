@@ -46,9 +46,7 @@ class Profile:
 TARGETS: Final[dict[str, Target]] = {
     "pfis-web": Target("pfis-web", "pfis.test", 443, "https", True, private_ca=True),
     "sqli-fixture": Target("sqli-fixture", "sqli-fixture", 8080, "http", True, True),
-    "metasploit-fixture": Target(
-        "metasploit-fixture", "metasploit-fixture", 2121, "tcp", True, True
-    ),
+    "metasploit-fixture": Target("metasploit-fixture", "metasploit-fixture", 21, "tcp", True, True),
 }
 
 # Image references are content-addressed; the display version is independently
@@ -105,9 +103,10 @@ TOOLS: Final[dict[str, Tool]] = {
     "metasploit": Tool(
         "metasploit",
         "metasploit",
-        "framework-locked-by-image-digest",
-        "metasploitframework/metasploit-framework:latest@sha256:a05bb5cac4c4d95b2ebeb972813ce17b2da022d7647c4f17e9537bffa2906ed6",
+        "6.5.5-dev",
+        "metasploitframework/metasploit-framework:6.5.5@sha256:a05bb5cac4c4d95b2ebeb972813ce17b2da022d7647c4f17e9537bffa2906ed6",
         ("registered-module-validation",),
+        runtime_image="pfis-security-metasploit:6.5.5",
     ),
 }
 

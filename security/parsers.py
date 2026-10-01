@@ -76,7 +76,6 @@ def sanitize_url(value: str) -> str:
 def sanitize_evidence(value: str) -> str:
     """Remove common credentials, truncate, and normalize hostile scanner output."""
     value = value[: MAX_REPORT_BYTES + 1]
-    value = _HEADER_SECRET.sub(r"\1[redacted]", value)
     value = _BEARER.sub("Bearer [redacted]", value)
     value = _JWT.sub("[redacted-token]", value)
 
@@ -88,6 +87,9 @@ def sanitize_evidence(value: str) -> str:
         return f"{match.group('prefix')}{quote}[redacted]{quote}"
 
     value = _CREDENTIAL_PAIR.sub(redact_pair, value)
+    # Redact entire header lines last so the key/value pass cannot leave a
+    # partial header value or add a second closing bracket around the marker.
+    value = _HEADER_SECRET.sub(r"\1[redacted]", value)
     value = re.sub(r"(?i)(https?://[^\s\"'<>]+)", lambda m: sanitize_url(m.group(1)), value)
     return value[:MAX_EVIDENCE_CHARS]
 

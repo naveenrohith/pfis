@@ -62,7 +62,7 @@ leaves local credentials and evidence available for reuse.
 | testssl.sh 3.2.4 | HTTPS protocol, cipher, and certificate checks | Private-CA observations are contextualized rather than treated as public certificate defects. |
 | Greenbone Community | Infrastructure assessment after feed readiness | Image, feed age, enabled VT families, and reachable services limit coverage; readiness must be recorded. |
 | sqlmap 1.10 | Positive and negative controls against the isolated SQL injection fixture | PFIS endpoints are assessed only when evidence supports bounded validation. |
-| Metasploit Framework | Fixed, reviewed module validation against the isolated Metasploitable fixture | No arbitrary module paths or targets; the deliberately vulnerable fixture is never a PFIS target. |
+| Metasploit Framework 6.5.5 image digest | Fixed vsftpd module validation against the isolated Metasploitable fixture | A derived image removes the upstream Ruby/Nmap file capabilities and setuid helper, then runs UID/GID 1000 with a read-only root, no added capabilities, and `no-new-privileges`. The binary reports `6.5.5-dev`; no arbitrary module paths or targets are accepted. The fixture uses TCP 21 and restarts before and after every attempt; it is never a PFIS target. |
 
 Images and scanner templates are digest or revision pinned. Greenbone runs
 separately because of its memory use. Feed update services disconnect before
