@@ -1,5 +1,8 @@
 # PFIS Security
 
+For disposable local vulnerability assessment, scanner operations, and CI
+behavior, see [PFIS Security Lab](security-lab.md).
+
 ## Ownership
 
 User-scoped endpoints must use:
@@ -29,6 +32,10 @@ When `AUTH_REQUIRED=false`, local/demo mode may accept `user_id`, but authentica
 - A separate readable CSRF cookie is bound to the server session. Cookie-authenticated mutations must echo it in `X-CSRF-Token` and pass the same-origin request check.
 - Logout revokes the server-side session before clearing both browser cookies. Sessions have absolute and idle expiry limits.
 - API responses use `Cache-Control: no-store`; browser tokens must never be copied to `localStorage` or `sessionStorage`.
+- The browser CSP keeps `style-src` limited to same-origin stylesheets and
+  scopes inline styling to `style-src-attr` for existing React-driven progress
+  widths and drag transforms. Remove that attribute exception when those
+  interactions no longer depend on inline style attributes.
 - Passwords use Argon2id. A successful login transparently upgrades legacy PBKDF2 hashes.
 - Production session cookies must use the `__Host-` prefix, `Secure`, path `/`, and no `Domain` attribute.
 - Signed bearer JWTs remain an API compatibility mechanism; they are not returned by browser login or registration.
