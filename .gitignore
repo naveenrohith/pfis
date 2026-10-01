@@ -42,6 +42,7 @@ Thumbs.db
 .test-tmp/
 .test-run/
 /tmp/
+.security-local/
 
 # Tooling caches & coverage
 .ruff_cache/
@@ -57,3 +58,4 @@ node_modules/
 *.tsbuildinfo
 frontend/test-results/
 frontend/playwright-report/
+frontend/security-dist/
