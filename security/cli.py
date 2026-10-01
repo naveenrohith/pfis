@@ -82,9 +82,6 @@ def build_parser() -> argparse.ArgumentParser:
         dest="target_ids",
         help="registered target ID; repeat to match profile scope",
     )
-    run.add_argument(
-        "--wait", action="store_true", help="wait until the serial assessment finishes"
-    )
 
     status = commands.add_parser("status", help="show assessment runs or one run")
     status.add_argument("--run-id")
@@ -163,13 +160,19 @@ def main(argv: list[str] | None = None) -> int:
             store = _store()
             coordinator = AssessmentCoordinator(ROOT, store, lab)
             record = coordinator.enqueue(args.profile, list(targets))
-            if args.wait:
+            try:
                 coordinator.wait()
-                finished_record = store.get_run(record["id"])
-                if finished_record is not None:
-                    record = finished_record
+            except KeyboardInterrupt:
+                # A one-shot process owns the worker thread. Request cancellation and
+                # let executor and fixture cleanup finish before allowing Python to exit.
+                coordinator.cancel(record["id"])
+                coordinator.wait()
+                raise
+            finished_record = store.get_run(record["id"])
+            if finished_record is not None:
+                record = finished_record
             _json(record)
-            return 0 if record["state"] in {"queued", "running", "completed"} else 1
+            return 0 if record["state"] == "completed" else 1
 
         if args.command == "status":
             store = _store()

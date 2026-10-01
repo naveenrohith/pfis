@@ -14,7 +14,7 @@ Run these commands from the repository root:
 python scripts/security.py prepare --lightweight
 python scripts/security.py lab start --lightweight
 python scripts/security.py verify-boundaries
-python scripts/security.py run --profile passive --wait
+python scripts/security.py run --profile passive
 python scripts/security.py console
 ```
 
@@ -36,12 +36,12 @@ by default.
 python scripts/security.py lab status
 python scripts/security.py status
 python scripts/security.py findings
-python scripts/security.py run --profile baseline --wait
-python scripts/security.py run --profile application --wait
-python scripts/security.py run --profile frontend --wait
-python scripts/security.py run --profile infrastructure --wait
-python scripts/security.py run --profile exploit-validation --wait
-python scripts/security.py run --profile full --wait
+python scripts/security.py run --profile baseline
+python scripts/security.py run --profile application
+python scripts/security.py run --profile frontend
+python scripts/security.py run --profile infrastructure
+python scripts/security.py run --profile exploit-validation
+python scripts/security.py run --profile full
 python scripts/security.py cancel <run-id>
 python scripts/security.py report <run-id>
 python scripts/security.py lab reset

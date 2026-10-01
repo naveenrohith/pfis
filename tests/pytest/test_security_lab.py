@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -65,6 +67,111 @@ from security.zap_authenticated import (
     _safe_authentication_state,
     _safe_scan_diagnostic,
 )
+
+
+def test_cli_run_waits_for_assessment_worker_before_process_exit() -> None:
+    root = Path(__file__).resolve().parents[2]
+    script = r"""
+import json
+import threading
+import time
+from security import cli
+
+class Store:
+    record = {"id": "a" * 32, "state": "queued"}
+    def get_run(self, run_id):
+        return self.record if self.record["id"] == run_id else None
+
+class Lab:
+    def __init__(self, root):
+        pass
+
+class Coordinator:
+    def __init__(self, root, store, lab):
+        self.store = store
+        self.worker = None
+    def enqueue(self, profile_id, targets):
+        def finish():
+            time.sleep(0.15)
+            self.store.record = {"id": "a" * 32, "state": "completed"}
+        self.worker = threading.Thread(target=finish, daemon=True)
+        self.worker.start()
+        return {"id": "a" * 32, "state": "queued"}
+    def wait(self):
+        self.worker.join()
+    def cancel(self, run_id):
+        self.store.record = {"id": run_id, "state": "cancelled"}
+
+store = Store()
+cli.LabManager = Lab
+cli.AssessmentCoordinator = Coordinator
+cli._store = lambda: store
+raise SystemExit(cli.main(["run", "--profile", "baseline"]))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["state"] == "completed"
+
+
+def test_cli_interrupt_cancels_and_joins_assessment_worker() -> None:
+    root = Path(__file__).resolve().parents[2]
+    script = r"""
+import json
+from security import cli
+
+class Store:
+    def get_run(self, run_id):
+        return {"id": run_id, "state": "cancelled"}
+
+class Lab:
+    def __init__(self, root):
+        pass
+
+class Coordinator:
+    instance = None
+    def __init__(self, root, store, lab):
+        self.cancelled = False
+        self.wait_calls = 0
+        Coordinator.instance = self
+    def enqueue(self, profile_id, targets):
+        return {"id": "b" * 32, "state": "queued"}
+    def wait(self):
+        self.wait_calls += 1
+        if self.wait_calls == 1:
+            raise KeyboardInterrupt
+    def cancel(self, run_id):
+        self.cancelled = True
+
+cli.LabManager = Lab
+cli.AssessmentCoordinator = Coordinator
+cli._store = lambda: Store()
+exit_code = cli.main(["run", "--profile", "baseline"])
+print(json.dumps({"exit_code": exit_code, "cancelled": Coordinator.instance.cancelled,
+                  "wait_calls": Coordinator.instance.wait_calls}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "exit_code": 130,
+        "cancelled": True,
+        "wait_calls": 2,
+    }
 
 
 def test_target_registry_rejects_arbitrary_urls_and_redirects() -> None:
