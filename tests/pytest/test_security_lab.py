@@ -645,6 +645,9 @@ def test_lab_compose_keeps_scanners_and_greenbone_managers_internal() -> None:
     assert services["greenbone-control"]["environment"]["PFIS_GVM_PASSWORD"] == (
         "${LAB_GREENBONE_PASSWORD:?set by scripts/security.py prepare}"
     )
+    assert services["greenbone-control"]["environment"]["LAB_GENERATION"] == (
+        "${LAB_GENERATION:?set by scripts/security.py prepare}"
+    )
     assert set(services["ospd-openvas"]["networks"]) == {"default", "scanner"}
     assert services["ospd-openvas"].get("privileged", False) is False
     assert services["ospd-openvas"]["cap_add"] == ["NET_ADMIN", "NET_RAW"]

@@ -612,6 +612,7 @@ services:
     - --help
     environment:
       PFIS_GVM_PASSWORD: ${LAB_GREENBONE_PASSWORD:?set by scripts/security.py prepare}
+      LAB_GENERATION: ${LAB_GENERATION:?set by scripts/security.py prepare}
       LAB_SECURITY_TARGET_ID: pfis-web
     read_only: true
     cap_drop:
