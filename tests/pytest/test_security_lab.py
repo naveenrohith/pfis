@@ -244,20 +244,19 @@ def test_zap_pre_shutdown_reads_the_latest_csrf_probe_message(
     probe_message: dict[str, str] = {}
 
     class _CoreApi:
-        message_page = 0
-
         def messages(self, _target: str, start: int, count: int) -> list[dict[str, str]]:
-            self.message_page += 1
-            if self.message_page == 1:
-                assert start == 0
-                assert count == 10_000
+            if start == 9_001:
+                assert count == 1_000
                 return [{"requestHeader": scanned_request}]
-            assert start == 10_000
-            assert count == 1
-            return [probe_message]
+            if start == 20_001:
+                assert count == 1
+                return [probe_message]
+            assert count == 1_000
+            assert start >= 10_001
+            return []
 
         def number_of_messages(self, _target: str) -> int:
-            return 10_001
+            return 20_002 if probe_message else 20_001
 
         def send_request(self, request: str, *, followredirects: bool) -> str:
             assert followredirects is False
@@ -275,6 +274,29 @@ def test_zap_pre_shutdown_reads_the_latest_csrf_probe_message(
 
     zap_api_hooks.zap_pre_shutdown(_Zap())
     assert hook_state.read_text(encoding="ascii") == "csrf_validation_verified"
+
+
+def test_zap_authenticated_scan_cookie_header_distinguishes_missing_mirroring() -> None:
+    scanned_request = (
+        "POST /api/transactions/ HTTP/1.1\r\n"
+        "Host: pfis.test\r\n"
+        "Origin: https://pfis.test\r\n"
+        "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
+    )
+
+    class _CoreApi:
+        def number_of_messages(self, _target: str) -> int:
+            return 1
+
+        def messages(self, _target: str, _start: int, _count: int) -> list[dict[str, str]]:
+            return [{"requestHeader": scanned_request}]
+
+    class _Zap:
+        core = _CoreApi()
+
+    with pytest.raises(zap_api_hooks.ZapHookEvidenceError) as error:
+        zap_api_hooks._authenticated_scan_cookie_header(_Zap())
+    assert error.value.state == "csrf_sender_missing"
 
 
 def test_scanner_commands_are_registry_bound_and_nmap_scripts_allowlisted() -> None:
