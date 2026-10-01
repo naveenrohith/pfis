@@ -9,11 +9,12 @@ the PFIS target**. The two high-severity observations from exploit validation
 are expected positive controls on the isolated SQL injection and Metasploitable
 fixtures; both are tagged as controls and excluded from PFIS findings.
 
-The scan identified a medium TLS grade of B for the local HTTPS endpoint and
-informational observations caused by the private lab certificate, expected
-negative API probes, and literal placeholder query parameters. These are
-recorded below with their current disposition. No PFIS application vulnerability
-was confirmed, so no application vulnerability remediation was needed.
+No scanner-confirmed PFIS application vulnerability was found. A separate
+dependency audit found vulnerable PyJWT records on the starting revision; the
+branch upgrades the pin and its repeat audit is clean. The scan also identified
+a medium TLS grade of B for the local HTTPS endpoint and informational
+observations caused by the private lab certificate, expected negative API
+probes, and literal placeholder query parameters. Their dispositions are below.
 
 ## Scope and lab identity
 
@@ -126,6 +127,25 @@ passes:
 - Greenbone completed its full-and-fast scan with complete coverage and no
   findings on the registered target.
 
+### Dependency audit
+
+- Auditing the exact `origin/main` requirements manifest on 2026-10-01 found
+  **13 vulnerability records for PyJWT 2.13.0**. Official maintainer advisories
+  mark 2.13.0 affected and list fixes in 2.14.0, including a high-severity JWK
+  BOM bypass and a critical asymmetric-key detection bypass
+  ([GHSA-r6x4-923q-g947](https://github.com/jpadilla/pyjwt/security/advisories/GHSA-r6x4-923q-g947),
+  [GHSA-ffc3-869f-jxw9](https://github.com/jpadilla/pyjwt/security/advisories/GHSA-ffc3-869f-jxw9)).
+- Commit `529f55e` updates the pin to PyJWT 2.15.1. Re-running `pip-audit` on
+  the branch requirements manifest reported no known vulnerabilities. The
+  machine-readable base and branch receipts are preserved at
+  `.security-local/reports/base-pip-audit.json` and
+  `.security-local/reports/branch-pip-audit.json`.
+- PFIS currently calls `jwt.decode` with the single allowed algorithm HS256
+  and a raw configured secret. The reviewed mixed-algorithm/JWK bypass
+  preconditions were not present in that call path, so no exploit of PFIS token
+  handling was confirmed. The dependency update removes the affected package
+  versions regardless.
+
 ### Isolated exploit controls
 
 SQLMap confirmed the intentionally injectable in-memory fixture; Metasploit's
@@ -165,11 +185,12 @@ The latest observed existing GitHub `CI` run on the base branch was run
 status for this branch remains unverified until an authorized push triggers it.
 
 The plan-time local baseline receipts on `f755c3b` recorded exit code 1 for
-`pip-audit` and backend pytest coverage; their runner receipt retained output
-hashes but not diagnostic text, so those local baseline failures cannot be
-attributed further from the saved evidence. The later branch dependency audit
-and full backend suite passed. The successful GitHub base-branch result and the
-local planning-run failures are both retained here as separate evidence.
+`pip-audit` and backend pytest coverage. A later audit of the exact base
+requirements manifest reproduced the dependency failure and identified the
+PyJWT findings above. The coverage receipt retained only an output hash, so its
+baseline failure cause is unavailable; the branch full backend suite passed at
+85.29%. The successful GitHub base-branch result and local planning-run results
+are retained here as separate evidence.
 
 ## Remaining coverage limits
 
