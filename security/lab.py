@@ -954,7 +954,7 @@ class LabManager:
                     config.docker_context,
                     "inspect",
                     "--format",
-                    "{{json .Config.Labels}}{{println}}{{json .NetworkSettings.Networks}}{{println}}{{json .HostConfig.Binds}}{{println}}{{json .Mounts}}",
+                    "{{json .Config.Labels}}{{println}}{{json .NetworkSettings.Networks}}{{println}}{{json .Mounts}}",
                     container_id,
                 ],
                 cwd=self.root,
@@ -967,10 +967,10 @@ class LabManager:
                 shell=False,
             )
             lines = inspected.stdout.decode("utf-8", errors="replace").splitlines()
-            if inspected.returncode or len(lines) != 4:
+            if inspected.returncode or len(lines) != 3:
                 raise LabError("lab container network metadata could not be verified")
             try:
-                labels, attached, binds, mounts = (json.loads(line) for line in lines)
+                labels, attached, mounts = (json.loads(line) for line in lines)
             except json.JSONDecodeError as exc:
                 raise LabError("lab container network metadata is invalid") from exc
             if not isinstance(labels, dict) or labels.get(LAB_LABEL) != config.generation:
@@ -993,7 +993,7 @@ class LabManager:
                 "sqli-fixture",
                 "metasploit-fixture",
             }
-            if scanner_container and (binds or not isinstance(mounts, list)):
+            if scanner_container and not isinstance(mounts, list):
                 raise LabError("scanner container has a host bind mount or invalid mount metadata")
             if scanner_container and any(
                 isinstance(mount, dict) and mount.get("Type") == "bind" for mount in mounts

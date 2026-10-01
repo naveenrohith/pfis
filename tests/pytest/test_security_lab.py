@@ -26,7 +26,7 @@ from security.executor import (
     _safe_process_environment,
 )
 from security.isolation_probe import run as run_isolation_probe
-from security.lab import FEED_SERVICES, LabCancelled, LabConfig, LabManager
+from security.lab import FEED_SERVICES, LabCancelled, LabConfig, LabError, LabManager
 from security.parsers import (
     ParsedFinding,
     parse_greenbone_xml,
@@ -698,6 +698,58 @@ def test_greenbone_readiness_stops_when_operator_cancels(
 
     with pytest.raises(LabCancelled, match="readiness was cancelled"):
         lab._wait_for_service("ospd-openvas", 900, cancel=cancelled)
+
+
+def test_network_verification_allows_named_greenbone_volumes_but_rejects_host_binds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    lab = LabManager(tmp_path)
+    config = LabConfig("0123456789ab", "desktop-linux", 8443, {})
+    monkeypatch.setattr(lab, "config", lambda: config)
+
+    def inspect_with_mount(mount: dict[str, str]) -> None:
+        def fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+            if "ps" in argv:
+                return subprocess.CompletedProcess(argv, 0, b"container-id\n")
+            result = "\n".join(
+                json.dumps(item)
+                for item in (
+                    {
+                        "com.pfis.security.lab-generation": config.generation,
+                        "com.docker.compose.service": "ospd-openvas",
+                    },
+                    {
+                        f"{config.project}_default": {},
+                        f"pfis-security-{config.generation}-scanner": {},
+                    },
+                    [mount],
+                )
+            )
+            return subprocess.CompletedProcess(argv, 0, f"{result}\n".encode())
+
+        monkeypatch.setattr("security.lab.subprocess.run", fake_run)
+
+    inspect_with_mount(
+        {
+            "Type": "volume",
+            "Name": f"{config.project}_vt_data_vol",
+            "Source": "/var/lib/docker/volumes/vt_data/_data",
+            "Destination": "/var/lib/openvas/plugins",
+        }
+    )
+    lab._verify_container_networks(config)
+
+    inspect_with_mount(
+        {
+            "Type": "bind",
+            "Source": "C:/Users/operator/.ssh",
+            "Destination": "/root/.ssh",
+        }
+    )
+    with pytest.raises(LabError, match="host filesystem path"):
+        lab._verify_container_networks(config)
 
 
 def test_zap_passive_accepts_warning_exit_only_with_a_valid_bounded_report(
