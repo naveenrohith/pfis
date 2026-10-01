@@ -299,6 +299,41 @@ def test_zap_authenticated_scan_cookie_header_distinguishes_missing_mirroring() 
     assert error.value.state == "csrf_sender_missing"
 
 
+def test_zap_authenticated_scan_cookie_and_sender_evidence_can_be_separate_messages() -> None:
+    messages = [
+        {
+            "requestHeader": (
+                "POST /api/transactions/ HTTP/1.1\r\n"
+                "Host: pfis.test\r\n"
+                "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
+            )
+        },
+        {
+            "requestHeader": (
+                "GET /api/accounts HTTP/1.1\r\n"
+                "Host: pfis.test\r\n"
+                "Origin: https://pfis.test\r\n"
+                "Cookie: __Host-pfis-csrf=csrf-value\r\n"
+                "X-CSRF-Token: csrf-value\r\n"
+            )
+        },
+    ]
+
+    class _CoreApi:
+        def number_of_messages(self, _target: str) -> int:
+            return len(messages)
+
+        def messages(self, _target: str, _start: int, _count: int) -> list[dict[str, str]]:
+            return messages
+
+    class _Zap:
+        core = _CoreApi()
+
+    assert zap_api_hooks._authenticated_scan_cookie_header(_Zap()) == (
+        "__Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value"
+    )
+
+
 def test_scanner_commands_are_registry_bound_and_nmap_scripts_allowlisted() -> None:
     nmap = build_tool_command("nmap", "pfis-web", "baseline")
     assert "--script" in nmap.argv

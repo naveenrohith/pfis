@@ -133,35 +133,48 @@ def _authenticated_scan_cookie_header(zap: Any) -> str:
         )
     bounded_count = min(max(message_count, 0), MAX_SCAN_MESSAGES_TO_INSPECT)
     page_end = message_count
-    authenticated_cookies_observed = False
+    authenticated_cookie_header = ""
+    authenticated_csrf_tokens: set[str] = set()
+    mirrored_csrf_tokens: set[str] = set()
     while page_end > message_count - bounded_count:
         page_start = max(message_count - bounded_count, page_end - MESSAGE_PAGE_SIZE)
         messages = zap.core.messages(REGISTERED_ORIGIN, page_start, page_end - page_start)
         for message in messages if isinstance(messages, list) else []:
             request = str(message.get("requestHeader", ""))
-            if not request.startswith("POST ") or not _has_registered_host_and_origin(request):
-                continue
             cookie_line = re.search(r"(?im)^Cookie:\s*([^\r\n]+)", request)
             if cookie_line is None:
                 continue
             cookies = _parse_cookie_header(cookie_line.group(1))
             session_cookie = cookies.get(SESSION_COOKIE_NAME, "")
             csrf_cookie = cookies.get(CSRF_COOKIE_NAME, "")
-            if session_cookie and csrf_cookie:
-                authenticated_cookies_observed = True
             token_line = re.search(r"(?im)^X-CSRF-Token:\s*([^\r\n]+)", request)
-            if token_line is None:
-                continue
-            csrf_header = token_line.group(1).strip()
-            values = (session_cookie, csrf_cookie, csrf_header)
             if (
-                all(values)
-                and csrf_cookie == csrf_header
-                and not any(re.search(r"[\r\n;]", value) for value in values)
+                request.startswith("POST ")
+                and _has_registered_host(request)
+                and session_cookie
+                and csrf_cookie
+                and not any(re.search(r"[\r\n;]", value) for value in (session_cookie, csrf_cookie))
             ):
-                return f"{SESSION_COOKIE_NAME}={session_cookie}; {CSRF_COOKIE_NAME}={csrf_cookie}"
+                if not authenticated_cookie_header:
+                    authenticated_cookie_header = (
+                        f"{SESSION_COOKIE_NAME}={session_cookie}; "
+                        f"{CSRF_COOKIE_NAME}={csrf_cookie}"
+                    )
+                authenticated_csrf_tokens.add(csrf_cookie)
+            if (
+                csrf_cookie
+                and token_line is not None
+                and _has_registered_host_and_origin(request)
+                and csrf_cookie == token_line.group(1).strip()
+                and not re.search(r"[\r\n;]", csrf_cookie)
+            ):
+                mirrored_csrf_tokens.add(csrf_cookie)
+            if authenticated_cookie_header and authenticated_csrf_tokens.intersection(
+                mirrored_csrf_tokens
+            ):
+                return authenticated_cookie_header
         page_end = page_start
-    if not authenticated_cookies_observed:
+    if not authenticated_cookie_header:
         raise ZapHookEvidenceError(
             "auth_cookies_missing", "authenticated ZAP did not observe both PFIS lab cookies"
         )
@@ -271,14 +284,20 @@ def _is_csrf_probe_request(request: str) -> bool:
 
 
 def _has_registered_host_and_origin(request: str) -> bool:
-    host_line = re.search(r"(?im)^Host:\s*([^\r\n]+)", request)
     origin_line = re.search(r"(?im)^Origin:\s*([^\r\n]+)", request)
     return (
-        host_line is not None
-        and host_line.group(1).strip().lower() in {"pfis.test", "pfis.test:443"}
+        _has_registered_host(request)
         and origin_line is not None
         and origin_line.group(1).strip() == REGISTERED_ORIGIN
     )
+
+
+def _has_registered_host(request: str) -> bool:
+    host_line = re.search(r"(?im)^Host:\s*([^\r\n]+)", request)
+    return host_line is not None and host_line.group(1).strip().lower() in {
+        "pfis.test",
+        "pfis.test:443",
+    }
 
 
 def _response_status_code(message: object) -> str:
