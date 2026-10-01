@@ -25,6 +25,7 @@ HOOK_STATES = frozenset(
         "sender_enabled",
         "pre_shutdown_started",
         "auth_cookies_observed",
+        "csrf_sender_missing",
         "csrf_probe_sent",
         "csrf_validation_verified",
         "auth_cookies_missing",
@@ -93,15 +94,15 @@ def zap_pre_shutdown(zap: Any) -> None:
         _record_hook_state("auth_cookies_missing")
         raise
     _record_hook_state("auth_cookies_observed")
-    request = (
-        f"POST {CSRF_PROBE_PATH} HTTP/1.1\r\n"
-        "Host: pfis.test\r\n"
-        f"Origin: {REGISTERED_ORIGIN}\r\n"
-        "Content-Type: application/json\r\n"
-        f"Cookie: {cookie_header}\r\n"
-        "Content-Length: 2\r\n"
-        "Connection: close\r\n\r\n{}"
-    )
+    try:
+        request = _build_csrf_probe_request(cookie_header)
+    except RuntimeError:
+        _record_hook_state("auth_cookies_missing")
+        raise
+    if not _has_csrf_header_mirroring(messages):
+        _record_hook_state("csrf_sender_missing")
+        raise RuntimeError("authenticated ZAP did not mirror its CSRF cookie into a request header")
+
     zap.core.send_request(request, followredirects=False)
     _record_hook_state("csrf_probe_sent")
     messages = zap.core.messages(REGISTERED_ORIGIN, 0, 10_000)
@@ -109,6 +110,22 @@ def zap_pre_shutdown(zap: Any) -> None:
         _record_hook_state("csrf_validation_missing")
         raise RuntimeError("authenticated ZAP did not pass its CSRF probe to PFIS validation")
     _record_hook_state("csrf_validation_verified")
+
+
+def _build_csrf_probe_request(cookie_header: str) -> str:
+    csrf_token = _parse_cookie_header(cookie_header).get(CSRF_COOKIE_NAME, "")
+    if not csrf_token or re.search(r"[\r\n;]", csrf_token):
+        raise RuntimeError("authenticated ZAP did not observe a valid PFIS CSRF cookie")
+    return (
+        f"POST {CSRF_PROBE_PATH} HTTP/1.1\r\n"
+        "Host: pfis.test\r\n"
+        f"Origin: {REGISTERED_ORIGIN}\r\n"
+        "Content-Type: application/json\r\n"
+        f"Cookie: {cookie_header}\r\n"
+        f"X-CSRF-Token: {csrf_token}\r\n"
+        "Content-Length: 2\r\n"
+        "Connection: close\r\n\r\n{}"
+    )
 
 
 def _authenticated_cookie_header(messages: list[dict[str, Any]]) -> str:
@@ -135,6 +152,19 @@ def _parse_cookie_header(value: str) -> dict[str, str]:
         if separator:
             cookies[name] = cookie_value
     return cookies
+
+
+def _has_csrf_header_mirroring(messages: list[dict[str, Any]]) -> bool:
+    for message in messages:
+        request = str(message.get("requestHeader", ""))
+        cookie_line = re.search(r"(?im)^Cookie:\s*([^\r\n]+)", request)
+        token_line = re.search(r"(?im)^X-CSRF-Token:\s*([^\r\n]+)", request)
+        if cookie_line is None or token_line is None:
+            continue
+        cookies = _parse_cookie_header(cookie_line.group(1))
+        if cookies.get(CSRF_COOKIE_NAME) == token_line.group(1).strip():
+            return True
+    return False
 
 
 def _has_csrf_validation_response(messages: list[dict[str, Any]]) -> bool:

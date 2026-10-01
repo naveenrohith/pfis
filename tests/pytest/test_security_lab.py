@@ -42,7 +42,11 @@ from security.registry import PROFILE_TOOL_IDS
 from security.scope import ScopeViolation, resolve_targets, resolve_url, validate_redirect
 from security.store import SecurityStore
 from security.tools import NMAP_SCRIPT_ALLOWLIST, build_tool_command, commands_for_profile
-from security.zap_api_hooks import _has_csrf_validation_response
+from security.zap_api_hooks import (
+    _build_csrf_probe_request,
+    _has_csrf_header_mirroring,
+    _has_csrf_validation_response,
+)
 from security.zap_authenticated import (
     ACTIVE_SCAN_OPERATIONS,
     CONTEXT_INCLUDE_REGEX,
@@ -153,6 +157,11 @@ def test_zap_csrf_hook_is_fixed_to_registered_host_and_sender_engine(
 
 
 def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> None:
+    probe_request = _build_csrf_probe_request(
+        "__Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value"
+    )
+    assert "X-CSRF-Token: csrf-value\r\n" in probe_request
+
     request = (
         "POST /api/transactions/?user_id=00000000-0000-4000-8000-000000000001 HTTP/1.1\r\n"
         "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
@@ -161,6 +170,7 @@ def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> N
     assert _has_csrf_validation_response(
         [{"requestHeader": request, "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n"}]
     )
+    assert _has_csrf_header_mirroring([{"requestHeader": request}])
     assert not _has_csrf_validation_response(
         [{"requestHeader": request, "responseHeader": "HTTP/1.1 403 Forbidden\r\n"}]
     )
@@ -174,6 +184,11 @@ def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> N
             }
         ]
     )
+    assert not _has_csrf_header_mirroring(
+        [{"requestHeader": request.replace("X-CSRF-Token: csrf-value", "X-CSRF-Token: other")}]
+    )
+    with pytest.raises(RuntimeError, match="valid PFIS CSRF cookie"):
+        _build_csrf_probe_request("__Host-pfis-session=session-value")
 
 
 def test_scanner_commands_are_registry_bound_and_nmap_scripts_allowlisted() -> None:
