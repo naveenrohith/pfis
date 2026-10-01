@@ -18,7 +18,11 @@ from security.auth_boundary import (
     run_auth_boundary_checks,
 )
 from security.controller import COOKIE_NAME, create_controller
-from security.executor import ComposeToolExecutor, _safe_process_environment
+from security.executor import (
+    ComposeToolExecutor,
+    _is_authentication_failure,
+    _safe_process_environment,
+)
 from security.isolation_probe import run as run_isolation_probe
 from security.lab import FEED_SERVICES, LabConfig, LabManager
 from security.parsers import (
@@ -294,12 +298,21 @@ def test_auth_boundary_failures_are_high_findings_without_response_data() -> Non
 
 def test_zap_failure_diagnostic_keeps_exception_class_and_discards_response_data() -> None:
     diagnostic = _safe_scan_diagnostic(
+        "Traceback (most recent call last):\n"
+        "Caused by: java.nio.file.AccessDeniedException: /tmp/zap-data/context.xml\n"
         "ERROR <class 'zapv2.errors.FileNotFoundError'> owner@pfis.example.com "
         "password=synthetic-secret"
     )
     assert "FileNotFoundError" in diagnostic
+    assert "AccessDeniedException: /tmp/zap-data/context.xml" in diagnostic
     assert "owner@pfis.example.com" not in diagnostic
     assert "synthetic-secret" not in diagnostic
+
+
+def test_scanner_log_mentions_do_not_become_authentication_failures() -> None:
+    assert not _is_authentication_failure("Authentication Request Identified; authSuccessful=true")
+    assert _is_authentication_failure("HTTP/1.1 401 Unauthorized")
+    assert _is_authentication_failure("synthetic PFIS user failed ZAP authentication preflight")
 
 
 def test_authenticated_zap_installs_bounded_bundled_scan_policy(tmp_path: Path) -> None:

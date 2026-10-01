@@ -242,6 +242,7 @@ def _safe_scan_diagnostic(output: str) -> str:
         next(value for value in match if value).rsplit(".", maxsplit=1)[-1] for match in matches
     ]
     names = list(dict.fromkeys(names))[-3:]
+    exception_details: list[str] = []
     details: list[str] = []
     for line in output.splitlines():
         if not re.search(
@@ -273,8 +274,15 @@ def _safe_scan_diagnostic(output: str) -> str:
             lambda match: _safe_diagnostic_url(match.group(1)),
             line,
         )
-        details.append(line.strip()[:240])
-    fragments = names + list(dict.fromkeys(details[-4:]))
+        safe_line = line.strip()[:240]
+        if re.search(
+            r"(?i)(?:\b[A-Za-z0-9_.$]*(?:Error|Exception)\s*:|\bCaused by\s*:) ",
+            safe_line,
+        ):
+            exception_details.append(safe_line)
+        else:
+            details.append(safe_line)
+    fragments = names + list(dict.fromkeys(exception_details[-3:] + details[-2:]))
     return "; ".join(fragments)[:700] or "scanner reported an incomplete result"
 
 

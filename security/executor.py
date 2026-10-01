@@ -16,6 +16,20 @@ from security.registry import ALLOWED_SERVICES
 
 MAX_PROCESS_OUTPUT = 8_000_000
 CONTEXT_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,64}$")
+AUTHENTICATION_FAILURE_PATTERNS = (
+    re.compile(r"(?im)^\s*HTTP/\S+\s+401\b"),
+    re.compile(r"(?i)\b401\s+unauthorized\b"),
+    re.compile(r"(?i)\bsynthetic PFIS user failed ZAP authentication preflight\b"),
+    re.compile(
+        r"(?i)\b(?:authentication|auth)(?:\s+preflight)?\s+" r"(?:failed|failure|rejected|denied)\b"
+    ),
+    re.compile(r"(?i)\b(?:failed|rejected|denied)\s+(?:authentication|auth)\b"),
+)
+
+
+def _is_authentication_failure(output: str) -> bool:
+    """Require an explicit auth failure; scanner log mentions of auth are common."""
+    return any(pattern.search(output) for pattern in AUTHENTICATION_FAILURE_PATTERNS)
 
 
 @dataclass(frozen=True)
@@ -173,7 +187,7 @@ class ComposeToolExecutor:
 
         output = captured.decode("utf-8", errors="replace")
         error = ""
-        if status == "failed" and ("401" in output or "authentication" in output.lower()):
+        if status == "failed" and _is_authentication_failure(output):
             status = "authentication_failure"
         elif status == "failed" and (
             "not found" in output.lower() or "pull access denied" in output.lower()
