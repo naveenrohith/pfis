@@ -121,6 +121,10 @@ class LabError(RuntimeError):
     """A requested lab operation failed closed."""
 
 
+class LabCancelled(LabError):
+    """A cancellable lab readiness operation was stopped by the operator."""
+
+
 @dataclass(frozen=True)
 class LabConfig:
     generation: str
@@ -659,8 +663,10 @@ class LabManager:
         start_targets = ("sqli-fixture",) if lightweight else FIXTURE_SERVICES
         self.verify_identity(required_targets=start_targets)
 
-    def start_greenbone(self) -> None:
+    def start_greenbone(self, cancel: threading.Event | None = None) -> None:
         config = self.config()
+        if cancel is not None and cancel.is_set():
+            raise LabCancelled("Greenbone startup was cancelled")
         self.verify_identity()
         if not self._greenbone_feed_receipt_ready(config):
             raise LabError(
@@ -671,12 +677,16 @@ class LabManager:
             timeout=1800,
             profile="greenbone",
         )
+        if cancel is not None and cancel.is_set():
+            raise LabCancelled("Greenbone startup was cancelled")
         self._disconnect_feed_updates(config)
         if not self._feed_updates_disconnected(config):
             raise LabError("Greenbone feed updater reconnected to egress; refusing the scan")
         self.verify_network_isolation()
         for service in ("gvmd", "ospd-openvas"):
-            self._wait_for_service(service, 900)
+            self._wait_for_service(service, 900, cancel=cancel)
+        if cancel is not None and cancel.is_set():
+            raise LabCancelled("Greenbone startup was cancelled")
         readiness = self.run_compose(
             ["run", "--rm", "--no-deps", "greenbone-control", "ready"],
             timeout=300,
@@ -925,7 +935,9 @@ class LabManager:
             **{
                 service: {default_network}
                 for service in (*GREENBONE_INTERNAL_SERVICES, *FEED_SERVICES)
+                if service != "ospd-openvas"
             },
+            "ospd-openvas": {default_network, scanner_network},
         }
         allowed_network_names = {
             app_network,
@@ -977,6 +989,7 @@ class LabManager:
                 raise LabError("a lab container has an unregistered network attachment")
             scanner_container = service in SCANNER_SERVICES or service in {
                 "greenbone-control",
+                "ospd-openvas",
                 "sqli-fixture",
                 "metasploit-fixture",
             }
@@ -1111,10 +1124,18 @@ class LabManager:
                 time.sleep(2)
         raise LabError("PFIS HTTPS health endpoint did not become ready")
 
-    def _wait_for_service(self, service: str, timeout_seconds: int) -> None:
+    def _wait_for_service(
+        self,
+        service: str,
+        timeout_seconds: int,
+        *,
+        cancel: threading.Event | None = None,
+    ) -> None:
         config = self.config()
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
+            if cancel is not None and cancel.is_set():
+                raise LabCancelled("Greenbone readiness was cancelled")
             result = subprocess.run(
                 [
                     "docker",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,7 @@ from security.executor import (
     _safe_process_environment,
 )
 from security.isolation_probe import run as run_isolation_probe
-from security.lab import FEED_SERVICES, LabConfig, LabManager
+from security.lab import FEED_SERVICES, LabCancelled, LabConfig, LabManager
 from security.parsers import (
     ParsedFinding,
     parse_greenbone_xml,
@@ -636,6 +637,24 @@ def test_lab_compose_keeps_scanners_and_greenbone_managers_internal() -> None:
         else:
             assert "feed-egress" not in attached
     assert set(services["greenbone-control"]["networks"]) == {"default", "scanner"}
+    assert set(services["ospd-openvas"]["networks"]) == {"default", "scanner"}
+    assert services["ospd-openvas"].get("privileged", False) is False
+    assert services["ospd-openvas"]["cap_add"] == ["NET_ADMIN", "NET_RAW"]
+    assert services["ospd-openvas"]["security_opt"] == [
+        "seccomp=unconfined",
+        "apparmor=unconfined",
+    ]
+    assert "cap_drop" not in services["ospd-openvas"]
+    assert "read_only" not in services["ospd-openvas"]
+    assert {volume.split(":", maxsplit=1)[0] for volume in services["ospd-openvas"]["volumes"]} == {
+        "gpg_data_vol",
+        "vt_data_vol",
+        "notus_data_vol",
+        "ospd_openvas_socket_vol",
+        "redis_socket_vol",
+        "openvas_data_vol",
+        "openvas_log_data_vol",
+    }
     assert set(services["proxy"]["networks"]) == {"app-data", "scanner", "operator"}
     for scanner in (
         "zap",
@@ -666,6 +685,19 @@ def test_isolation_probe_fails_closed_on_host_or_public_connectivity(
     calls = iter(((True, "connected"), (False, "blocked"), (False, "blocked")))
     monkeypatch.setattr("security.isolation_probe._reachable", lambda *_: next(calls))
     assert run_isolation_probe(45678, 1)["status"] == "failed"
+
+
+def test_greenbone_readiness_stops_when_operator_cancels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lab = LabManager(tmp_path)
+    config = LabConfig("0123456789ab", "desktop-linux", 8443, {})
+    monkeypatch.setattr(lab, "config", lambda: config)
+    cancelled = threading.Event()
+    cancelled.set()
+
+    with pytest.raises(LabCancelled, match="readiness was cancelled"):
+        lab._wait_for_service("ospd-openvas", 900, cancel=cancelled)
 
 
 def test_zap_passive_accepts_warning_exit_only_with_a_valid_bounded_report(

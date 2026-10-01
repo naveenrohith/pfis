@@ -13,7 +13,7 @@ from typing import Any
 
 from security.auth_boundary import run_auth_boundary_checks
 from security.executor import ComposeToolExecutor, ProcessOutcome
-from security.lab import LabManager
+from security.lab import LabCancelled, LabManager
 from security.parsers import (
     ParsedFinding,
     parse_greenbone_xml,
@@ -206,7 +206,12 @@ class AssessmentCoordinator:
                 run_command = command
                 if command.tool_id == "greenbone":
                     try:
-                        self.lab.start_greenbone()
+                        self.lab.start_greenbone(cancel)
+                    except LabCancelled:
+                        outcome = ProcessOutcome(
+                            "cancelled", None, "", 0, "operator cancellation requested"
+                        )
+                    else:
                         outcome = executor.execute(
                             command.service or spec.service,
                             run_command.argv,

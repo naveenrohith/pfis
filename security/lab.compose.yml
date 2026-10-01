@@ -576,15 +576,13 @@ services:
       com.pfis.security.managed: 'true'
     networks:
     - default
-    cap_drop:
-    - ALL
+    - scanner
     cap_add:
+    - NET_ADMIN
     - NET_RAW
     security_opt:
-    - no-new-privileges:true
-    read_only: true
-    tmpfs:
-    - /tmp:rw,noexec,nosuid,size=256m
+    - seccomp=unconfined
+    - apparmor=unconfined
   greenbone-control:
     image: pfis-security-greenbone-control:community
     volumes:
