@@ -104,15 +104,11 @@ def zap_pre_shutdown(zap: Any) -> None:
         _record_hook_state("csrf_sender_missing")
         raise RuntimeError("authenticated ZAP did not mirror its CSRF cookie into a request header")
 
-    probe_result = zap.core.send_request(request, followredirects=False)
+    zap.core.send_request(request, followredirects=False)
     _record_hook_state("csrf_probe_sent")
-    messages = (
-        [probe_result]
-        if isinstance(probe_result, dict)
-        else zap.core.messages(REGISTERED_ORIGIN, 0, 10_000)
-    )
+    messages = _latest_message(zap, REGISTERED_ORIGIN)
     if not _has_csrf_validation_response(messages):
-        status_code = _response_status_code(probe_result)
+        status_code = _response_status_code(messages[0] if messages else None)
         _record_hook_state(f"csrf_status_{status_code}" if status_code else "csrf_response_missing")
         raise RuntimeError("authenticated ZAP did not observe its CSRF probe reach PFIS validation")
     _record_hook_state("csrf_validation_verified")
@@ -197,3 +193,14 @@ def _response_status_code(message: object) -> str:
     response = str(message.get("responseHeader", ""))
     match = re.search(r"(?im)^HTTP/\S+\s+([0-9]{3})\b", response)
     return match.group(1) if match else ""
+
+
+def _latest_message(zap: Any, target: str) -> list[dict[str, Any]]:
+    try:
+        message_count = int(zap.core.number_of_messages(target))
+    except (TypeError, ValueError):
+        return []
+    if message_count < 1:
+        return []
+    messages = zap.core.messages(target, message_count - 1, 1)
+    return messages if isinstance(messages, list) else []

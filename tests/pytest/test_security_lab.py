@@ -196,7 +196,7 @@ def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> N
     assert _response_status_code({"responseHeader": "not-an-http-response"}) == ""
 
 
-def test_zap_pre_shutdown_uses_direct_csrf_probe_response(
+def test_zap_pre_shutdown_reads_the_latest_csrf_probe_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     hook_state = tmp_path / "hook-state.txt"
@@ -206,18 +206,34 @@ def test_zap_pre_shutdown_uses_direct_csrf_probe_response(
         "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
         "X-CSRF-Token: csrf-value\r\n"
     )
+    probe_message: dict[str, str] = {}
 
     class _CoreApi:
-        def messages(self, *_args: object) -> list[dict[str, str]]:
-            return [{"requestHeader": scanned_request}]
+        message_page = 0
 
-        def send_request(self, request: str, *, followredirects: bool) -> dict[str, str]:
+        def messages(self, _target: str, start: int, count: int) -> list[dict[str, str]]:
+            self.message_page += 1
+            if self.message_page == 1:
+                assert start == 0
+                assert count == 10_000
+                return [{"requestHeader": scanned_request}]
+            assert start == 10_000
+            assert count == 1
+            return [probe_message]
+
+        def number_of_messages(self, _target: str) -> int:
+            return 10_001
+
+        def send_request(self, request: str, *, followredirects: bool) -> str:
             assert followredirects is False
             assert "X-CSRF-Token: csrf-value\r\n" in request
-            return {
-                "requestHeader": request,
-                "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
-            }
+            probe_message.update(
+                {
+                    "requestHeader": request,
+                    "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
+                }
+            )
+            return "request and response text"
 
     class _Zap:
         core = _CoreApi()
