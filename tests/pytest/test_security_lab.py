@@ -715,6 +715,13 @@ def test_greenbone_adapter_sanitizes_manager_errors(
     with pytest.raises(greenbone_adapter.AdapterError, match="credentials were rejected") as error:
         greenbone_adapter._send("<get_version/>")
     assert "secret-value" not in str(error.value)
+    diagnostic = greenbone_adapter._safe_cli_error(
+        subprocess.CompletedProcess(
+            ["gvm-cli"], 1, stdout="", stderr="Request denied for token=secret-value"
+        )
+    )
+    assert "secret-value" not in diagnostic
+    assert diagnostic == "Request denied for token=[redacted]"
 
 
 def test_network_verification_allows_named_greenbone_volumes_but_rejects_host_binds(

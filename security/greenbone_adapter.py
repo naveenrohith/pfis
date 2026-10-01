@@ -41,6 +41,25 @@ def _write_config(password: str) -> Path:
     return path
 
 
+def _safe_cli_error(result: subprocess.CompletedProcess[str]) -> str:
+    """Keep only one bounded, redacted gvm-cli diagnostic line."""
+    raw = f"{result.stderr or ''}\n{result.stdout or ''}"
+    raw = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", raw)
+    for secret in (os.environ.get("PFIS_GVM_PASSWORD", ""),):
+        if secret:
+            raw = raw.replace(secret, "[redacted]")
+    raw = re.sub(
+        r"(?i)\b(password|passphrase|secret|token)(\s*[:=]\s*|\s+)[^\s,;]+",
+        r"\1\2[redacted]",
+        raw,
+    )
+    for line in raw.splitlines():
+        candidate = line.strip()
+        if candidate and "<" not in candidate and ">" not in candidate:
+            return candidate[:160]
+    return "unclassified gvm-cli error"
+
+
 def _send(command: str) -> ET.Element:
     if len(command) > 16_000 or not command.startswith("<"):
         raise AdapterError("invalid registered Greenbone request")
@@ -80,7 +99,7 @@ def _send(command: str) -> ET.Element:
         elif "timed out" in diagnostic or "timeout" in diagnostic:
             reason = "Greenbone management request timed out"
         else:
-            reason = "Greenbone management request failed"
+            reason = f"Greenbone management request failed: {_safe_cli_error(result)}"
         raise AdapterError(reason)
     try:
         response = ET.fromstring(result.stdout)
