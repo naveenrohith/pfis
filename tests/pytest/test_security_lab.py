@@ -880,6 +880,7 @@ def test_greenbone_scan_uses_only_the_registered_target_and_port_list(
             "</scanner></get_scanners_response>",
             f'<get_port_lists_response><port_list id="{port_list_id}">'
             "<name>All IANA assigned TCP</name></port_list></get_port_lists_response>",
+            "<get_targets_response/>",
             f'<create_target_response status="201" id="{target_id}"/>',
             f'<create_task_response status="201" id="{task_id}"/>',
             f'<start_task_response status="202"><report_id>{report_id}</report_id>'
@@ -908,10 +909,143 @@ def test_greenbone_scan_uses_only_the_registered_target_and_port_list(
 
     assert report.tag == "get_reports_response"
     assert requests[2] == "<get_port_lists/>"
-    assert requests[3] == (
+    assert requests[3] == '<get_targets details="1" tasks="1"/>'
+    assert requests[4] == (
         f"<create_target><name>PFIS 0123456789ab</name><hosts>172.20.0.3</hosts>"
         f'<port_list id="{port_list_id}"/></create_target>'
     )
+    assert requests[5] == (
+        f'<create_task><name>PFIS 0123456789ab</name><target id="{target_id}"/>'
+        f'<config id="{config_id}"/><scanner id="{scanner_id}"/></create_task>'
+    )
+
+
+def test_greenbone_reuses_only_a_completed_task_for_the_exact_lab_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml.etree.ElementTree as ET
+
+    target_id = "8e667439-b1d6-4a35-a66b-c071898071a4"
+    task_id = "d3861dd1-7f23-4ea2-9a55-7d3176a812fd"
+    config_id = "9db05c58-d768-4b46-a6a5-485f3c9b4c91"
+    scanner_id = "a23e1f00-bc30-4d9d-b3a0-011a6e02fa45"
+    target = ET.fromstring(
+        f'<target id="{target_id}"><name>PFIS 0123456789ab</name>'
+        "<hosts>172.20.0.3</hosts><exclude_hosts/>"
+        '<port_list id="4f6d4d5c-50c2-4f6a-9012-011a6e02fa45"/>'
+        f'<tasks><task id="{task_id}"><name>PFIS 0123456789ab</name>'
+        "<status>Done</status></task></tasks></target>"
+    )
+    responses = iter(
+        [
+            ET.fromstring(
+                f'<get_tasks_response><task id="{task_id}">'
+                f"<name>PFIS 0123456789ab</name><status>Done</status>"
+                f'<target id="{target_id}"/><config id="{config_id}"/>'
+                f'<scanner id="{scanner_id}"/></task></get_tasks_response>'
+            )
+        ]
+    )
+    requests: list[str] = []
+
+    def fake_send(command: str) -> ET.Element:
+        requests.append(command)
+        return next(responses)
+
+    monkeypatch.setattr(greenbone_adapter, "_send", fake_send)
+    assert (
+        greenbone_adapter._resolve_task(
+            target, target_id, "PFIS 0123456789ab", config_id, scanner_id
+        )
+        == task_id
+    )
+    assert requests == [f'<get_tasks task_id="{task_id}" details="1"/>']
+
+
+def test_greenbone_reuses_an_existing_target_only_when_scope_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml.etree.ElementTree as ET
+
+    target_id = "8e667439-b1d6-4a35-a66b-c071898071a4"
+    response = ET.fromstring(
+        f'<get_targets_response><target id="{target_id}">'
+        "<name>PFIS 0123456789ab</name><hosts>172.20.0.3</hosts>"
+        '<exclude_hosts/><port_list id="4f6d4d5c-50c2-4f6a-9012-011a6e02fa45"/>'
+        "</target></get_targets_response>"
+    )
+    requests: list[str] = []
+
+    def fake_send(command: str) -> ET.Element:
+        requests.append(command)
+        return response
+
+    monkeypatch.setattr(greenbone_adapter, "_send", fake_send)
+    resolved_id, target = greenbone_adapter._resolve_target(
+        "PFIS 0123456789ab",
+        "172.20.0.3",
+        "4f6d4d5c-50c2-4f6a-9012-011a6e02fa45",
+    )
+
+    assert resolved_id == target_id
+    assert target is not None
+    assert requests == ['<get_targets details="1" tasks="1"/>']
+
+
+def test_greenbone_rejects_an_existing_target_outside_registered_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml.etree.ElementTree as ET
+
+    target_id = "8e667439-b1d6-4a35-a66b-c071898071a4"
+    monkeypatch.setattr(
+        greenbone_adapter,
+        "_send",
+        lambda _command: ET.fromstring(
+            f'<get_targets_response><target id="{target_id}">'
+            "<name>PFIS 0123456789ab</name><hosts>172.20.0.99</hosts>"
+            '<port_list id="4f6d4d5c-50c2-4f6a-9012-011a6e02fa45"/>'
+            "</target></get_targets_response>"
+        ),
+    )
+
+    with pytest.raises(greenbone_adapter.AdapterError, match="does not match.*scope"):
+        greenbone_adapter._resolve_target(
+            "PFIS 0123456789ab",
+            "172.20.0.3",
+            "4f6d4d5c-50c2-4f6a-9012-011a6e02fa45",
+        )
+
+
+def test_greenbone_refuses_to_start_a_second_active_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml.etree.ElementTree as ET
+
+    target_id = "8e667439-b1d6-4a35-a66b-c071898071a4"
+    task_id = "d3861dd1-7f23-4ea2-9a55-7d3176a812fd"
+    target = ET.fromstring(
+        f'<target id="{target_id}"><tasks><task id="{task_id}">'
+        "<name>PFIS 0123456789ab</name><status>Running</status>"
+        "</task></tasks></target>"
+    )
+    monkeypatch.setattr(
+        greenbone_adapter,
+        "_send",
+        lambda _command: ET.fromstring(
+            f'<get_tasks_response><task id="{task_id}"><status>Running</status>'
+            "</task></get_tasks_response>"
+        ),
+    )
+
+    with pytest.raises(greenbone_adapter.AdapterError, match="already has an active task"):
+        greenbone_adapter._resolve_task(
+            target,
+            target_id,
+            "PFIS 0123456789ab",
+            "9db05c58-d768-4b46-a6a5-485f3c9b4c91",
+            "a23e1f00-bc30-4d9d-b3a0-011a6e02fa45",
+        )
 
 
 def test_network_verification_allows_named_greenbone_volumes_but_rejects_host_binds(

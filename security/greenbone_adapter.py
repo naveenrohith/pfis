@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 import xml.etree.ElementTree as ET
 from contextlib import suppress
 from pathlib import Path
@@ -201,6 +202,110 @@ def _find_id(response: ET.Element, element: str, name: str | None = None) -> str
     raise AdapterError(f"required Greenbone {element} is not ready")
 
 
+def _find_resource(response: ET.Element, element: str, resource_id: str) -> ET.Element | None:
+    return next(
+        (item for item in response.findall(f".//{element}") if item.get("id") == resource_id),
+        None,
+    )
+
+
+def _resolve_target(
+    target_name: str,
+    host: str,
+    port_list_id: str,
+) -> tuple[str, ET.Element | None]:
+    response = _send('<get_targets details="1" tasks="1"/>')
+    targets = [
+        item
+        for item in response.findall("./target")
+        if (item.findtext("name") or "").strip() == target_name
+    ]
+    if len(targets) > 1:
+        raise AdapterError("multiple Greenbone targets match the PFIS lab generation")
+    if not targets:
+        created = _send(
+            f"<create_target><name>{target_name}</name><hosts>{host}</hosts>"
+            f'<port_list id="{port_list_id}"/></create_target>'
+        )
+        target_id = created.get("id", "")
+        if not UUID_RE.fullmatch(target_id):
+            raise AdapterError("Greenbone could not register the PFIS lab target")
+        return target_id, None
+
+    target = targets[0]
+    target_id = target.get("id", "")
+    hosts = [
+        value.strip() for value in (target.findtext("hosts") or "").split(",") if value.strip()
+    ]
+    port_list = target.find("port_list")
+    excluded_hosts = (target.findtext("exclude_hosts") or "").strip()
+    if (
+        not UUID_RE.fullmatch(target_id)
+        or hosts != [host]
+        or excluded_hosts
+        or port_list is None
+        or port_list.get("id") != port_list_id
+    ):
+        raise AdapterError("existing Greenbone target does not match the registered PFIS lab scope")
+    return target_id, target
+
+
+def _resolve_task(
+    target: ET.Element | None,
+    target_id: str,
+    target_name: str,
+    config_id: str,
+    scanner_id: str,
+) -> str:
+    reusable: list[str] = []
+    has_owned_task_name = False
+    for reference in target.findall("./tasks/task") if target is not None else ():
+        task_id = reference.get("id", "")
+        task_name = (reference.findtext("name") or "").strip()
+        if not UUID_RE.fullmatch(task_id):
+            raise AdapterError("Greenbone returned an invalid task reference for the PFIS target")
+        details = _send(f'<get_tasks task_id="{task_id}" details="1"/>')
+        task = _find_resource(details, "task", task_id)
+        if task is None:
+            raise AdapterError("Greenbone target references a missing scan task")
+        status = (task.findtext("status") or "").strip().casefold()
+        if status in {"requested", "queued", "running", "processing", "stopping"}:
+            raise AdapterError("Greenbone already has an active task for the PFIS lab target")
+
+        if task_name == target_name or task_name.startswith(f"{target_name} assessment "):
+            has_owned_task_name = True
+            task_target = task.find("target")
+            task_config = task.find("config")
+            task_scanner = task.find("scanner")
+            if (
+                status in {"done", "completed"}
+                and task_target is not None
+                and task_target.get("id") == target_id
+                and task_config is not None
+                and task_config.get("id") == config_id
+                and task_scanner is not None
+                and task_scanner.get("id") == scanner_id
+            ):
+                reusable.append(task_id)
+
+    if len(reusable) > 1:
+        raise AdapterError("multiple completed Greenbone tasks match the PFIS lab scope")
+    if reusable:
+        return reusable[0]
+
+    task_name = (
+        f"{target_name} assessment {uuid.uuid4().hex[:12]}" if has_owned_task_name else target_name
+    )
+    created = _send(
+        f'<create_task><name>{task_name}</name><target id="{target_id}"/>'
+        f'<config id="{config_id}"/><scanner id="{scanner_id}"/></create_task>'
+    )
+    task_id = created.get("id", "")
+    if not UUID_RE.fullmatch(task_id):
+        raise AdapterError("Greenbone could not create the PFIS scan task")
+    return task_id
+
+
 def _signal_handler(_signum: int, _frame: object) -> None:
     if ACTIVE_TASK_ID:
         with suppress(AdapterError, subprocess.SubprocessError):
@@ -219,20 +324,18 @@ def scan(target_id: str) -> ET.Element:
     config_id = _find_id(_send("<get_configs/>"), "config", "Full and fast")
     scanner_id = _find_id(_send("<get_scanners/>"), "scanner", "OpenVAS Default")
     port_list_id = _find_id(_send("<get_port_lists/>"), "port_list", "All IANA assigned TCP")
-    task_name = f"PFIS {generation}"
-    target_response = _send(
-        f"<create_target><name>{task_name}</name><hosts>{host}</hosts>"
-        f'<port_list id="{port_list_id}"/></create_target>'
+    if not all(UUID_RE.fullmatch(value) for value in (config_id, scanner_id, port_list_id)):
+        raise AdapterError("Greenbone returned invalid scanner configuration identifiers")
+    target_name = f"PFIS {generation}"
+    target_uuid, existing_target = _resolve_target(target_name, host, port_list_id)
+    ACTIVE_TASK_ID = _resolve_task(
+        existing_target,
+        target_uuid,
+        target_name,
+        config_id,
+        scanner_id,
     )
-    target_uuid = target_response.get("id")
-    if not target_uuid or not UUID_RE.fullmatch(target_uuid):
-        raise AdapterError("Greenbone could not register the PFIS lab target")
-    task_response = _send(
-        f'<create_task><name>{task_name}</name><target id="{target_uuid}"/>'
-        f'<config id="{config_id}"/><scanner id="{scanner_id}"/></create_task>'
-    )
-    ACTIVE_TASK_ID = task_response.get("id")
-    if not ACTIVE_TASK_ID or not UUID_RE.fullmatch(ACTIVE_TASK_ID):
+    if ACTIVE_TASK_ID is None:
         raise AdapterError("Greenbone could not create the PFIS scan task")
     started = _send(f'<start_task task_id="{ACTIVE_TASK_ID}"/>')
     report_id = (started.findtext("report_id") or "").strip()
