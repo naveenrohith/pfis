@@ -237,30 +237,32 @@ def test_zap_pre_shutdown_reads_the_latest_csrf_probe_message(
     scanned_request = (
         "POST /api/transactions/ HTTP/1.1\r\n"
         "Host: pfis.test\r\n"
-        "Origin: https://pfis.test\r\n"
         "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
-        "X-CSRF-Token: csrf-value\r\n"
     )
     probe_message: dict[str, str] = {}
 
     class _CoreApi:
         def messages(self, _target: str, start: int, count: int) -> list[dict[str, str]]:
-            if start == 9_001:
-                assert count == 1_000
+            if start == 0:
+                assert count == 10_000
                 return [{"requestHeader": scanned_request}]
-            if start == 20_001:
+            if start == 10_000:
                 assert count == 1
                 return [probe_message]
-            assert count == 1_000
-            assert start >= 10_001
-            return []
+            raise AssertionError(f"unexpected ZAP history page: {start}, {count}")
 
         def number_of_messages(self, _target: str) -> int:
-            return 20_002 if probe_message else 20_001
+            return 10_001
 
         def send_request(self, request: str, *, followredirects: bool) -> str:
             assert followredirects is False
-            assert "X-CSRF-Token: csrf-value\r\n" in request
+            assert "X-CSRF-Token:" not in request
+            # Model the registered HTTP Sender script, which inserts the header
+            # before the request is sent and recorded by ZAP.
+            request = request.replace(
+                "__Host-pfis-csrf=csrf-value\r\n",
+                "__Host-pfis-csrf=csrf-value\r\nX-CSRF-Token: csrf-value\r\n",
+            )
             probe_message.update(
                 {
                     "requestHeader": request,
@@ -276,62 +278,42 @@ def test_zap_pre_shutdown_reads_the_latest_csrf_probe_message(
     assert hook_state.read_text(encoding="ascii") == "csrf_validation_verified"
 
 
-def test_zap_authenticated_scan_cookie_header_distinguishes_missing_mirroring() -> None:
-    scanned_request = (
+def test_zap_csrf_probe_fails_when_sender_does_not_mirror_the_cookie(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hook_state = tmp_path / "hook-state.txt"
+    monkeypatch.setattr(zap_api_hooks, "HOOK_STATE_PATH", hook_state)
+    initial_request = (
         "POST /api/transactions/ HTTP/1.1\r\n"
         "Host: pfis.test\r\n"
-        "Origin: https://pfis.test\r\n"
         "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
     )
+    probe_message: dict[str, str] = {}
 
     class _CoreApi:
-        def number_of_messages(self, _target: str) -> int:
-            return 1
+        def messages(self, _target: str, start: int, count: int) -> list[dict[str, str]]:
+            assert count == (10_000 if start == 0 else 1)
+            return [{"requestHeader": initial_request}] if start == 0 else [probe_message]
 
-        def messages(self, _target: str, _start: int, _count: int) -> list[dict[str, str]]:
-            return [{"requestHeader": scanned_request}]
+        def number_of_messages(self, _target: str) -> int:
+            return 10_001
+
+        def send_request(self, request: str, *, followredirects: bool) -> str:
+            assert followredirects is False
+            probe_message.update(
+                {
+                    "requestHeader": request,
+                    "responseHeader": "HTTP/1.1 403 Forbidden\r\n",
+                }
+            )
+            return "request and response text"
 
     class _Zap:
         core = _CoreApi()
 
-    with pytest.raises(zap_api_hooks.ZapHookEvidenceError) as error:
-        zap_api_hooks._authenticated_scan_cookie_header(_Zap())
-    assert error.value.state == "csrf_sender_missing"
-
-
-def test_zap_authenticated_scan_cookie_and_sender_evidence_can_be_separate_messages() -> None:
-    messages = [
-        {
-            "requestHeader": (
-                "POST /api/transactions/ HTTP/1.1\r\n"
-                "Host: pfis.test\r\n"
-                "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
-            )
-        },
-        {
-            "requestHeader": (
-                "GET /api/accounts HTTP/1.1\r\n"
-                "Host: pfis.test\r\n"
-                "Origin: https://pfis.test\r\n"
-                "Cookie: __Host-pfis-csrf=csrf-value\r\n"
-                "X-CSRF-Token: csrf-value\r\n"
-            )
-        },
-    ]
-
-    class _CoreApi:
-        def number_of_messages(self, _target: str) -> int:
-            return len(messages)
-
-        def messages(self, _target: str, _start: int, _count: int) -> list[dict[str, str]]:
-            return messages
-
-    class _Zap:
-        core = _CoreApi()
-
-    assert zap_api_hooks._authenticated_scan_cookie_header(_Zap()) == (
-        "__Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value"
-    )
+    with pytest.raises(RuntimeError, match="sender probe"):
+        zap_api_hooks.zap_pre_shutdown(_Zap())
+    assert hook_state.read_text(encoding="ascii") == "csrf_status_403"
 
 
 def test_scanner_commands_are_registry_bound_and_nmap_scripts_allowlisted() -> None:
