@@ -11,7 +11,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from security import zap_api_hooks, zap_passive
+from security import greenbone_adapter, zap_api_hooks, zap_passive
 from security.assessment import AssessmentCoordinator, ToolCoverage
 from security.auth_boundary import (
     BoundaryCheck,
@@ -699,6 +699,22 @@ def test_greenbone_readiness_stops_when_operator_cancels(
 
     with pytest.raises(LabCancelled, match="readiness was cancelled"):
         lab._wait_for_service("ospd-openvas", 900, cancel=cancelled)
+
+
+def test_greenbone_adapter_sanitizes_manager_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    monkeypatch.setattr(greenbone_adapter, "GVM_CONFIG", tmp_path / "gvm-tools.conf")
+    failure = subprocess.CompletedProcess(
+        ["gvm-cli"], 1, stdout="", stderr="Authentication failed for password secret-value"
+    )
+    monkeypatch.setattr(greenbone_adapter.subprocess, "run", lambda *_args, **_kwargs: failure)
+
+    with pytest.raises(greenbone_adapter.AdapterError, match="credentials were rejected") as error:
+        greenbone_adapter._send("<get_version/>")
+    assert "secret-value" not in str(error.value)
 
 
 def test_network_verification_allows_named_greenbone_volumes_but_rejects_host_binds(

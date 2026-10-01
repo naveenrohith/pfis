@@ -65,8 +65,23 @@ def _send(command: str) -> ET.Element:
         shell=False,
     )
     if result.returncode:
-        # Do not echo protocol output or credentials into assessment evidence.
-        raise AdapterError("Greenbone management request failed")
+        # Expose only a bounded category; command output can contain secrets.
+        diagnostic = f"{result.stdout}\n{result.stderr}".casefold()
+        if "must not be run as root" in diagnostic:
+            reason = "gvm-tools requires an unprivileged user"
+        elif "permission denied" in diagnostic:
+            reason = "Greenbone management socket permission denied"
+        elif "authentication" in diagnostic or "unauthorized" in diagnostic:
+            reason = "Greenbone credentials were rejected"
+        elif "enter username" in diagnostic or "eof when reading a line" in diagnostic:
+            reason = "Greenbone credentials were not supplied to gvm-tools"
+        elif any(term in diagnostic for term in ("no such file", "connection refused")):
+            reason = "Greenbone management socket is unavailable"
+        elif "timed out" in diagnostic or "timeout" in diagnostic:
+            reason = "Greenbone management request timed out"
+        else:
+            reason = "Greenbone management request failed"
+        raise AdapterError(reason)
     try:
         response = ET.fromstring(result.stdout)
     except ET.ParseError as exc:
