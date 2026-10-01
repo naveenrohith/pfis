@@ -31,7 +31,9 @@ class ProcessLock:
                 if os.name == "nt":
                     import msvcrt
 
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    lock_file = getattr(msvcrt, "locking")  # noqa: B009
+                    nonblocking_lock = getattr(msvcrt, "LK_NBLCK")  # noqa: B009
+                    lock_file(handle.fileno(), nonblocking_lock, 1)
                 else:
                     import fcntl
 
@@ -54,7 +56,9 @@ class ProcessLock:
                 if os.name == "nt":
                     import msvcrt
 
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    lock_file = getattr(msvcrt, "locking")  # noqa: B009
+                    unlock_lock = getattr(msvcrt, "LK_UNLCK")  # noqa: B009
+                    lock_file(handle.fileno(), unlock_lock, 1)
                 else:
                     import fcntl
 

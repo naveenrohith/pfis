@@ -28,6 +28,7 @@ from security.executor import (
     _is_missing_image_error,
     _safe_process_environment,
 )
+from security.isolation_probe import discover_host_gateway
 from security.isolation_probe import run as run_isolation_probe
 from security.lab import FEED_SERVICES, LabCancelled, LabConfig, LabError, LabManager
 from security.parsers import (
@@ -738,7 +739,7 @@ def test_lab_compose_keeps_scanners_and_greenbone_managers_internal() -> None:
         service["image"]
         for service in services.values()
         if isinstance(service.get("image"), str)
-        and service["image"].startswith("registry.community.greenbone.net/")
+        and service["image"].partition("/")[0] == "registry.community.greenbone.net"
     ]
     assert greenbone_images
     assert all(
@@ -837,6 +838,17 @@ def test_isolation_probe_fails_closed_on_host_or_public_connectivity(
     assert run_isolation_probe(45678, 1)["status"] == "failed"
 
 
+def test_isolation_probe_accepts_only_private_host_gateway_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("socket.gethostbyname", lambda _: "172.19.0.1")
+    assert discover_host_gateway() == "172.19.0.1"
+
+    monkeypatch.setattr("socket.gethostbyname", lambda _: "8.8.8.8")
+    with pytest.raises(ValueError, match="outside the private lab range"):
+        discover_host_gateway()
+
+
 def test_greenbone_readiness_stops_when_operator_cancels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -850,54 +862,35 @@ def test_greenbone_readiness_stops_when_operator_cancels(
         lab._wait_for_service("ospd-openvas", 900, cancel=cancelled)
 
 
-def test_greenbone_adapter_sanitizes_manager_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_greenbone_adapter_uses_local_gmp_socket_and_sanitizes_manager_errors(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import subprocess
+    import xml.etree.ElementTree as ET
 
-    monkeypatch.setattr(greenbone_adapter, "GVM_CONFIG", tmp_path / "gvm-tools.conf")
-    failure = subprocess.CompletedProcess(
-        ["gvm-cli"], 1, stdout="", stderr="Authentication failed for password secret-value"
-    )
-    expected_request = (
-        "<modify_user><name>admin</name><password>secret-value</password></modify_user>"
-    )
-    request_paths: list[Path] = []
+    class GmpClient:
+        def __init__(self) -> None:
+            self.requests: list[str] = []
 
-    def fail_request(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        request_path = Path(argv[-1])
-        request_paths.append(request_path)
-        assert request_path.read_text(encoding="utf-8") == expected_request
-        assert "secret-value" not in " ".join(argv)
-        return failure
+        def send_command(self, command: str) -> str:
+            self.requests.append(command)
+            return (
+                '<modify_user_response status="400" '
+                'status_text="Not authorized password=secret-value"/>'
+            )
 
-    monkeypatch.setattr(greenbone_adapter.subprocess, "run", fail_request)
+    client = GmpClient()
+    monkeypatch.setattr(greenbone_adapter, "GVM_CLIENT", client)
+    command = "<modify_user><name>synthetic</name></modify_user>"
 
-    with pytest.raises(greenbone_adapter.AdapterError, match="credentials were rejected") as error:
-        greenbone_adapter._send(expected_request)
+    with pytest.raises(greenbone_adapter.AdapterError, match="permission denied") as error:
+        greenbone_adapter._send(command)
+
+    assert client.requests == [command]
     assert "secret-value" not in str(error.value)
-    assert request_paths and not request_paths[0].exists()
-    diagnostic = greenbone_adapter._safe_cli_error(
-        subprocess.CompletedProcess(
-            ["gvm-cli"], 1, stdout="", stderr="Request denied for token=secret-value"
-        )
+    detail = greenbone_adapter._safe_gmp_status_detail(
+        ET.fromstring('<response status_text="Request denied for token=secret-value"/>')
     )
-    assert "secret-value" not in diagnostic
-    assert diagnostic == "Request denied for token=[redacted]"
-    traceback = greenbone_adapter._safe_cli_error(
-        subprocess.CompletedProcess(
-            ["gvm-cli"],
-            1,
-            stdout="",
-            stderr=(
-                "Traceback (most recent call last):\n"
-                '  File "/usr/local/bin/gvm-cli", line 8, in <module>\n'
-                "TypeError: object of type 'NoneType' has no len() for secret=secret-value"
-            ),
-        )
-    )
-    assert 'File "/usr/local/bin/gvm-cli", line 8' in traceback
-    assert "secret-value" not in traceback
+    assert detail == "Request denied for token=[redacted]"
 
 
 def test_greenbone_authenticates_only_with_the_generated_integration_user_password(
@@ -909,16 +902,26 @@ def test_greenbone_authenticates_only_with_the_generated_integration_user_passwo
     configured_passwords: list[str] = []
     requests: list[str] = []
 
+    class GmpClient:
+        def send_command(self, command: str) -> str:
+            requests.append(command)
+            return '<get_version_response status="200"/>'
+
+        def disconnect(self) -> None:
+            return None
+
+    client = GmpClient()
+
     def fake_send(command: str) -> ET.Element:
         requests.append(command)
         return ET.fromstring('<get_version_response status="200"/>')
 
     monkeypatch.setenv("PFIS_GVM_PASSWORD", generated_password)
-    monkeypatch.setattr(greenbone_adapter, "GVM_CONFIG", None)
+    monkeypatch.setattr(greenbone_adapter, "GVM_CLIENT", None)
     monkeypatch.setattr(
         greenbone_adapter,
-        "_write_config",
-        lambda password: configured_passwords.append(password) or Path("gvm-tools.conf"),
+        "_create_gmp_client",
+        lambda password: configured_passwords.append(password) or client,
     )
     monkeypatch.setattr(greenbone_adapter, "_send", fake_send)
 
@@ -928,26 +931,63 @@ def test_greenbone_authenticates_only_with_the_generated_integration_user_passwo
     assert configured_passwords == [generated_password]
 
 
-def test_greenbone_adapter_names_rejected_management_operation_safely(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_greenbone_gmp_client_authenticates_over_the_registered_unix_socket(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import subprocess
+    from types import SimpleNamespace
 
-    monkeypatch.setattr(greenbone_adapter, "GVM_CONFIG", tmp_path / "gvm-tools.conf")
-    monkeypatch.setenv("PFIS_GVM_PASSWORD", "secret-value")
-    monkeypatch.setattr(
-        greenbone_adapter.subprocess,
-        "run",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            ["gvm-cli"],
-            0,
-            stdout=(
+    calls: list[tuple[object, ...]] = []
+    connections: list[object] = []
+
+    class Connection:
+        def __init__(self, *, path: str, timeout: int) -> None:
+            connections.append(self)
+            calls.append(("connection", path, timeout))
+
+    class Client:
+        def __init__(self, *, connection: Connection) -> None:
+            calls.append(("client", connection))
+
+        def connect(self) -> None:
+            calls.append(("connect",))
+
+        def authenticate(self, username: str, password: str) -> None:
+            calls.append(("authenticate", username, password))
+
+        def is_authenticated(self) -> bool:
+            return True
+
+        def disconnect(self) -> None:
+            calls.append(("disconnect",))
+
+    modules = {
+        "gvm.connections": SimpleNamespace(UnixSocketConnection=Connection),
+        "gvm.protocols.gmp": SimpleNamespace(GMP=Client),
+    }
+    monkeypatch.setattr(greenbone_adapter.importlib, "import_module", modules.__getitem__)
+
+    client = greenbone_adapter._create_gmp_client("generated-synthetic-password")
+
+    assert isinstance(client, Client)
+    assert calls == [
+        ("connection", greenbone_adapter.GVM_SOCKET, 60),
+        ("client", connections[0]),
+        ("connect",),
+        ("authenticate", greenbone_adapter.GVM_USER, "generated-synthetic-password"),
+    ]
+
+
+def test_greenbone_adapter_names_rejected_management_operation_safely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class GmpClient:
+        def send_command(self, _command: str) -> str:
+            return (
                 '<get_configs_response status="400" '
                 'status_text="configuration unavailable for password=secret-value"/>'
-            ),
-            stderr="",
-        ),
-    )
+            )
+
+    monkeypatch.setattr(greenbone_adapter, "GVM_CLIENT", GmpClient())
 
     with pytest.raises(
         greenbone_adapter.AdapterError,
@@ -1643,6 +1683,41 @@ def test_assessment_process_lock_and_store_reads_preserve_live_run(tmp_path: Pat
 class _LabStub:
     def __init__(self, root: Path) -> None:
         self.root = root
+
+
+class _FailingLabStub(_LabStub):
+    def status(self) -> dict[str, object]:
+        raise RuntimeError("internal diagnostic leaked-token=synthetic-secret")
+
+    def verify_identity(self) -> dict[str, object]:
+        raise RuntimeError("internal diagnostic leaked-token=synthetic-secret")
+
+    def tool_readiness(self) -> list[dict[str, object]]:
+        return [{"ready": True, "status": "ready", "detail": "scanner ready"}]
+
+
+def test_controller_does_not_return_internal_lab_exceptions(tmp_path: Path) -> None:
+    store = SecurityStore(tmp_path / "security.sqlite3")
+    app = create_controller(
+        tmp_path, port=43128, store=store, lab=_FailingLabStub(tmp_path)  # type: ignore[arg-type]
+    )
+    client = TestClient(app, base_url="https://localhost:43128")
+    origin = {"Origin": "http://localhost:43128"}
+    pairing = app.state.pairing
+    paired = client.post("/security-api/pair", headers=origin, json={"code": pairing.code})
+    assert paired.status_code == 200
+
+    lab_response = client.get("/security-api/lab")
+    tool_response = client.get("/security-api/tools")
+    serialized = json.dumps([lab_response.json(), tool_response.json()])
+    assert lab_response.json() == {"ready": False, "detail": "Lab status is unavailable."}
+    assert tool_response.json() == {
+        "tools": [
+            {"ready": False, "status": "not_ready", "detail": "Lab readiness is unavailable."}
+        ],
+        "lab_ready": False,
+    }
+    assert "synthetic-secret" not in serialized
 
 
 def test_controller_requires_host_origin_pairing_csrf_and_attaches_reports(tmp_path: Path) -> None:

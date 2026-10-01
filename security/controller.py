@@ -191,17 +191,17 @@ def create_controller(
     def lab_status(_session_id: str = Depends(require_session)) -> dict[str, Any]:
         try:
             return lab.status()
-        except Exception as exc:
-            return {"ready": False, "detail": sanitize_evidence(str(exc))}
+        except Exception:
+            return {"ready": False, "detail": "Lab status is unavailable."}
 
     @app.get("/security-api/tools")
     def tool_readiness(_session_id: str = Depends(require_session)) -> dict[str, Any]:
         try:
             lab.verify_identity()
             lab_ready = True
-        except Exception as exc:
+        except Exception:
             lab_ready = False
-            lab_error = sanitize_evidence(str(exc))
+            lab_error = "Lab readiness is unavailable."
         tools = lab.tool_readiness()
         if not lab_ready:
             for tool in tools:

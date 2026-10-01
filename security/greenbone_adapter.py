@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
+import importlib
 import ipaddress
 import json
 import os
 import re
 import signal
 import socket
-import subprocess
 import sys
-import tempfile
 import time
 import uuid
 import xml.etree.ElementTree as ET
 from contextlib import suppress
-from pathlib import Path
+from typing import Any
 
 GVM_SOCKET = "/run/gvmd/gvmd.sock"
 GVM_USER = "pfis_security"
@@ -23,51 +22,11 @@ REGISTERED_TARGET = "pfis-web"
 REGISTERED_HOST = "pfis.test"
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 ACTIVE_TASK_ID: str | None = None
-GVM_CONFIG: Path | None = None
+GVM_CLIENT: Any | None = None
 
 
 class AdapterError(RuntimeError):
     """A fixed Greenbone operation failed or exceeded its scope."""
-
-
-def _write_config(password: str) -> Path:
-    path = Path(tempfile.gettempdir()) / "pfis-gvm-tools.conf"
-    content = (
-        "[main]\ntimeout=60\n\n"
-        f"[gmp]\nusername={GVM_USER}\npassword={password}\n\n"
-        f"[unixsocket]\nsocketpath={GVM_SOCKET}\n"
-    )
-    path.write_text(content, encoding="utf-8")
-    path.chmod(0o600)
-    return path
-
-
-def _safe_cli_error(result: subprocess.CompletedProcess[str]) -> str:
-    """Keep only one bounded, redacted gvm-cli diagnostic line."""
-    raw = f"{result.stderr or ''}\n{result.stdout or ''}"
-    raw = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", raw)
-    for secret in (os.environ.get("PFIS_GVM_PASSWORD", ""),):
-        if secret:
-            raw = raw.replace(secret, "[redacted]")
-    raw = re.sub(
-        r"(?i)\b(password|passphrase|secret|token)(\s*[:=]\s*|\s+)[^\s,;]+",
-        r"\1\2[redacted]",
-        raw,
-    )
-    lines = raw.splitlines()
-    frames = [line.strip() for line in lines if re.match(r"\s*File \"[^\"]+\", line \d+", line)]
-    for line in reversed(lines):
-        candidate = line.strip()
-        if (
-            candidate
-            and not candidate.startswith(("Traceback ", "File "))
-            and "<" not in candidate
-            and ">" not in candidate
-        ):
-            if frames:
-                return f"{frames[-1][:100]}: {candidate[:120]}"
-            return candidate[:160]
-    return "unclassified gvm-cli error"
 
 
 def _safe_gmp_status_reason(response: ET.Element) -> str:
@@ -87,72 +46,33 @@ def _safe_gmp_status_detail(response: ET.Element) -> str:
     status_text = response.get("status_text", "")[:256]
     if not status_text:
         return ""
-    detail = _safe_cli_error(
-        subprocess.CompletedProcess(["gvm-cli"], 1, stdout="", stderr=status_text)
+    detail = re.sub(
+        r"(?i)\b(password|passphrase|secret|token)(\s*[:=]\s*|\s+)[^\s,;]+",
+        r"\1\2[redacted]",
+        status_text,
     )
     detail = re.sub(r"[^A-Za-z0-9 .,;:_()/-\[\]]", "", detail)[:100]
-    return "" if detail == "unclassified gvm-cli error" else detail
+    return detail
 
 
 def _send(command: str) -> ET.Element:
     if len(command) > 16_000 or not command.startswith("<"):
         raise AdapterError("invalid registered Greenbone request")
-    if GVM_CONFIG is None:
+    if GVM_CLIENT is None:
         raise AdapterError("Greenbone credentials are unavailable")
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        prefix="pfis-gvm-request-",
-        suffix=".xml",
-        dir=tempfile.gettempdir(),
-        delete=False,
-    ) as request_file:
-        request_file.write(command)
-        request_path = Path(request_file.name)
     try:
-        request_path.chmod(0o600)
-        result = subprocess.run(
-            [
-                "gvm-cli",
-                "--config",
-                str(GVM_CONFIG),
-                "--timeout",
-                "60",
-                "socket",
-                "--socketpath",
-                GVM_SOCKET,
-                str(request_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=70,
-            check=False,
-            shell=False,
-        )
-    finally:
-        request_path.unlink(missing_ok=True)
-    if result.returncode:
-        # Expose only a bounded category; command output can contain secrets.
-        diagnostic = f"{result.stdout}\n{result.stderr}".casefold()
-        if "must not be run as root" in diagnostic:
-            reason = "gvm-tools requires an unprivileged user"
-        elif "permission denied" in diagnostic:
-            reason = "Greenbone management socket permission denied"
-        elif "authentication" in diagnostic or "unauthorized" in diagnostic:
-            reason = "Greenbone credentials were rejected"
-        elif "enter username" in diagnostic or "eof when reading a line" in diagnostic:
-            reason = "Greenbone credentials were not supplied to gvm-tools"
-        elif any(term in diagnostic for term in ("no such file", "connection refused")):
-            reason = "Greenbone management socket is unavailable"
-        elif "timed out" in diagnostic or "timeout" in diagnostic:
-            reason = "Greenbone management request timed out"
-        else:
-            reason = f"Greenbone management request failed: {_safe_cli_error(result)}"
-        raise AdapterError(reason)
-    try:
-        response = ET.fromstring(result.stdout)
+        response_text = GVM_CLIENT.send_command(command)
+        response = ET.fromstring(response_text)
     except ET.ParseError as exc:
         raise AdapterError("Greenbone returned invalid management XML") from exc
+    except TimeoutError as exc:
+        raise AdapterError("Greenbone management request timed out") from exc
+    except PermissionError as exc:
+        raise AdapterError("Greenbone management socket permission denied") from exc
+    except OSError as exc:
+        raise AdapterError("Greenbone management socket is unavailable") from exc
+    except Exception as exc:
+        raise AdapterError("Greenbone management request failed") from exc
     status = response.get("status", "")
     if status and status[0] not in {"2", "3"}:
         request_name = response.tag.removesuffix("_response")
@@ -168,12 +88,51 @@ def _send(command: str) -> ET.Element:
 
 
 def _authenticate() -> None:
-    global GVM_CONFIG
+    global GVM_CLIENT
     password = os.environ.get("PFIS_GVM_PASSWORD", "")
     if len(password) < 24 or any(char in password for char in "\r\n"):
         raise AdapterError("generated Greenbone credentials are unavailable")
-    GVM_CONFIG = _write_config(password)
+    _disconnect_gmp()
+    try:
+        GVM_CLIENT = _create_gmp_client(password)
+    except AdapterError:
+        raise
+    except TimeoutError as exc:
+        raise AdapterError("Greenbone management request timed out") from exc
+    except PermissionError as exc:
+        raise AdapterError("Greenbone management socket permission denied") from exc
+    except OSError as exc:
+        raise AdapterError("Greenbone management socket is unavailable") from exc
+    except Exception as exc:
+        _disconnect_gmp()
+        raise AdapterError("Greenbone authentication failed") from exc
     _send("<get_version/>")
+
+
+def _create_gmp_client(password: str) -> Any:
+    connection_module = importlib.import_module("gvm.connections")
+    protocol_module = importlib.import_module("gvm.protocols.gmp")
+    connection = connection_module.UnixSocketConnection(path=GVM_SOCKET, timeout=60)
+    client = protocol_module.GMP(connection=connection)
+    try:
+        client.connect()
+        client.authenticate(GVM_USER, password)
+        if not client.is_authenticated():
+            raise AdapterError("Greenbone credentials were rejected")
+    except Exception:
+        with suppress(Exception):
+            client.disconnect()
+        raise
+    return client
+
+
+def _disconnect_gmp() -> None:
+    global GVM_CLIENT
+    client = GVM_CLIENT
+    GVM_CLIENT = None
+    if client is not None:
+        with suppress(Exception):
+            client.disconnect()
 
 
 def _registered_address() -> str:
@@ -308,7 +267,7 @@ def _resolve_task(
 
 def _signal_handler(_signum: int, _frame: object) -> None:
     if ACTIVE_TASK_ID:
-        with suppress(AdapterError, subprocess.SubprocessError):
+        with suppress(AdapterError):
             _send(f'<stop_task task_id="{ACTIVE_TASK_ID}"/>')
     raise SystemExit(143)
 
@@ -373,13 +332,11 @@ def main() -> int:
         try:
             print(json.dumps(readiness(), sort_keys=True))
             return 0
-        except (AdapterError, OSError, subprocess.SubprocessError, ET.ParseError) as exc:
+        except (AdapterError, OSError, ET.ParseError) as exc:
             print(str(exc), file=sys.stderr)
             return 1
         finally:
-            if GVM_CONFIG is not None:
-                with suppress(OSError):
-                    GVM_CONFIG.unlink(missing_ok=True)
+            _disconnect_gmp()
     if sys.argv[1:] != ["scan", "--target-id", REGISTERED_TARGET]:
         print("Greenbone adapter accepts only the registered PFIS target.", file=sys.stderr)
         return 2
@@ -389,13 +346,11 @@ def main() -> int:
         sys.stdout.write(ET.tostring(report, encoding="unicode"))
         sys.stdout.write("\n")
         return 0
-    except (AdapterError, OSError, subprocess.SubprocessError, ET.ParseError) as exc:
+    except (AdapterError, OSError, ET.ParseError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     finally:
-        if GVM_CONFIG is not None:
-            with suppress(OSError):
-                GVM_CONFIG.unlink(missing_ok=True)
+        _disconnect_gmp()
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
         # Deliberately unsafe query for scanner positive-control verification.
         query = f"SELECT id, label FROM items WHERE id = {item_id}"
         try:
+            # codeql[py/sql-injection] Deliberate in-memory positive control; never application data.
             row = connection.execute(query).fetchone()
         except sqlite3.Error:
             row = None

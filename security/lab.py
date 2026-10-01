@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 import os
 import re
@@ -119,6 +120,19 @@ GREENBONE_INTERNAL_SERVICES = frozenset(
 
 class LabError(RuntimeError):
     """A requested lab operation failed closed."""
+
+
+def _last_json_object(output: str) -> dict[str, Any]:
+    for line in reversed(output.splitlines()):
+        if not line.lstrip().startswith("{"):
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    raise LabError("scanner isolation probe returned invalid JSON")
 
 
 class LabCancelled(LabError):
@@ -803,10 +817,39 @@ class LabManager:
         config = self.config()
         self._verify_container_networks(config)
 
+        run_id = secrets.token_hex(16)
+        probe_prefix = [
+            "run",
+            "--rm",
+            "--no-deps",
+            "--pull",
+            "never",
+            "--label",
+            f"{RUN_LABEL}={run_id}",
+            "--label",
+            f"{LAB_LABEL}={config.generation}",
+            "isolation-probe",
+        ]
+        try:
+            discovery_output = self.run_compose(
+                [*probe_prefix, "--discover-host-gateway"], timeout=30, profile="scanners"
+            )
+            discovery = _last_json_object(discovery_output)
+            host_address = ipaddress.ip_address(str(discovery.get("host_gateway", "")))
+            if (
+                not host_address.is_private
+                or host_address.is_loopback
+                or host_address.is_link_local
+                or host_address.is_multicast
+            ):
+                raise LabError("scanner probe returned an invalid host gateway")
+        except (OSError, ValueError, LabError, subprocess.SubprocessError) as exc:
+            raise LabError("scanner isolation probe could not discover the host gateway") from exc
+
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            listener.bind(("0.0.0.0", 0))
+            listener.bind((str(host_address), 0))
             listener.listen(1)
             listener.settimeout(0.25)
             host_port = int(listener.getsockname()[1])
@@ -833,23 +876,9 @@ class LabManager:
             target=accept_once, name="pfis-host-isolation-sentinel", daemon=True
         )
         accept_thread.start()
-        run_id = secrets.token_hex(16)
         try:
             output = self.run_compose(
-                [
-                    "run",
-                    "--rm",
-                    "--no-deps",
-                    "--pull",
-                    "never",
-                    "--label",
-                    f"{RUN_LABEL}={run_id}",
-                    "--label",
-                    f"{LAB_LABEL}={config.generation}",
-                    "isolation-probe",
-                    "--host-port",
-                    str(host_port),
-                ],
+                [*probe_prefix, "--host-port", str(host_port)],
                 timeout=30,
                 profile="scanners",
             )
@@ -861,12 +890,8 @@ class LabManager:
             accept_thread.join(timeout=1)
 
         try:
-            result = next(
-                json.loads(line)
-                for line in reversed(output.splitlines())
-                if line.lstrip().startswith("{")
-            )
-        except (json.JSONDecodeError, StopIteration) as exc:
+            result = _last_json_object(output)
+        except LabError as exc:
             raise LabError("scanner isolation probe returned no valid receipt") from exc
         if sentinel_hit.is_set():
             result["host_listener_accessible"] = True

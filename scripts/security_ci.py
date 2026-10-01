@@ -72,7 +72,20 @@ def verify_boundaries() -> int:
             "error": sanitize_evidence(str(exc)),
         }
     _write_artifact("auth-boundary.json", result)
-    print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))
+    print(
+        json.dumps(
+            {
+                "kind": "auth-boundary",
+                "coverage_complete": result.get("coverage_complete", False),
+                "check_count": result.get("check_count", 0),
+                "passed_count": result.get("passed_count", 0),
+                "critical_high_count": result.get("critical_high_count", 0),
+                "artifact": "auth-boundary.json",
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+    )
     return 0 if result.get("coverage_complete") else 1
 
 
@@ -134,7 +147,13 @@ def run_profile(profile: str) -> int:
             )
             else 1
         )
-    print(json.dumps({"profile": profile, "error": result.get("error"), "artifact": name}))
+    print(
+        json.dumps(
+            {"profile": profile, "state": "failed", "artifact": name},
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+    )
     return 1
 
 

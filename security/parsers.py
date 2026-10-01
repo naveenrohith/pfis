@@ -15,7 +15,7 @@ MAX_REPORT_BYTES = 8_000_000
 MAX_FINDINGS = 5_000
 MAX_EVIDENCE_CHARS = 1_000
 _HEADER_SECRET = re.compile(
-    r"(?im)^(\s*(?:authorization|proxy-authorization|cookie|set-cookie):\s*).+$"
+    r"(?im)^([ \t]*(?:authorization|proxy-authorization|cookie|set-cookie):[ \t]*)[^\r\n]*"
 )
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
 _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")

@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from tests.pytest.helpers import create_user
+from tests.pytest.helpers import create_user, user_today
 
 
 async def _account(client, user_id: str, account_type: str, suffix: str) -> dict:
@@ -88,7 +88,7 @@ async def _transaction(
     amount: int,
     transaction_type: str,
     transaction_status: str = "settled",
-    transaction_date: date | None = None,
+    transaction_date: date,
     merchant: str = "Contract merchant",
     reviewed: bool = True,
     card_event: str | None = None,
@@ -99,7 +99,7 @@ async def _transaction(
         "amount": amount,
         "transaction_type": transaction_type,
         "transaction_status": transaction_status,
-        "transaction_date": (transaction_date or date.today()).isoformat(),
+        "transaction_date": transaction_date.isoformat(),
         "merchant_raw": merchant,
         "merchant_normalized": merchant,
         "reviewed_flag": reviewed,
@@ -133,7 +133,8 @@ async def test_balance_position_contract_fields_for_bank_cash_and_card(
 ):
     user = await create_user(client, f"position-contract-{account_type}")
     account = await _account(client, user["id"], account_type, account_type[-4:])
-    await _balance(client, user["id"], account["id"], 1000, date.today())
+    financial_today = user_today(user)
+    await _balance(client, user["id"], account["id"], 1000, financial_today)
 
     body = await _position(client, user["id"], account["id"])
 
@@ -147,7 +148,7 @@ async def test_balance_position_contract_fields_for_bank_cash_and_card(
     assert body["observed_source"] == "manual"
     assert body["settled_movement_since_observation"] == 0
     assert body["estimated_balance"] == 1000
-    assert body["estimated_as_of"] == date.today().isoformat()
+    assert body["estimated_as_of"] == financial_today.isoformat()
     assert body["pending_increase"] == 0
     assert body["pending_decrease"] == 0
     assert body["unlinked_count"] == 0
@@ -164,7 +165,8 @@ async def test_balance_position_applies_asset_liability_signs_and_settled_only(c
     user = await create_user(client, "position-contract-signs")
     bank = await _account(client, user["id"], "bank", "7711")
     card = await _account(client, user["id"], "credit_card", "7722")
-    anchor_date = date.today() - timedelta(days=3)
+    financial_today = user_today(user)
+    anchor_date = financial_today - timedelta(days=3)
     await _balance(client, user["id"], bank["id"], 1000, anchor_date)
     await _balance(client, user["id"], card["id"], 1000, anchor_date, source="statement")
 
@@ -174,7 +176,7 @@ async def test_balance_position_applies_asset_liability_signs_and_settled_only(c
         bank["id"],
         amount=100,
         transaction_type="debit",
-        transaction_date=date.today() - timedelta(days=2),
+        transaction_date=financial_today - timedelta(days=2),
     )
     await _transaction(
         client,
@@ -182,7 +184,7 @@ async def test_balance_position_applies_asset_liability_signs_and_settled_only(c
         bank["id"],
         amount=50,
         transaction_type="credit",
-        transaction_date=date.today() - timedelta(days=1),
+        transaction_date=financial_today - timedelta(days=1),
     )
     await _transaction(
         client,
@@ -191,7 +193,7 @@ async def test_balance_position_applies_asset_liability_signs_and_settled_only(c
         amount=25,
         transaction_type="debit",
         transaction_status="pending",
-        transaction_date=date.today(),
+        transaction_date=financial_today,
     )
     await _transaction(
         client,
@@ -199,7 +201,7 @@ async def test_balance_position_applies_asset_liability_signs_and_settled_only(c
         card["id"],
         amount=200,
         transaction_type="debit",
-        transaction_date=date.today() - timedelta(days=2),
+        transaction_date=financial_today - timedelta(days=2),
         card_event="purchase",
     )
     await _transaction(
@@ -208,7 +210,7 @@ async def test_balance_position_applies_asset_liability_signs_and_settled_only(c
         card["id"],
         amount=100,
         transaction_type="credit",
-        transaction_date=date.today() - timedelta(days=1),
+        transaction_date=financial_today - timedelta(days=1),
         card_event="payment",
         payment_rail="transfer",
     )
@@ -219,7 +221,7 @@ async def test_balance_position_applies_asset_liability_signs_and_settled_only(c
         amount=40,
         transaction_type="debit",
         transaction_status="pending",
-        transaction_date=date.today(),
+        transaction_date=financial_today,
         card_event="purchase",
     )
 
@@ -237,13 +239,20 @@ async def test_balance_position_applies_asset_liability_signs_and_settled_only(c
 async def test_balance_position_uses_verified_anchor_and_reports_provisional_snapshot(client):
     user = await create_user(client, "position-contract-provisional")
     account = await _account(client, user["id"], "bank", "7733")
-    await _balance(client, user["id"], account["id"], 1000, date.today() - timedelta(days=1))
+    financial_today = user_today(user)
+    await _balance(
+        client,
+        user["id"],
+        account["id"],
+        1000,
+        financial_today - timedelta(days=1),
+    )
     await _balance(
         client,
         user["id"],
         account["id"],
         5000,
-        date.today(),
+        financial_today,
         verified=False,
         source_record_id="provisional-today",
     )
@@ -263,6 +272,7 @@ async def test_balance_position_uses_verified_anchor_and_reports_provisional_sna
 
 async def test_balance_position_fail_closed_statuses_and_review_counts(client):
     user = await create_user(client, "position-contract-fail-closed")
+    financial_today = user_today(user)
     missing = await _account(client, user["id"], "bank", "7744")
     stale = await _account(client, user["id"], "bank", "7755")
     review = await _account(client, user["id"], "bank", "7766")
@@ -272,7 +282,7 @@ async def test_balance_position_fail_closed_statuses_and_review_counts(client):
     assert missing_position["status"] == "incomplete"
     assert "verified_observation_required" in missing_position["reason_codes"]
 
-    await _balance(client, user["id"], unsupported["id"], 4000, date.today())
+    await _balance(client, user["id"], unsupported["id"], 4000, financial_today)
     unsupported_position = await _position(client, user["id"], unsupported["id"])
     assert unsupported_position["status"] == "unsupported"
     assert "unsupported_product_type" in unsupported_position["reason_codes"]
@@ -283,7 +293,7 @@ async def test_balance_position_fail_closed_statuses_and_review_counts(client):
         user["id"],
         stale["id"],
         2000,
-        date.today() - timedelta(days=1),
+        financial_today - timedelta(days=1),
         source="connector",
         source_record_id="stale-connector-record",
         observed_at=observed_at,
@@ -298,7 +308,13 @@ async def test_balance_position_fail_closed_statuses_and_review_counts(client):
     assert stale_position["coverage_status"] == "overdue"
     assert "balance_observation_overdue" in stale_position["reason_codes"]
 
-    await _balance(client, user["id"], review["id"], 3000, date.today() - timedelta(days=2))
+    await _balance(
+        client,
+        user["id"],
+        review["id"],
+        3000,
+        financial_today - timedelta(days=2),
+    )
     for index in range(2):
         await _transaction(
             client,
@@ -306,7 +322,7 @@ async def test_balance_position_fail_closed_statuses_and_review_counts(client):
             review["id"],
             amount=123,
             transaction_type="debit",
-            transaction_date=date.today() - timedelta(days=1),
+            transaction_date=financial_today - timedelta(days=1),
             merchant="Duplicated merchant",
             reviewed=False,
             reference_id=f"duplicate-{index}",
@@ -317,7 +333,7 @@ async def test_balance_position_fail_closed_statuses_and_review_counts(client):
         review["id"],
         amount=500,
         transaction_type="debit",
-        transaction_date=date.today() - timedelta(days=1),
+        transaction_date=financial_today - timedelta(days=1),
         merchant="Card payment",
         payment_rail="transfer",
         card_event="payment",
@@ -336,7 +352,7 @@ async def test_balance_position_route_preserves_cross_user_ownership(client):
     owner = await create_user(client, "position-contract-owner")
     other = await create_user(client, "position-contract-other")
     account = await _account(client, owner["id"], "bank", "7777")
-    await _balance(client, owner["id"], account["id"], 1000, date.today())
+    await _balance(client, owner["id"], account["id"], 1000, user_today(owner))
 
     denied = await client.get(f"/api/accounts/{account['id']}/position?user_id={other['id']}")
     assert denied.status_code == 404
