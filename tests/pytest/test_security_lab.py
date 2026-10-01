@@ -658,6 +658,7 @@ def test_lab_compose_keeps_scanners_and_greenbone_managers_internal() -> None:
     assert "setcap -r /usr/local/bin/ruby" in metasploit_image
     assert "setcap -r /usr/bin/nmap" in metasploit_image
     assert "chmod a-s /usr/bin/abuild-sudo" in metasploit_image
+    assert "adduser -S -D -H -u 1000 -h /tmp -G pfis pfis" in metasploit_image
     assert "ENTRYPOINT []" in metasploit_image
     for service_name, service in services.items():
         attached = service.get("networks", [])
@@ -1312,6 +1313,7 @@ def test_metasploit_target_uses_fixture_port_and_pinned_runtime_image() -> None:
         "@sha256:a05bb5cac4c4d95b2ebeb972813ce17b2da022d7647c4f17e9537bffa2906ed6"
     )
     assert TOOLS["metasploit"].runtime_image == "pfis-security-metasploit:6.5.5"
+    assert "set TARGET 1; set PAYLOAD cmd/unix/interact;" in command.argv[3]
     assert "set RHOSTS metasploit-fixture; set RPORT 21;" in command.argv[3]
 
 

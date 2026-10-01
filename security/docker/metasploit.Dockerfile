@@ -4,7 +4,11 @@ WORKDIR /usr/src/metasploit-framework
 
 # This assessment uses a fixed outbound TCP module and does not need the
 # upstream image's raw-socket or privileged-port file capabilities.
-RUN setcap -r /usr/local/bin/ruby \
+RUN addgroup -S -g 1000 pfis \
+    && adduser -S -D -H -u 1000 -h /tmp -G pfis pfis \
+    && test "$(id -u pfis)" = "1000" \
+    && test "$(id -g pfis)" = "1000" \
+    && setcap -r /usr/local/bin/ruby \
     && setcap -r /usr/bin/nmap \
     && chmod a-s /usr/bin/abuild-sudo \
     && test -z "$(getcap -r / 2>/dev/null)" \
@@ -12,5 +16,5 @@ RUN setcap -r /usr/local/bin/ruby \
     && test -x ./msfconsole
 
 ENV HOME=/tmp
-USER 1000:1000
+USER pfis:pfis
 ENTRYPOINT []
