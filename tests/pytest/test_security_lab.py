@@ -1315,6 +1315,7 @@ def test_metasploit_target_uses_fixture_port_and_pinned_runtime_image() -> None:
     assert TOOLS["metasploit"].runtime_image == "pfis-security-metasploit:6.5.5"
     assert "set TARGET 1; set PAYLOAD cmd/unix/interact;" in command.argv[3]
     assert "set RHOSTS metasploit-fixture; set RPORT 21;" in command.argv[3]
+    assert "exploit -z; sessions -K;" in command.argv[3]
 
 
 def test_metasploit_fixture_is_restarted_before_and_after_failed_attempt() -> None:
