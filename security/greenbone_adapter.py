@@ -53,9 +53,14 @@ def _safe_cli_error(result: subprocess.CompletedProcess[str]) -> str:
         r"\1\2[redacted]",
         raw,
     )
-    for line in raw.splitlines():
+    for line in reversed(raw.splitlines()):
         candidate = line.strip()
-        if candidate and "<" not in candidate and ">" not in candidate:
+        if (
+            candidate
+            and not candidate.startswith(("Traceback ", "File "))
+            and "<" not in candidate
+            and ">" not in candidate
+        ):
             return candidate[:160]
     return "unclassified gvm-cli error"
 
