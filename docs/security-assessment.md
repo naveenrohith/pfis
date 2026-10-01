@@ -84,6 +84,27 @@ passes:
   disposable exploit fixtures before and after each probe. The successful
   exploit-validation run above confirms both controls after that change.
 
+### Starting-revision triage
+
+Two preliminary runs against `f755c3b` are preserved for comparison but are
+not counted as final branch coverage:
+
+- Application run `55d7fa84619b9d11ce7fa5ff68d4ecef` was incomplete: the
+  synthetic owner login check failed, and ZAP/Nuclei did not produce complete
+  coverage. The subsequent final application run completed all 22 fixed
+  boundary checks and produced no authentication-boundary finding. The earlier
+  login record is resolved; the run remains failed evidence.
+- Baseline run `7a7a037831f6db26a1b6246503eb23d1` parsed four high/critical
+  testssl observations from the generated private-CA certificate. The final
+  branch baseline run classified the equivalent private-CA observations as
+  informational. Those four earlier certificate records are triaged as false
+  positives for PFIS production scope; the medium TLS grade B remains a
+  candidate for staging retest.
+
+The findings database retains these run histories and triage notes. Earlier
+failure or out-of-scope certificate observations are not silently treated as
+passing scans.
+
 ## Findings and disposition
 
 ### PFIS application
