@@ -722,6 +722,20 @@ def test_greenbone_adapter_sanitizes_manager_errors(
     )
     assert "secret-value" not in diagnostic
     assert diagnostic == "Request denied for token=[redacted]"
+    traceback = greenbone_adapter._safe_cli_error(
+        subprocess.CompletedProcess(
+            ["gvm-cli"],
+            1,
+            stdout="",
+            stderr=(
+                "Traceback (most recent call last):\n"
+                '  File "/usr/local/bin/gvm-cli", line 8, in <module>\n'
+                "TypeError: object of type 'NoneType' has no len() for secret=secret-value"
+            ),
+        )
+    )
+    assert 'File "/usr/local/bin/gvm-cli", line 8' in traceback
+    assert "secret-value" not in traceback
 
 
 def test_network_verification_allows_named_greenbone_volumes_but_rejects_host_binds(

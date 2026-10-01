@@ -53,7 +53,9 @@ def _safe_cli_error(result: subprocess.CompletedProcess[str]) -> str:
         r"\1\2[redacted]",
         raw,
     )
-    for line in reversed(raw.splitlines()):
+    lines = raw.splitlines()
+    frames = [line.strip() for line in lines if re.match(r"\s*File \"[^\"]+\", line \d+", line)]
+    for line in reversed(lines):
         candidate = line.strip()
         if (
             candidate
@@ -61,6 +63,8 @@ def _safe_cli_error(result: subprocess.CompletedProcess[str]) -> str:
             and "<" not in candidate
             and ">" not in candidate
         ):
+            if frames:
+                return f"{frames[-1][:100]}: {candidate[:120]}"
             return candidate[:160]
     return "unclassified gvm-cli error"
 
