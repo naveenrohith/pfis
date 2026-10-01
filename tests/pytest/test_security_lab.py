@@ -44,8 +44,7 @@ from security.store import SecurityStore
 from security.tools import NMAP_SCRIPT_ALLOWLIST, build_tool_command, commands_for_profile
 from security.zap_api_hooks import (
     _build_csrf_probe_request,
-    _has_csrf_header_mirroring,
-    _has_csrf_validation_response,
+    _has_csrf_probe_status,
     _response_status_code,
 )
 from security.zap_authenticated import (
@@ -157,11 +156,23 @@ def test_zap_csrf_hook_is_fixed_to_registered_host_and_sender_engine(
         zap_api_hooks.zap_started(zap, str(tmp_path / "different-openapi.json"))
 
 
-def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> None:
+def test_zap_csrf_probe_requires_registered_status_responses() -> None:
     probe_request = _build_csrf_probe_request(
         "__Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value"
     )
     assert "X-CSRF-Token: csrf-value\r\n" in probe_request
+    headerless_request = _build_csrf_probe_request(
+        "__Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value",
+        include_csrf_header=False,
+    )
+    assert "X-CSRF-Token:" not in headerless_request
+    denial_request = _build_csrf_probe_request(
+        "__Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value",
+        include_csrf_cookie=False,
+        include_csrf_header=False,
+    )
+    assert "Cookie: __Host-pfis-session=session-value\r\n" in denial_request
+    assert "__Host-pfis-csrf=" not in denial_request
 
     request = (
         "POST /api/transactions/?user_id=00000000-0000-4000-8000-000000000001 HTTP/1.1\r\n"
@@ -170,22 +181,23 @@ def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> N
         "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
         "X-CSRF-Token: csrf-value\r\n"
     )
-    assert _has_csrf_validation_response(
-        [{"requestHeader": request, "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n"}]
+    assert _has_csrf_probe_status(
+        [{"requestHeader": request, "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n"}],
+        422,
     )
-    assert _has_csrf_header_mirroring([{"requestHeader": request}])
     absolute_request = request.replace(
         "POST /api/transactions/", "POST https://pfis.test/api/transactions/"
     )
-    assert _has_csrf_validation_response(
+    assert _has_csrf_probe_status(
         [
             {
                 "requestHeader": absolute_request,
                 "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
             }
-        ]
+        ],
+        422,
     )
-    assert not _has_csrf_validation_response(
+    assert not _has_csrf_probe_status(
         [
             {
                 "requestHeader": absolute_request.replace(
@@ -193,9 +205,10 @@ def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> N
                 ),
                 "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
             }
-        ]
+        ],
+        422,
     )
-    assert not _has_csrf_validation_response(
+    assert not _has_csrf_probe_status(
         [
             {
                 "requestHeader": absolute_request.replace(
@@ -203,23 +216,11 @@ def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> N
                 ),
                 "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
             }
-        ]
+        ],
+        422,
     )
-    assert not _has_csrf_validation_response(
-        [{"requestHeader": request, "responseHeader": "HTTP/1.1 403 Forbidden\r\n"}]
-    )
-    assert not _has_csrf_validation_response(
-        [
-            {
-                "requestHeader": request.replace(
-                    "X-CSRF-Token: csrf-value", "X-CSRF-Token: different-token"
-                ),
-                "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
-            }
-        ]
-    )
-    assert not _has_csrf_header_mirroring(
-        [{"requestHeader": request.replace("X-CSRF-Token: csrf-value", "X-CSRF-Token: other")}]
+    assert not _has_csrf_probe_status(
+        [{"requestHeader": request, "responseHeader": "HTTP/1.1 403 Forbidden\r\n"}], 422
     )
     with pytest.raises(RuntimeError, match="valid PFIS CSRF cookie"):
         _build_csrf_probe_request("__Host-pfis-session=session-value")
@@ -239,36 +240,28 @@ def test_zap_pre_shutdown_reads_the_latest_csrf_probe_message(
         "Host: pfis.test\r\n"
         "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
     )
-    probe_message: dict[str, str] = {}
+    probe_messages: list[dict[str, str]] = []
 
     class _CoreApi:
         def messages(self, _target: str, start: int, count: int) -> list[dict[str, str]]:
             if start == 0:
                 assert count == 10_000
                 return [{"requestHeader": scanned_request}]
-            if start == 10_000:
-                assert count == 1
-                return [probe_message]
-            raise AssertionError(f"unexpected ZAP history page: {start}, {count}")
+            assert count == 1
+            return [probe_messages[-1]]
 
         def number_of_messages(self, _target: str) -> int:
-            return 10_001
+            return 10_001 + len(probe_messages)
 
         def send_request(self, request: str, *, followredirects: bool) -> str:
             assert followredirects is False
             assert "X-CSRF-Token:" not in request
-            # Model the registered HTTP Sender script, which inserts the header
-            # before the request is sent and recorded by ZAP.
-            request = request.replace(
-                "__Host-pfis-csrf=csrf-value\r\n",
-                "__Host-pfis-csrf=csrf-value\r\nX-CSRF-Token: csrf-value\r\n",
+            response = (
+                "HTTP/1.1 422 Unprocessable Entity\r\n"
+                if "__Host-pfis-csrf=csrf-value" in request
+                else "HTTP/1.1 403 Forbidden\r\n"
             )
-            probe_message.update(
-                {
-                    "requestHeader": request,
-                    "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
-                }
-            )
+            probe_messages.append({"requestHeader": request, "responseHeader": response})
             return "request and response text"
 
     class _Zap:
@@ -276,6 +269,8 @@ def test_zap_pre_shutdown_reads_the_latest_csrf_probe_message(
 
     zap_api_hooks.zap_pre_shutdown(_Zap())
     assert hook_state.read_text(encoding="ascii") == "csrf_validation_verified"
+    assert "__Host-pfis-csrf=" not in probe_messages[0]["requestHeader"]
+    assert "__Host-pfis-csrf=csrf-value" in probe_messages[1]["requestHeader"]
 
 
 def test_zap_csrf_probe_fails_when_sender_does_not_mirror_the_cookie(
@@ -288,30 +283,27 @@ def test_zap_csrf_probe_fails_when_sender_does_not_mirror_the_cookie(
         "Host: pfis.test\r\n"
         "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
     )
-    probe_message: dict[str, str] = {}
+    probe_messages: list[dict[str, str]] = []
 
     class _CoreApi:
         def messages(self, _target: str, start: int, count: int) -> list[dict[str, str]]:
             assert count == (10_000 if start == 0 else 1)
-            return [{"requestHeader": initial_request}] if start == 0 else [probe_message]
+            return [{"requestHeader": initial_request}] if start == 0 else [probe_messages[-1]]
 
         def number_of_messages(self, _target: str) -> int:
-            return 10_001
+            return 10_001 + len(probe_messages)
 
         def send_request(self, request: str, *, followredirects: bool) -> str:
             assert followredirects is False
-            probe_message.update(
-                {
-                    "requestHeader": request,
-                    "responseHeader": "HTTP/1.1 403 Forbidden\r\n",
-                }
+            probe_messages.append(
+                {"requestHeader": request, "responseHeader": "HTTP/1.1 403 Forbidden\r\n"}
             )
             return "request and response text"
 
     class _Zap:
         core = _CoreApi()
 
-    with pytest.raises(RuntimeError, match="sender probe"):
+    with pytest.raises(RuntimeError, match="CSRF sender did not reach"):
         zap_api_hooks.zap_pre_shutdown(_Zap())
     assert hook_state.read_text(encoding="ascii") == "csrf_status_403"
 
