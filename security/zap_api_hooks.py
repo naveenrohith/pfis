@@ -159,6 +159,8 @@ def _parse_cookie_header(value: str) -> dict[str, str]:
 def _has_csrf_header_mirroring(messages: list[dict[str, Any]]) -> bool:
     for message in messages:
         request = str(message.get("requestHeader", ""))
+        if not _has_registered_host_and_origin(request):
+            continue
         cookie_line = re.search(r"(?im)^Cookie:\s*([^\r\n]+)", request)
         token_line = re.search(r"(?im)^X-CSRF-Token:\s*([^\r\n]+)", request)
         if cookie_line is None or token_line is None:
@@ -172,7 +174,7 @@ def _has_csrf_header_mirroring(messages: list[dict[str, Any]]) -> bool:
 def _has_csrf_validation_response(messages: list[dict[str, Any]]) -> bool:
     for message in messages:
         request = str(message.get("requestHeader", ""))
-        if not request.startswith(f"POST {CSRF_PROBE_PATH} "):
+        if not _is_csrf_probe_request(request) or not _has_registered_host_and_origin(request):
             continue
         cookie_line = re.search(r"(?im)^Cookie:\s*([^\r\n]+)", request)
         token_line = re.search(r"(?im)^X-CSRF-Token:\s*([^\r\n]+)", request)
@@ -185,6 +187,41 @@ def _has_csrf_validation_response(messages: list[dict[str, Any]]) -> bool:
         if re.search(r"(?m)^HTTP/\S+\s+422\b", response):
             return True
     return False
+
+
+def _is_csrf_probe_request(request: str) -> bool:
+    request_line = request.splitlines()[0] if request else ""
+    parts = request_line.split()
+    if len(parts) != 3 or parts[0] != "POST" or not parts[2].startswith("HTTP/"):
+        return False
+    target = parts[1]
+    if target.startswith("/"):
+        return target == CSRF_PROBE_PATH
+    try:
+        parsed = urlsplit(target)
+        path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        return (
+            parsed.scheme == "https"
+            and parsed.hostname == "pfis.test"
+            and parsed.port in {None, 443}
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.fragment
+            and path == CSRF_PROBE_PATH
+        )
+    except ValueError:
+        return False
+
+
+def _has_registered_host_and_origin(request: str) -> bool:
+    host_line = re.search(r"(?im)^Host:\s*([^\r\n]+)", request)
+    origin_line = re.search(r"(?im)^Origin:\s*([^\r\n]+)", request)
+    return (
+        host_line is not None
+        and host_line.group(1).strip().lower() in {"pfis.test", "pfis.test:443"}
+        and origin_line is not None
+        and origin_line.group(1).strip() == REGISTERED_ORIGIN
+    )
 
 
 def _response_status_code(message: object) -> str:

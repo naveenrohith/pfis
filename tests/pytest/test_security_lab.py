@@ -165,6 +165,8 @@ def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> N
 
     request = (
         "POST /api/transactions/?user_id=00000000-0000-4000-8000-000000000001 HTTP/1.1\r\n"
+        "Host: pfis.test\r\n"
+        "Origin: https://pfis.test\r\n"
         "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
         "X-CSRF-Token: csrf-value\r\n"
     )
@@ -172,6 +174,37 @@ def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> N
         [{"requestHeader": request, "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n"}]
     )
     assert _has_csrf_header_mirroring([{"requestHeader": request}])
+    absolute_request = request.replace(
+        "POST /api/transactions/", "POST https://pfis.test/api/transactions/"
+    )
+    assert _has_csrf_validation_response(
+        [
+            {
+                "requestHeader": absolute_request,
+                "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
+            }
+        ]
+    )
+    assert not _has_csrf_validation_response(
+        [
+            {
+                "requestHeader": absolute_request.replace(
+                    "https://pfis.test/", "https://other.invalid/"
+                ),
+                "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
+            }
+        ]
+    )
+    assert not _has_csrf_validation_response(
+        [
+            {
+                "requestHeader": absolute_request.replace(
+                    "Origin: https://pfis.test", "Origin: https://other.invalid"
+                ),
+                "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
+            }
+        ]
+    )
     assert not _has_csrf_validation_response(
         [{"requestHeader": request, "responseHeader": "HTTP/1.1 403 Forbidden\r\n"}]
     )
@@ -203,6 +236,8 @@ def test_zap_pre_shutdown_reads_the_latest_csrf_probe_message(
     monkeypatch.setattr(zap_api_hooks, "HOOK_STATE_PATH", hook_state)
     scanned_request = (
         "POST /api/transactions/ HTTP/1.1\r\n"
+        "Host: pfis.test\r\n"
+        "Origin: https://pfis.test\r\n"
         "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
         "X-CSRF-Token: csrf-value\r\n"
     )
