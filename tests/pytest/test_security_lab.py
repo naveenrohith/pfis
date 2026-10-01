@@ -141,8 +141,15 @@ def test_zap_csrf_hook_is_fixed_to_registered_host_and_sender_engine(
     )
     assert zap.script.enabled == "pfis-lab-csrf-cookie-header"
 
+    profile_path = tmp_path / "pfis-zap-application-openapi.json"
+    profile_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(zap_api_hooks, "OPENAPI_PROFILE_PATH", profile_path)
+    zap_api_hooks.zap_started(zap, str(profile_path))
+
     with pytest.raises(RuntimeError, match="unregistered target"):
         zap_api_hooks.zap_started(zap, "https://pfis.test.attacker.invalid/")
+    with pytest.raises(RuntimeError, match="unregistered target"):
+        zap_api_hooks.zap_started(zap, str(tmp_path / "different-openapi.json"))
 
 
 def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> None:

@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 REGISTERED_ORIGIN = "https://pfis.test"
+OPENAPI_PROFILE_PATH = Path("/tmp/pfis-zap-application-openapi.json")
 CSRF_SCRIPT_NAME = "pfis-lab-csrf-cookie-header"
 CSRF_SCRIPT_PATH = "/opt/pfis/zap_csrf_cookie_header.js"
 CSRF_COOKIE_NAME = "__Host-pfis-csrf"
@@ -40,17 +41,28 @@ def _record_hook_state(state: str) -> None:
         HOOK_STATE_PATH.write_text(state, encoding="ascii")
 
 
+def _is_registered_scan_target(target: str) -> bool:
+    """Accept PFIS HTTPS or the one prevalidated OpenAPI file used by API Scan."""
+    parsed = urlsplit(target)
+    if "://" in target:
+        return (
+            parsed.scheme == "https"
+            and parsed.hostname == "pfis.test"
+            and parsed.port in {None, 443}
+            and parsed.username is None
+            and parsed.password is None
+        )
+    try:
+        supplied_path = Path(target)
+        return supplied_path.resolve() == OPENAPI_PROFILE_PATH.resolve() and supplied_path.is_file()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def zap_started(zap: Any, target: str) -> None:
     """Load the reviewed sender script into only the fixed PFIS scan target."""
     _record_hook_state("zap_started")
-    parsed = urlsplit(target)
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname != "pfis.test"
-        or parsed.port not in {None, 443}
-        or parsed.username is not None
-        or parsed.password is not None
-    ):
+    if not _is_registered_scan_target(target):
         raise RuntimeError("PFIS CSRF sender hook received an unregistered target")
     _record_hook_state("target_verified")
     if not Path(CSRF_SCRIPT_PATH).is_file():
