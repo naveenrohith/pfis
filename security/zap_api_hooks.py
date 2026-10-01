@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -13,10 +14,35 @@ CSRF_SCRIPT_PATH = "/opt/pfis/zap_csrf_cookie_header.js"
 CSRF_COOKIE_NAME = "__Host-pfis-csrf"
 SESSION_COOKIE_NAME = "__Host-pfis-session"
 CSRF_PROBE_PATH = "/api/transactions/?user_id=00000000-0000-4000-8000-000000000001"
+HOOK_STATE_PATH = Path("/tmp/pfis-zap-hook-state.txt")
+HOOK_STATES = frozenset(
+    {
+        "zap_started",
+        "target_verified",
+        "script_available",
+        "graal_engine_verified",
+        "sender_enabled",
+        "pre_shutdown_started",
+        "auth_cookies_observed",
+        "csrf_probe_sent",
+        "csrf_validation_verified",
+        "auth_cookies_missing",
+        "csrf_validation_missing",
+    }
+)
+
+
+def _record_hook_state(state: str) -> None:
+    """Keep only a fixed, credential-free lifecycle marker for scanner diagnostics."""
+    if state not in HOOK_STATES:
+        return
+    with suppress(OSError):
+        HOOK_STATE_PATH.write_text(state, encoding="ascii")
 
 
 def zap_started(zap: Any, target: str) -> None:
     """Load the reviewed sender script into only the fixed PFIS scan target."""
+    _record_hook_state("zap_started")
     parsed = urlsplit(target)
     if (
         parsed.scheme != "https"
@@ -26,11 +52,14 @@ def zap_started(zap: Any, target: str) -> None:
         or parsed.password is not None
     ):
         raise RuntimeError("PFIS CSRF sender hook received an unregistered target")
+    _record_hook_state("target_verified")
     if not Path(CSRF_SCRIPT_PATH).is_file():
         raise RuntimeError("the pinned PFIS CSRF sender script is missing")
+    _record_hook_state("script_available")
     engines = zap.script.list_engines
     if not any(str(engine).endswith(" : Graal.js") for engine in engines):
         raise RuntimeError("the pinned ZAP image does not provide the Graal.js engine")
+    _record_hook_state("graal_engine_verified")
     zap.script.load(
         CSRF_SCRIPT_NAME,
         "httpsender",
@@ -39,12 +68,19 @@ def zap_started(zap: Any, target: str) -> None:
         "Copies the registered PFIS CSRF cookie into the request header.",
     )
     zap.script.enable(CSRF_SCRIPT_NAME)
+    _record_hook_state("sender_enabled")
 
 
 def zap_pre_shutdown(zap: Any) -> None:
     """Prove an in-scope cookie mutation passes CSRF and reaches validation."""
+    _record_hook_state("pre_shutdown_started")
     messages = zap.core.messages(REGISTERED_ORIGIN, 0, 10_000)
-    cookie_header = _authenticated_cookie_header(messages)
+    try:
+        cookie_header = _authenticated_cookie_header(messages)
+    except RuntimeError:
+        _record_hook_state("auth_cookies_missing")
+        raise
+    _record_hook_state("auth_cookies_observed")
     request = (
         f"POST {CSRF_PROBE_PATH} HTTP/1.1\r\n"
         "Host: pfis.test\r\n"
@@ -55,9 +91,12 @@ def zap_pre_shutdown(zap: Any) -> None:
         "Connection: close\r\n\r\n{}"
     )
     zap.core.send_request(request, followredirects=False)
+    _record_hook_state("csrf_probe_sent")
     messages = zap.core.messages(REGISTERED_ORIGIN, 0, 10_000)
     if not _has_csrf_validation_response(messages):
+        _record_hook_state("csrf_validation_missing")
         raise RuntimeError("authenticated ZAP did not pass its CSRF probe to PFIS validation")
+    _record_hook_state("csrf_validation_verified")
 
 
 def _authenticated_cookie_header(messages: list[dict[str, Any]]) -> str:

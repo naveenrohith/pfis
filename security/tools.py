@@ -135,7 +135,9 @@ def build_tool_command(tool_id: str, target_id: str, profile_id: str) -> ToolCom
             "set RHOSTS metasploit-fixture; set RPORT 21; "
             "set WfsDelay 1; exploit -j; sleep 2; sessions -K; exit -y"
         )
-        return ToolCommand(tool_id, target_id, ("-q", "-x", resource_commands), 180)
+        # The pinned Rapid7 image entrypoint drops privileges and expects its
+        # command to include the working-directory-relative console executable.
+        return ToolCommand(tool_id, target_id, ("./msfconsole", "-q", "-x", resource_commands), 180)
 
     if tool_id == "greenbone" and target_id == "pfis-web":
         return ToolCommand(tool_id, target_id, ("scan", "--target-id", "pfis-web"), 3600)

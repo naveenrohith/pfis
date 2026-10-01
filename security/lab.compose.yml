@@ -228,9 +228,8 @@ services:
     tmpfs:
     - /tmp:rw,noexec,nosuid,size=512m
     image: metasploitframework/metasploit-framework:latest@sha256:a05bb5cac4c4d95b2ebeb972813ce17b2da022d7647c4f17e9537bffa2906ed6
-    entrypoint:
-    - msfconsole
     command:
+    - ./msfconsole
     - --version
     profiles:
     - scanners

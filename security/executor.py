@@ -25,11 +25,22 @@ AUTHENTICATION_FAILURE_PATTERNS = (
     ),
     re.compile(r"(?i)\b(?:failed|rejected|denied)\s+(?:authentication|auth)\b"),
 )
+MISSING_IMAGE_PATTERNS = (
+    re.compile(r"(?i)\bno such image\s*:"),
+    re.compile(r"(?i)\bpull access denied for\b"),
+    re.compile(r"(?i)\bmanifest for [^\r\n]+ not found\b"),
+    re.compile(r"(?i)\bfailed to resolve reference\b[^\r\n]*\bnot found\b"),
+)
 
 
 def _is_authentication_failure(output: str) -> bool:
     """Require an explicit auth failure; scanner log mentions of auth are common."""
     return any(pattern.search(output) for pattern in AUTHENTICATION_FAILURE_PATTERNS)
+
+
+def _is_missing_image_error(output: str) -> bool:
+    """Recognize Docker image-resolution errors without masking tool failures."""
+    return any(pattern.search(output) for pattern in MISSING_IMAGE_PATTERNS)
 
 
 @dataclass(frozen=True)
@@ -189,9 +200,7 @@ class ComposeToolExecutor:
         error = ""
         if status == "failed" and _is_authentication_failure(output):
             status = "authentication_failure"
-        elif status == "failed" and (
-            "not found" in output.lower() or "pull access denied" in output.lower()
-        ):
+        elif status == "failed" and _is_missing_image_error(output):
             error = "required scanner image is unavailable; assessment did not pass"
         return ProcessOutcome(status, exit_code, output, time.monotonic() - started, error)
 

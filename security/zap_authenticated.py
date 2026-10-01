@@ -41,6 +41,7 @@ CONTEXT_FILE = Path("/tmp/pfis-zap-context.xml")
 REPORT_FILE = Path("/zap/wrk/pfis-zap-report.json")
 ZAP_LOG_FILE = Path("/tmp/zap.out")
 ZAP_DATA_DIRECTORY = Path("/tmp/zap-data")
+HOOK_STATE_FILE = Path("/tmp/pfis-zap-hook-state.txt")
 API_MINIMAL_POLICY_SOURCE = Path("/home/zap/.ZAP/policies/API-Minimal.policy")
 ROOT_CA_FILE = Path("/tmp/pfis-lab-root.crt")
 TRUSTSTORE_FILE = Path("/tmp/pfis-truststore.p12")
@@ -284,6 +285,17 @@ def _safe_scan_diagnostic(output: str) -> str:
             details.append(safe_line)
     fragments = names + list(dict.fromkeys(exception_details[-3:] + details[-2:]))
     return "; ".join(fragments)[:700] or "scanner reported an incomplete result"
+
+
+def _hook_state_diagnostic(path: Path = HOOK_STATE_FILE) -> str:
+    """Read the hook's bounded phase marker without exposing requests or credentials."""
+    try:
+        if path.stat().st_size > 64:
+            return ""
+        state = path.read_text(encoding="ascii").strip()
+    except OSError:
+        return ""
+    return state if re.fullmatch(r"[a-z_]{1,64}", state) else ""
 
 
 def _safe_diagnostic_url(value: str) -> str:
@@ -625,6 +637,9 @@ def _run_scan(preflight_diagnostic: str) -> int:
             if secret:
                 output = output.replace(secret, "[redacted]")
         diagnostic = _safe_scan_diagnostic(output)
+        hook_state = _hook_state_diagnostic()
+        if hook_state:
+            diagnostic = f"{diagnostic}; hook_state={hook_state}"
         suffix = f"; {diagnostic}; {preflight_diagnostic}" if diagnostic else ""
         raise ZapError(f"authenticated ZAP API scan exited with code {scan.returncode}{suffix}")
     if len(scan.stdout or b"") > MAX_NORMALIZED_REPORT_BYTES:
@@ -674,6 +689,7 @@ def main() -> int:
     finally:
         if daemon is not None:
             _stop_daemon(daemon)
+        HOOK_STATE_FILE.unlink(missing_ok=True)
         CONTEXT_FILE.unlink(missing_ok=True)
         REPORT_FILE.unlink(missing_ok=True)
         OPENAPI_PROFILE_FILE.unlink(missing_ok=True)

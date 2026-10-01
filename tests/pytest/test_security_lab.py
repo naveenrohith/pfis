@@ -21,6 +21,7 @@ from security.controller import COOKIE_NAME, create_controller
 from security.executor import (
     ComposeToolExecutor,
     _is_authentication_failure,
+    _is_missing_image_error,
     _safe_process_environment,
 )
 from security.isolation_probe import run as run_isolation_probe
@@ -50,6 +51,7 @@ from security.zap_authenticated import (
     _auth_preflight_succeeded,
     _compact_zap_report,
     _filter_openapi_spec,
+    _hook_state_diagnostic,
     _java_environment,
     _prepare_scan_policy,
     _prepare_truststore,
@@ -204,6 +206,9 @@ def test_scanner_commands_are_registry_bound_and_nmap_scripts_allowlisted() -> N
     assert frontend[0] in commands_for_profile("full")
     sqlmap = build_tool_command("sqlmap", "sqli-fixture", "exploit-validation")
     assert "--delay=0.2" in sqlmap.argv
+    metasploit = build_tool_command("metasploit", "metasploit-fixture", "exploit-validation")
+    assert metasploit.argv[:3] == ("./msfconsole", "-q", "-x")
+    assert "metasploit-fixture" in metasploit.argv[3]
 
 
 def test_zap_report_projection_discards_raw_requests_and_bounds_evidence() -> None:
@@ -315,6 +320,22 @@ def test_scanner_log_mentions_do_not_become_authentication_failures() -> None:
     assert _is_authentication_failure("synthetic PFIS user failed ZAP authentication preflight")
 
 
+def test_scanner_module_errors_are_not_misreported_as_missing_images() -> None:
+    assert not _is_missing_image_error('exec: "msfconsole": executable file not found in $PATH')
+    assert not _is_missing_image_error("Exploit module not found")
+    assert _is_missing_image_error("Error response from daemon: no such image: example:tag")
+
+
+def test_zap_hook_diagnostics_accept_only_bounded_safe_stage_markers(tmp_path: Path) -> None:
+    marker = tmp_path / "hook-state"
+    marker.write_text("graal_engine_verified", encoding="ascii")
+    assert _hook_state_diagnostic(marker) == "graal_engine_verified"
+    marker.write_text("csrf_token=synthetic-secret", encoding="ascii")
+    assert _hook_state_diagnostic(marker) == ""
+    marker.write_text("x" * 65, encoding="ascii")
+    assert _hook_state_diagnostic(marker) == ""
+
+
 def test_authenticated_zap_installs_bounded_bundled_scan_policy(tmp_path: Path) -> None:
     source = tmp_path / "image-policy"
     data_directory = tmp_path / "zap-data"
@@ -410,6 +431,8 @@ def test_lab_compose_keeps_scanners_and_greenbone_managers_internal() -> None:
     )
     assert networks["feed-egress"].get("internal", False) is False
     assert services["zap-api"]["healthcheck"] == {"disable": True}
+    assert "entrypoint" not in services["metasploit"]
+    assert services["metasploit"]["command"] == ["./msfconsole", "--version"]
     for service_name, service in services.items():
         attached = service.get("networks", [])
         if isinstance(attached, dict):
