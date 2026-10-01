@@ -43,6 +43,7 @@ from security.scope import ScopeViolation, resolve_targets, resolve_url, validat
 from security.store import SecurityStore
 from security.tools import NMAP_SCRIPT_ALLOWLIST, build_tool_command, commands_for_profile
 from security.zap_api_hooks import (
+    _authenticated_cookie_header,
     _build_csrf_probe_request,
     _has_csrf_probe_status,
     _response_status_code,
@@ -230,6 +231,26 @@ def test_zap_csrf_probe_requires_registered_status_responses() -> None:
     assert _response_status_code({"responseHeader": "not-an-http-response"}) == ""
 
 
+def test_zap_auth_cookie_discovery_accepts_authenticated_read_requests() -> None:
+    request = (
+        "GET /api/auth/me HTTP/1.1\r\n"
+        "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
+    )
+    assert _authenticated_cookie_header([{"requestHeader": request}]) == (
+        "__Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value"
+    )
+
+    login_response = (
+        "HTTP/1.1 200 OK\r\n"
+        "Set-Cookie: __Host-pfis-session=session-value; Path=/; HttpOnly\r\n"
+        "Set-Cookie: __Host-pfis-csrf=csrf-value; Path=/\r\n"
+    )
+    assert _authenticated_cookie_header([{"responseHeader": login_response}]) == (
+        "__Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value"
+    )
+    assert _response_status_code("POST /probe HTTP/1.1\r\nHTTP/1.1 403 Forbidden\r\n") == "403"
+
+
 def test_zap_pre_shutdown_reads_the_latest_csrf_probe_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -305,7 +326,36 @@ def test_zap_csrf_probe_fails_when_sender_does_not_mirror_the_cookie(
 
     with pytest.raises(RuntimeError, match="CSRF sender did not reach"):
         zap_api_hooks.zap_pre_shutdown(_Zap())
-    assert hook_state.read_text(encoding="ascii") == "csrf_status_403"
+    assert hook_state.read_text(encoding="ascii") == (
+        "csrf_validation_status_403_observed1_auth0_session1_cookie1_token0_origin1_host1_path1"
+    )
+
+
+def test_zap_csrf_probe_failure_marker_identifies_denial_stage_without_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hook_state = tmp_path / "hook-state.txt"
+    monkeypatch.setattr(zap_api_hooks, "HOOK_STATE_PATH", hook_state)
+    request = _build_csrf_probe_request(
+        "__Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value",
+        include_csrf_cookie=False,
+        include_csrf_header=False,
+    )
+
+    zap_api_hooks._record_probe_failure(
+        "denial",
+        [
+            {
+                "requestHeader": request,
+                "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
+            }
+        ],
+    )
+
+    assert hook_state.read_text(encoding="ascii") == (
+        "csrf_denial_status_422_observed1_auth0_session1_cookie0_token0_origin1_host1_path1"
+    )
+    assert "session-value" not in hook_state.read_text(encoding="ascii")
 
 
 def test_scanner_commands_are_registry_bound_and_nmap_scripts_allowlisted() -> None:
@@ -471,7 +521,12 @@ def test_zap_hook_diagnostics_accept_only_bounded_safe_stage_markers(tmp_path: P
     assert _hook_state_diagnostic(marker) == "graal_engine_verified"
     marker.write_text("csrf_token=synthetic-secret", encoding="ascii")
     assert _hook_state_diagnostic(marker) == ""
-    marker.write_text("x" * 65, encoding="ascii")
+    safe_csrf_state = (
+        "csrf_denial_status_422_observed1_auth0_session1_cookie0_token0_origin1_host1_path1"
+    )
+    marker.write_text(safe_csrf_state, encoding="ascii")
+    assert _hook_state_diagnostic(marker) == safe_csrf_state
+    marker.write_text("x" * 129, encoding="ascii")
     assert _hook_state_diagnostic(marker) == ""
 
 

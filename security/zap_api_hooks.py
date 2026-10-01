@@ -38,7 +38,10 @@ HOOK_STATES = frozenset(
 
 def _record_hook_state(state: str) -> None:
     """Keep only a fixed, credential-free lifecycle marker for scanner diagnostics."""
-    if state not in HOOK_STATES and not re.fullmatch(r"csrf_status_[0-9]{3}", state):
+    if state not in HOOK_STATES and not re.fullmatch(
+        r"csrf_(?:denial|validation)_status_[0-9]{3}_observed[01]_auth[01]_session[01]_cookie[01]_token[01]_origin[01]_host[01]_path[01]",
+        state,
+    ):
         return
     with suppress(OSError):
         HOOK_STATE_PATH.write_text(state, encoding="ascii")
@@ -105,21 +108,21 @@ def zap_pre_shutdown(zap: Any) -> None:
         _record_hook_state("auth_cookies_missing")
         raise
 
-    zap.core.send_request(denial_probe, followredirects=False)
+    denial_response = zap.core.send_request(denial_probe, followredirects=False)
     _record_hook_state("csrf_probe_sent")
     messages = _latest_message(zap, REGISTERED_ORIGIN)
-    if not _has_csrf_probe_status(messages, 403):
-        status_code = _response_status_code(messages[0] if messages else None)
-        _record_hook_state(f"csrf_status_{status_code}" if status_code else "csrf_response_missing")
+    status_code = _response_status_code(denial_response)
+    if status_code != "403" and not _has_csrf_probe_status(messages, 403):
+        _record_probe_failure("denial", messages, status_code, denial_probe)
         raise RuntimeError("PFIS did not reject the CSRF probe without its CSRF cookie")
     _record_hook_state("csrf_denial_verified")
 
-    zap.core.send_request(accepted_probe, followredirects=False)
+    accepted_response = zap.core.send_request(accepted_probe, followredirects=False)
     _record_hook_state("csrf_probe_sent")
     messages = _latest_message(zap, REGISTERED_ORIGIN)
-    if not _has_csrf_probe_status(messages, 422):
-        status_code = _response_status_code(messages[0] if messages else None)
-        _record_hook_state(f"csrf_status_{status_code}" if status_code else "csrf_response_missing")
+    status_code = _response_status_code(accepted_response)
+    if status_code != "422" and not _has_csrf_probe_status(messages, 422):
+        _record_probe_failure("validation", messages, status_code, accepted_probe)
         raise RuntimeError("authenticated ZAP CSRF sender did not reach PFIS validation")
     _record_hook_state("csrf_validation_verified")
 
@@ -139,7 +142,7 @@ def _build_csrf_probe_request(
     if include_csrf_cookie:
         probe_cookie_header += f"; {CSRF_COOKIE_NAME}={csrf_token}"
     return (
-        f"POST {CSRF_PROBE_PATH} HTTP/1.1\r\n"
+        f"POST {REGISTERED_ORIGIN}{CSRF_PROBE_PATH} HTTP/1.1\r\n"
         "Host: pfis.test\r\n"
         f"Origin: {REGISTERED_ORIGIN}\r\n"
         "Content-Type: application/json\r\n"
@@ -153,12 +156,18 @@ def _build_csrf_probe_request(
 def _authenticated_cookie_header(messages: list[dict[str, Any]]) -> str:
     for message in messages:
         request = str(message.get("requestHeader", ""))
-        if not request.startswith("POST "):
-            continue
-        cookie_line = re.search(r"(?im)^Cookie:\s*([^\r\n]+)", request)
-        if cookie_line is None:
-            continue
-        cookies = _parse_cookie_header(cookie_line.group(1))
+        response = str(message.get("responseHeader", ""))
+        request_line = request.splitlines()[0] if request else ""
+        request_parts = request_line.split()
+        cookies: dict[str, str] = {}
+        if len(request_parts) == 3 and request_parts[0] in {"GET", "POST", "PATCH", "PUT"}:
+            cookie_line = re.search(r"(?im)^Cookie:\s*([^\r\n]+)", request)
+            if cookie_line is not None:
+                cookies.update(_parse_cookie_header(cookie_line.group(1)))
+        for name, value in re.findall(
+            r"(?im)^Set-Cookie:\s*(__Host-pfis-(?:session|csrf))=([^;\r\n]*)", response
+        ):
+            cookies[name] = value
         if CSRF_COOKIE_NAME in cookies and SESSION_COOKIE_NAME in cookies:
             values = (cookies[SESSION_COOKIE_NAME], cookies[CSRF_COOKIE_NAME])
             if any(not value or re.search(r"[\r\n;]", value) for value in values):
@@ -221,12 +230,64 @@ def _has_registered_host_and_origin(request: str) -> bool:
     )
 
 
+def _record_probe_failure(
+    phase: str,
+    messages: list[dict[str, Any]],
+    status_code: str = "",
+    sent_request: str = "",
+) -> None:
+    """Persist only the probe phase, status and bounded request-shape booleans."""
+    if phase not in {"denial", "validation"}:
+        return
+    message = next(
+        (item for item in messages if _is_csrf_probe_request(str(item.get("requestHeader", "")))),
+        messages[0] if messages else {},
+    )
+    observed_request = str(message.get("requestHeader", ""))
+    observed = _is_csrf_probe_request(observed_request)
+    request = observed_request if observed else sent_request
+    cookie_line = re.search(r"(?im)^Cookie:\s*([^\r\n]+)", request)
+    cookies = _parse_cookie_header(cookie_line.group(1)) if cookie_line else {}
+    authorization_present = re.search(r"(?im)^Authorization:", request) is not None
+    csrf_header_present = re.search(r"(?im)^X-CSRF-Token:", request) is not None
+    status = status_code or _response_status_code(message) or "000"
+    flags = (
+        int(authorization_present),
+        int(SESSION_COOKIE_NAME in cookies),
+        int(CSRF_COOKIE_NAME in cookies),
+        int(csrf_header_present),
+        int("origin" in _headers(request)),
+        int("host" in _headers(request)),
+        int(_is_csrf_probe_request(request)),
+    )
+    auth, session, csrf_cookie, token, origin, host, path = flags
+    _record_hook_state(
+        f"csrf_{phase}_status_{status}_observed{int(observed)}_auth{auth}_session{session}_cookie{csrf_cookie}"
+        f"_token{token}_origin{origin}_host{host}_path{path}"
+    )
+
+
+def _headers(request: str) -> dict[str, str]:
+    """Parse header names only; values are never retained in diagnostics."""
+    result: dict[str, str] = {}
+    for line in request.splitlines()[1:]:
+        if not line:
+            break
+        name, separator, _ = line.partition(":")
+        if separator:
+            result[name.strip().lower()] = ""
+    return result
+
+
 def _response_status_code(message: object) -> str:
-    if not isinstance(message, dict):
+    if isinstance(message, dict):
+        response = str(message.get("responseHeader", message.get("response", "")))
+    elif isinstance(message, str):
+        response = message
+    else:
         return ""
-    response = str(message.get("responseHeader", ""))
-    match = re.search(r"(?im)^HTTP/\S+\s+([0-9]{3})\b", response)
-    return match.group(1) if match else ""
+    matches = re.findall(r"(?im)^HTTP/\S+\s+([0-9]{3})\b", response)
+    return matches[-1] if matches else ""
 
 
 def _latest_message(zap: Any, target: str) -> list[dict[str, Any]]:

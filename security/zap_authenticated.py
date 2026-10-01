@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import importlib.util
 import json
 import os
 import re
@@ -17,6 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from types import ModuleType
 
 ZAP_API = "http://127.0.0.1:18080/JSON"
 TARGET_ID = "pfis-web"
@@ -194,7 +196,7 @@ def _prepare_openapi_profile(
     ca_file: Path = ROOT_CA_FILE,
 ) -> None:
     """Fetch OpenAPI from the lab and write the bounded registered scan profile."""
-    if source_url != OPENAPI_URL or not ca_file.is_file():
+    if destination != OPENAPI_PROFILE_FILE or source_url != OPENAPI_URL or not ca_file.is_file():
         raise ZapError("verified PFIS OpenAPI source or lab CA is unavailable")
     try:
         context = ssl.create_default_context(cafile=str(ca_file))
@@ -290,12 +292,12 @@ def _safe_scan_diagnostic(output: str) -> str:
 def _hook_state_diagnostic(path: Path = HOOK_STATE_FILE) -> str:
     """Read the hook's bounded phase marker without exposing requests or credentials."""
     try:
-        if path.stat().st_size > 64:
+        if path.stat().st_size > 128:
             return ""
         state = path.read_text(encoding="ascii").strip()
     except OSError:
         return ""
-    return state if re.fullmatch(r"[a-z_0-9]{1,64}", state) else ""
+    return state if re.fullmatch(r"[a-z_0-9]{1,128}", state) else ""
 
 
 def _safe_diagnostic_url(value: str) -> str:
@@ -446,6 +448,139 @@ def _api(path: str, parameters: dict[str, str] | None = None) -> dict[str, objec
     if not isinstance(payload, dict) or "code" in payload:
         raise ZapError("ZAP rejected the registered authentication setup")
     return payload
+
+
+def _first_nested_list(value: object) -> list[object] | None:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        for nested in value.values():
+            result = _first_nested_list(nested)
+            if result is not None:
+                return result
+    return None
+
+
+def _first_nested_count(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+        return int(value)
+    if isinstance(value, dict):
+        for nested in value.values():
+            result = _first_nested_count(nested)
+            if result is not None:
+                return result
+    return None
+
+
+def _first_http_response(value: object) -> str:
+    if isinstance(value, str):
+        return value if re.search(r"(?im)^HTTP/\S+\s+[0-9]{3}\b", value) else ""
+    if isinstance(value, dict):
+        preferred = value.get("response")
+        if isinstance(preferred, str) and re.search(r"(?im)^HTTP/\S+\s+[0-9]{3}\b", preferred):
+            return preferred
+        for nested in value.values():
+            result = _first_http_response(nested)
+            if result:
+                return result
+    elif isinstance(value, list):
+        for nested in value:
+            result = _first_http_response(nested)
+            if result:
+                return result
+    return ""
+
+
+class _ZapScriptAPI:
+    @property
+    def list_engines(self) -> list[object]:
+        engines = _first_nested_list(_api("/script/view/listEngines/"))
+        if engines is None:
+            raise ZapError("ZAP did not return its registered script engines")
+        return engines
+
+    def load(
+        self,
+        name: str,
+        script_type: str,
+        engine: str,
+        filename: str,
+        description: str,
+    ) -> None:
+        _api(
+            "/script/action/load/",
+            {
+                "scriptName": name,
+                "scriptType": script_type,
+                "scriptEngine": engine,
+                "fileName": filename,
+                "scriptDescription": description,
+            },
+        )
+
+    def enable(self, name: str) -> None:
+        _api("/script/action/enable/", {"scriptName": name})
+
+
+class _ZapCoreAPI:
+    def messages(self, baseurl: str, start: int, count: int) -> list[dict[str, object]]:
+        payload = _api(
+            "/core/view/messages/",
+            {"baseurl": baseurl, "start": str(start), "count": str(count)},
+        )
+        messages = _first_nested_list(payload)
+        if messages is None:
+            return []
+        return [message for message in messages if isinstance(message, dict)]
+
+    def number_of_messages(self, baseurl: str) -> int:
+        payload = _api("/core/view/numberOfMessages/", {"baseurl": baseurl})
+        count = _first_nested_count(payload)
+        return count if count is not None else 0
+
+    def send_request(self, request: str, *, followredirects: bool) -> str:
+        payload = _api(
+            "/core/action/sendRequest/",
+            {"request": request, "followRedirects": str(followredirects).lower()},
+        )
+        return _first_http_response(payload)
+
+
+class _ZapAPIFacade:
+    def __init__(self) -> None:
+        self.script = _ZapScriptAPI()
+        self.core = _ZapCoreAPI()
+
+
+def _run_csrf_probe_only() -> int:
+    hook_path = Path("/opt/pfis/zap_api_hooks.py")
+    spec = importlib.util.spec_from_file_location("pfis_lab_zap_api_hooks", hook_path)
+    if spec is None or spec.loader is None:
+        raise ZapError("registered PFIS ZAP CSRF hook is unavailable")
+    hooks: ModuleType = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+    zap = _ZapAPIFacade()
+    try:
+        hooks.zap_started(zap, TARGET_URL)
+        hooks.zap_pre_shutdown(zap)
+    except RuntimeError as exc:
+        hook_state = _hook_state_diagnostic()
+        suffix = f"; hook_state={hook_state}" if hook_state else ""
+        raise ZapError(f"registered PFIS CSRF probe failed{suffix}") from exc
+    sys.stdout.write(
+        json.dumps(
+            {
+                "status": "completed",
+                "coverage_complete": True,
+                "checks": ["cookie-omission-rejected", "csrf-cookie-mirrored-by-zap"],
+            },
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    return 0
 
 
 def _start_daemon() -> subprocess.Popen[bytes]:
@@ -661,19 +796,26 @@ def _run_scan(preflight_diagnostic: str) -> int:
 
 
 def main() -> int:
-    if sys.argv[1:] != ["authenticated-api", "--target-id", TARGET_ID]:
-        print("ZAP accepts only the registered PFIS authenticated API target.", file=sys.stderr)
+    arguments = sys.argv[1:]
+    normal_command = ["authenticated-api", "--target-id", TARGET_ID]
+    probe_command = ["csrf-probe", "--target-id", TARGET_ID]
+    if arguments not in (normal_command, probe_command):
+        print("ZAP accepts only fixed PFIS application or CSRF probe profiles.", file=sys.stderr)
         return 2
+    probe_only = arguments == probe_command
     context_path = re.compile(r"^/tmp/pfis-zap-context\.xml$")
     if not context_path.fullmatch(str(CONTEXT_FILE)):
         return 2
     daemon: subprocess.Popen[bytes] | None = None
     try:
         _prepare_truststore()
-        _prepare_scan_policy()
-        _prepare_openapi_profile()
+        if not probe_only:
+            _prepare_scan_policy()
+            _prepare_openapi_profile()
         daemon = _start_daemon()
         preflight_diagnostic = _configure_authenticated_context()
+        if probe_only:
+            return _run_csrf_probe_only()
         _stop_daemon(daemon)
         daemon = None
         return _run_scan(preflight_diagnostic)
