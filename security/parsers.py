@@ -418,9 +418,15 @@ def parse_sqlmap_output(raw: str, *, target_id: str = "sqli-fixture") -> list[Pa
 
 def parse_metasploit_output(raw: str) -> list[ParsedFinding]:
     source = _bounded(raw)
-    if not re.search(
-        r"Command shell session .* opened|Meterpreter session .* opened", source, re.I
-    ):
+    session_opened = re.search(
+        r"(?:Command shell|Meterpreter) session\s+#?\d+\s+opened", source, re.I
+    )
+    # cmd/unix/interact can report a found shell and then print only the
+    # closed-session event when the adapter immediately cleans it up.
+    interact_shell_closed = re.search(r"\bFound shell\b", source, re.I) and re.search(
+        r"\bCommand shell session\s+#?\d+\s+closed\b", source, re.I
+    )
+    if not (session_opened or interact_shell_closed):
         return []
     return [
         _finding(
@@ -430,7 +436,7 @@ def parse_metasploit_output(raw: str) -> list[ParsedFinding]:
             target_id="metasploit-fixture",
             endpoint="tcp://metasploit-fixture:21",
             tool="metasploit",
-            evidence="The registered vsftpd training fixture returned a transient test session.",
+            evidence="Metasploit reported a shell on the registered training fixture; cleanup closed its transient session.",
             reproduction="exploit/unix/ftp/vsftpd_234_backdoor (registered fixture only)",
             control=True,
         )

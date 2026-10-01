@@ -1297,13 +1297,18 @@ def test_findings_deduplicate_across_tools_and_fixture_controls_stay_separate(
 def test_exploit_validators_require_positive_fixture_evidence() -> None:
     assert parse_sqlmap_output("all tested parameters do not appear to be injectable") == []
     assert parse_metasploit_output("Exploit completed, but no session was created.") == []
+    assert parse_metasploit_output("Found shell.") == []
+    assert parse_metasploit_output("Command shell session 1 closed.") == []
 
     sqlmap_control = parse_sqlmap_output("Parameter 'id' appears to be injectable.")[0]
     metasploit_control = parse_metasploit_output("Command shell session 1 opened.")[0]
+    interact_control = parse_metasploit_output("Found shell. Command shell session 1 closed.")[0]
     assert sqlmap_control.control is True
     assert sqlmap_control.target_id == "sqli-fixture"
     assert metasploit_control.control is True
     assert metasploit_control.target_id == "metasploit-fixture"
+    assert interact_control.control is True
+    assert interact_control.target_id == "metasploit-fixture"
 
 
 def test_metasploit_target_uses_fixture_port_and_pinned_runtime_image() -> None:
