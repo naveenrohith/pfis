@@ -710,7 +710,9 @@ def test_greenbone_adapter_sanitizes_manager_errors(
     failure = subprocess.CompletedProcess(
         ["gvm-cli"], 1, stdout="", stderr="Authentication failed for password secret-value"
     )
-    expected_request = "<modify_user><password>secret-value</password></modify_user>"
+    expected_request = (
+        "<modify_user><name>admin</name><password>secret-value</password></modify_user>"
+    )
     request_paths: list[Path] = []
 
     def fail_request(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -747,6 +749,52 @@ def test_greenbone_adapter_sanitizes_manager_errors(
     )
     assert 'File "/usr/local/bin/gvm-cli", line 8' in traceback
     assert "secret-value" not in traceback
+
+
+def test_greenbone_bootstrap_includes_the_required_registered_user_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml.etree.ElementTree as ET
+
+    generated_password = "synthetic-generated-greenbone-password-123456"
+    user_id = "9db05c58-d768-4b46-a6a5-485f3c9b4c91"
+    configured_passwords: list[str] = []
+    requests: list[str] = []
+    responses = iter(
+        [
+            greenbone_adapter.AdapterError("Greenbone credentials were rejected"),
+            ET.fromstring(
+                f'<get_users_response><user id="{user_id}"><name>admin</name></user>'
+                "</get_users_response>"
+            ),
+            ET.fromstring('<modify_user_response status="200"/>'),
+            ET.fromstring('<get_version_response status="200"/>'),
+        ]
+    )
+
+    def fake_send(command: str) -> ET.Element:
+        requests.append(command)
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setenv("PFIS_GVM_PASSWORD", generated_password)
+    monkeypatch.setattr(greenbone_adapter, "GVM_CONFIG", None)
+    monkeypatch.setattr(
+        greenbone_adapter,
+        "_write_config",
+        lambda password: configured_passwords.append(password) or Path("gvm-tools.conf"),
+    )
+    monkeypatch.setattr(greenbone_adapter, "_send", fake_send)
+
+    greenbone_adapter._authenticate()
+
+    assert requests[2] == (
+        f'<modify_user user_id="{user_id}"><name>admin</name>'
+        f"<password>{generated_password}</password></modify_user>"
+    )
+    assert configured_passwords == [generated_password, "admin", generated_password]
 
 
 def test_greenbone_adapter_names_rejected_management_operation_safely(

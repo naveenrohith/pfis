@@ -156,7 +156,10 @@ def _authenticate() -> None:
         user_id = user.get("id") if user is not None else None
         if not user_id or not UUID_RE.fullmatch(user_id):
             raise AdapterError("Greenbone initial administrator is unavailable") from None
-        _send(f'<modify_user user_id="{user_id}"><password>{password}</password></modify_user>')
+        _send(
+            f'<modify_user user_id="{user_id}"><name>{GVM_USER}</name>'
+            f"<password>{password}</password></modify_user>"
+        )
         GVM_CONFIG = _write_config(password)
         _send("<get_version/>")
 
