@@ -30,13 +30,14 @@ HOOK_STATES = frozenset(
         "csrf_validation_verified",
         "auth_cookies_missing",
         "csrf_validation_missing",
+        "csrf_response_missing",
     }
 )
 
 
 def _record_hook_state(state: str) -> None:
     """Keep only a fixed, credential-free lifecycle marker for scanner diagnostics."""
-    if state not in HOOK_STATES:
+    if state not in HOOK_STATES and not re.fullmatch(r"csrf_status_[0-9]{3}", state):
         return
     with suppress(OSError):
         HOOK_STATE_PATH.write_text(state, encoding="ascii")
@@ -103,12 +104,17 @@ def zap_pre_shutdown(zap: Any) -> None:
         _record_hook_state("csrf_sender_missing")
         raise RuntimeError("authenticated ZAP did not mirror its CSRF cookie into a request header")
 
-    zap.core.send_request(request, followredirects=False)
+    probe_result = zap.core.send_request(request, followredirects=False)
     _record_hook_state("csrf_probe_sent")
-    messages = zap.core.messages(REGISTERED_ORIGIN, 0, 10_000)
+    messages = (
+        [probe_result]
+        if isinstance(probe_result, dict)
+        else zap.core.messages(REGISTERED_ORIGIN, 0, 10_000)
+    )
     if not _has_csrf_validation_response(messages):
-        _record_hook_state("csrf_validation_missing")
-        raise RuntimeError("authenticated ZAP did not pass its CSRF probe to PFIS validation")
+        status_code = _response_status_code(probe_result)
+        _record_hook_state(f"csrf_status_{status_code}" if status_code else "csrf_response_missing")
+        raise RuntimeError("authenticated ZAP did not observe its CSRF probe reach PFIS validation")
     _record_hook_state("csrf_validation_verified")
 
 
@@ -183,3 +189,11 @@ def _has_csrf_validation_response(messages: list[dict[str, Any]]) -> bool:
         if re.search(r"(?m)^HTTP/\S+\s+422\b", response):
             return True
     return False
+
+
+def _response_status_code(message: object) -> str:
+    if not isinstance(message, dict):
+        return ""
+    response = str(message.get("responseHeader", ""))
+    match = re.search(r"(?im)^HTTP/\S+\s+([0-9]{3})\b", response)
+    return match.group(1) if match else ""

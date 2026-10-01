@@ -295,7 +295,7 @@ def _hook_state_diagnostic(path: Path = HOOK_STATE_FILE) -> str:
         state = path.read_text(encoding="ascii").strip()
     except OSError:
         return ""
-    return state if re.fullmatch(r"[a-z_]{1,64}", state) else ""
+    return state if re.fullmatch(r"[a-z_0-9]{1,64}", state) else ""
 
 
 def _safe_diagnostic_url(value: str) -> str:

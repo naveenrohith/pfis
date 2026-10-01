@@ -46,6 +46,7 @@ from security.zap_api_hooks import (
     _build_csrf_probe_request,
     _has_csrf_header_mirroring,
     _has_csrf_validation_response,
+    _response_status_code,
 )
 from security.zap_authenticated import (
     ACTIVE_SCAN_OPERATIONS,
@@ -189,6 +190,40 @@ def test_zap_csrf_probe_requires_cookie_mirroring_and_validation_response() -> N
     )
     with pytest.raises(RuntimeError, match="valid PFIS CSRF cookie"):
         _build_csrf_probe_request("__Host-pfis-session=session-value")
+    assert (
+        _response_status_code({"responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n"}) == "422"
+    )
+    assert _response_status_code({"responseHeader": "not-an-http-response"}) == ""
+
+
+def test_zap_pre_shutdown_uses_direct_csrf_probe_response(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hook_state = tmp_path / "hook-state.txt"
+    monkeypatch.setattr(zap_api_hooks, "HOOK_STATE_PATH", hook_state)
+    scanned_request = (
+        "POST /api/transactions/ HTTP/1.1\r\n"
+        "Cookie: __Host-pfis-session=session-value; __Host-pfis-csrf=csrf-value\r\n"
+        "X-CSRF-Token: csrf-value\r\n"
+    )
+
+    class _CoreApi:
+        def messages(self, *_args: object) -> list[dict[str, str]]:
+            return [{"requestHeader": scanned_request}]
+
+        def send_request(self, request: str, *, followredirects: bool) -> dict[str, str]:
+            assert followredirects is False
+            assert "X-CSRF-Token: csrf-value\r\n" in request
+            return {
+                "requestHeader": request,
+                "responseHeader": "HTTP/1.1 422 Unprocessable Entity\r\n",
+            }
+
+    class _Zap:
+        core = _CoreApi()
+
+    zap_api_hooks.zap_pre_shutdown(_Zap())
+    assert hook_state.read_text(encoding="ascii") == "csrf_validation_verified"
 
 
 def test_scanner_commands_are_registry_bound_and_nmap_scripts_allowlisted() -> None:
