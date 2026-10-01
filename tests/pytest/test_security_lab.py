@@ -1457,7 +1457,13 @@ def test_metasploit_target_uses_fixture_port_and_pinned_runtime_image() -> None:
     assert "exploit -z; sessions -K;" in command.argv[3]
 
 
-def test_metasploit_fixture_is_restarted_before_and_after_failed_attempt() -> None:
+@pytest.mark.parametrize(
+    ("tool_id", "fixture"),
+    (("sqlmap", "sqli-fixture"), ("metasploit", "metasploit-fixture")),
+)
+def test_exploit_fixture_is_restarted_before_and_after_failed_attempt(
+    tool_id: str, fixture: str
+) -> None:
     class RecordingLab:
         def __init__(self) -> None:
             self.calls: list[tuple[list[str], int]] = []
@@ -1470,12 +1476,12 @@ def test_metasploit_fixture_is_restarted_before_and_after_failed_attempt() -> No
     coordinator.lab = lab
     with (
         pytest.raises(RuntimeError, match="fixture probe failed"),
-        coordinator._tool_fixture_scope("metasploit"),
+        coordinator._tool_fixture_scope(tool_id),
     ):
         raise RuntimeError("fixture probe failed")
     assert lab.calls == [
-        (["restart", "metasploit-fixture"], 90),
-        (["restart", "metasploit-fixture"], 90),
+        (["restart", fixture], 90),
+        (["restart", fixture], 90),
     ]
 
 

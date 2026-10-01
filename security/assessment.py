@@ -143,15 +143,19 @@ class AssessmentCoordinator:
 
     @contextmanager
     def _tool_fixture_scope(self, tool_id: str) -> Iterator[None]:
-        """Reset destructive exploit fixtures both before and after execution."""
-        if tool_id != "metasploit":
+        """Reset exploit fixtures before and after their scanner attempts."""
+        fixture = {
+            "sqlmap": "sqli-fixture",
+            "metasploit": "metasploit-fixture",
+        }.get(tool_id)
+        if fixture is None:
             yield
             return
-        self.lab.run_compose(["restart", "metasploit-fixture"], timeout=90)
+        self.lab.run_compose(["restart", fixture], timeout=90)
         try:
             yield
         finally:
-            self.lab.run_compose(["restart", "metasploit-fixture"], timeout=90)
+            self.lab.run_compose(["restart", fixture], timeout=90)
 
     def _execute(
         self,
