@@ -791,8 +791,8 @@ def test_greenbone_bootstrap_includes_the_required_registered_user_name(
     greenbone_adapter._authenticate()
 
     assert requests[2] == (
-        f'<modify_user user_id="{user_id}"><name>admin</name>'
-        f"<password>{generated_password}</password></modify_user>"
+        "<modify_user><name>admin</name>"
+        f'<password modify="1">{generated_password}</password></modify_user>'
     )
     assert configured_passwords == [generated_password, "admin", generated_password]
 
@@ -803,23 +803,38 @@ def test_greenbone_adapter_names_rejected_management_operation_safely(
     import subprocess
 
     monkeypatch.setattr(greenbone_adapter, "GVM_CONFIG", tmp_path / "gvm-tools.conf")
+    monkeypatch.setenv("PFIS_GVM_PASSWORD", "secret-value")
     monkeypatch.setattr(
         greenbone_adapter.subprocess,
         "run",
         lambda *_args, **_kwargs: subprocess.CompletedProcess(
             ["gvm-cli"],
             0,
-            stdout='<get_configs_response status="400" status_text="secret-value"/>',
+            stdout=(
+                '<get_configs_response status="400" '
+                'status_text="configuration unavailable for password=secret-value"/>'
+            ),
             stderr="",
         ),
     )
 
     with pytest.raises(
         greenbone_adapter.AdapterError,
-        match=r"rejected get_configs request \(status 400\)",
+        match=r"rejected get_configs request \(status 400, configuration unavailable for password=\[redacted\]\)",
     ) as error:
         greenbone_adapter._send("<get_configs/>")
     assert "secret-value" not in str(error.value)
+
+
+def test_greenbone_status_reason_uses_only_safe_categories() -> None:
+    import xml.etree.ElementTree as ET
+
+    response = ET.fromstring(
+        '<modify_user_response status="404" status_text="User not found: secret-value"/>'
+    )
+
+    assert greenbone_adapter._safe_gmp_status_reason(response) == "user not found"
+    assert "secret-value" not in greenbone_adapter._safe_gmp_status_reason(response)
 
 
 def test_network_verification_allows_named_greenbone_volumes_but_rejects_host_binds(

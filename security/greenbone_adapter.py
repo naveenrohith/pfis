@@ -69,6 +69,30 @@ def _safe_cli_error(result: subprocess.CompletedProcess[str]) -> str:
     return "unclassified gvm-cli error"
 
 
+def _safe_gmp_status_reason(response: ET.Element) -> str:
+    status_text = response.get("status_text", "")[:256].casefold()
+    if "invalid characters in user name" in status_text:
+        return "invalid user name"
+    if "user" in status_text and any(term in status_text for term in ("not found", "not exist")):
+        return "user not found"
+    if "not found" in status_text or "not exist" in status_text:
+        return "resource not found"
+    if "permission denied" in status_text or "not authorized" in status_text:
+        return "permission denied"
+    return ""
+
+
+def _safe_gmp_status_detail(response: ET.Element) -> str:
+    status_text = response.get("status_text", "")[:256]
+    if not status_text:
+        return ""
+    detail = _safe_cli_error(
+        subprocess.CompletedProcess(["gvm-cli"], 1, stdout="", stderr=status_text)
+    )
+    detail = re.sub(r"[^A-Za-z0-9 .,;:_()/-\[\]]", "", detail)[:100]
+    return "" if detail == "unclassified gvm-cli error" else detail
+
+
 def _send(command: str) -> ET.Element:
     if len(command) > 16_000 or not command.startswith("<"):
         raise AdapterError("invalid registered Greenbone request")
@@ -134,7 +158,11 @@ def _send(command: str) -> ET.Element:
         if not re.fullmatch(r"[a-z_]{1,48}", request_name):
             request_name = "management"
         response_code = status if re.fullmatch(r"\d{3}", status) else "unknown"
-        raise AdapterError(f"Greenbone rejected {request_name} request (status {response_code})")
+        reason = _safe_gmp_status_reason(response) or _safe_gmp_status_detail(response)
+        detail = f", {reason}" if reason else ""
+        raise AdapterError(
+            f"Greenbone rejected {request_name} request (status {response_code}{detail})"
+        )
     return response
 
 
@@ -152,13 +180,16 @@ def _authenticate() -> None:
         # account. The first authenticated operation immediately replaces it.
         GVM_CONFIG = _write_config("admin")
         users = _send('<get_users filter="name=admin"/>')
-        user = users.find(".//user")
-        user_id = user.get("id") if user is not None else None
-        if not user_id or not UUID_RE.fullmatch(user_id):
+        matching_users = [
+            user
+            for user in users.findall(".//user")
+            if (user.findtext("name") or "").strip() == GVM_USER
+        ]
+        if len(matching_users) != 1:
             raise AdapterError("Greenbone initial administrator is unavailable") from None
         _send(
-            f'<modify_user user_id="{user_id}"><name>{GVM_USER}</name>'
-            f"<password>{password}</password></modify_user>"
+            f"<modify_user><name>{GVM_USER}</name>"
+            f'<password modify="1">{password}</password></modify_user>'
         )
         GVM_CONFIG = _write_config(password)
         _send("<get_version/>")
