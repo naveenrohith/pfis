@@ -710,11 +710,22 @@ def test_greenbone_adapter_sanitizes_manager_errors(
     failure = subprocess.CompletedProcess(
         ["gvm-cli"], 1, stdout="", stderr="Authentication failed for password secret-value"
     )
-    monkeypatch.setattr(greenbone_adapter.subprocess, "run", lambda *_args, **_kwargs: failure)
+    expected_request = "<modify_user><password>secret-value</password></modify_user>"
+    request_paths: list[Path] = []
+
+    def fail_request(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        request_path = Path(argv[-1])
+        request_paths.append(request_path)
+        assert request_path.read_text(encoding="utf-8") == expected_request
+        assert "secret-value" not in " ".join(argv)
+        return failure
+
+    monkeypatch.setattr(greenbone_adapter.subprocess, "run", fail_request)
 
     with pytest.raises(greenbone_adapter.AdapterError, match="credentials were rejected") as error:
-        greenbone_adapter._send("<get_version/>")
+        greenbone_adapter._send(expected_request)
     assert "secret-value" not in str(error.value)
+    assert request_paths and not request_paths[0].exists()
     diagnostic = greenbone_adapter._safe_cli_error(
         subprocess.CompletedProcess(
             ["gvm-cli"], 1, stdout="", stderr="Request denied for token=secret-value"

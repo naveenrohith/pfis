@@ -74,24 +74,38 @@ def _send(command: str) -> ET.Element:
         raise AdapterError("invalid registered Greenbone request")
     if GVM_CONFIG is None:
         raise AdapterError("Greenbone credentials are unavailable")
-    result = subprocess.run(
-        [
-            "gvm-cli",
-            "--config",
-            str(GVM_CONFIG),
-            "--timeout",
-            "60",
-            "socket",
-            "--socketpath",
-            GVM_SOCKET,
-        ],
-        input=command,
-        capture_output=True,
-        text=True,
-        timeout=70,
-        check=False,
-        shell=False,
-    )
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix="pfis-gvm-request-",
+        suffix=".xml",
+        dir=tempfile.gettempdir(),
+        delete=False,
+    ) as request_file:
+        request_file.write(command)
+        request_path = Path(request_file.name)
+    try:
+        request_path.chmod(0o600)
+        result = subprocess.run(
+            [
+                "gvm-cli",
+                "--config",
+                str(GVM_CONFIG),
+                "--timeout",
+                "60",
+                "socket",
+                "--socketpath",
+                GVM_SOCKET,
+                str(request_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=70,
+            check=False,
+            shell=False,
+        )
+    finally:
+        request_path.unlink(missing_ok=True)
     if result.returncode:
         # Expose only a bounded category; command output can contain secrets.
         diagnostic = f"{result.stdout}\n{result.stderr}".casefold()
