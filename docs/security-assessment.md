@@ -184,7 +184,8 @@ Local equivalents for both workflows passed on the branch:
   `.github/workflows/security.yml`.
 - Backend: Ruff, Black (347 files), mypy (193 sources), Python dependency audit
   (no known vulnerabilities), parser/release-gate evaluations, 32 operational
-  smoke tests, and **1,160 tests passed at 85.29% branch coverage** (85% gate).
+  smoke tests, and **1,160 tests passed at 85.29% total coverage with branch
+  measurement enabled** (85% gate).
 - PostgreSQL: migrations through `060_pref_policy_versions`, migration parity,
   and both runtime contract tests passed on an ephemeral database.
 - Existing frontend: `npm ci`, npm audit (0 vulnerabilities), lint, **162 tests
@@ -210,8 +211,8 @@ The plan-time local baseline receipts on `f755c3b` recorded exit code 1 for
 requirements manifest reproduced the dependency failure and identified the
 PyJWT findings above. The coverage receipt retained only an output hash, so its
 baseline failure cause is unavailable; the branch full backend suite passed at
-85.29%. The successful GitHub base-branch result and local planning-run results
-are retained here as separate evidence.
+85.29% total coverage with branch measurement enabled. The successful GitHub
+base-branch result and local planning-run results are retained here as separate evidence.
 
 ## Remaining coverage limits
 
