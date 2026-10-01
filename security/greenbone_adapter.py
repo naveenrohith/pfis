@@ -17,7 +17,7 @@ from contextlib import suppress
 from pathlib import Path
 
 GVM_SOCKET = "/run/gvmd/gvmd.sock"
-GVM_USER = "admin"
+GVM_USER = "pfis_security"
 REGISTERED_TARGET = "pfis-web"
 REGISTERED_HOST = "pfis.test"
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -172,27 +172,7 @@ def _authenticate() -> None:
     if len(password) < 24 or any(char in password for char in "\r\n"):
         raise AdapterError("generated Greenbone credentials are unavailable")
     GVM_CONFIG = _write_config(password)
-    try:
-        _send("<get_version/>")
-        return
-    except AdapterError:
-        # A new lab generation starts with the official image's default
-        # account. The first authenticated operation immediately replaces it.
-        GVM_CONFIG = _write_config("admin")
-        users = _send('<get_users filter="name=admin"/>')
-        matching_users = [
-            user
-            for user in users.findall(".//user")
-            if (user.findtext("name") or "").strip() == GVM_USER
-        ]
-        if len(matching_users) != 1:
-            raise AdapterError("Greenbone initial administrator is unavailable") from None
-        _send(
-            f"<modify_user><name>{GVM_USER}</name>"
-            f'<password modify="1">{password}</password></modify_user>'
-        )
-        GVM_CONFIG = _write_config(password)
-        _send("<get_version/>")
+    _send("<get_version/>")
 
 
 def _registered_address() -> str:

@@ -421,6 +421,9 @@ services:
     - default
   gvmd:
     image: registry.community.greenbone.net/community/gvmd@sha256:fec601848e0847b27d7bb262b684a05747d369b85ddde75f7074fd2880f06221
+    environment:
+      INTEGRATION_CONFIG_USER: pfis_security
+      INTEGRATION_CONFIG_USER_INIT_PASSWORD: ${LAB_GREENBONE_PASSWORD:?set by scripts/security.py prepare}
     deploy:
       restart_policy:
         condition: any
@@ -608,7 +611,6 @@ services:
     command:
     - --help
     environment:
-      PFIS_GVM_USER: admin
       PFIS_GVM_PASSWORD: ${LAB_GREENBONE_PASSWORD:?set by scripts/security.py prepare}
       LAB_SECURITY_TARGET_ID: pfis-web
     read_only: true

@@ -638,6 +638,13 @@ def test_lab_compose_keeps_scanners_and_greenbone_managers_internal() -> None:
             assert "feed-egress" not in attached
     assert set(services["greenbone-control"]["networks"]) == {"default", "scanner"}
     assert services["greenbone-control"]["user"] == "1000:1000"
+    assert services["gvmd"]["environment"]["INTEGRATION_CONFIG_USER"] == "pfis_security"
+    assert services["gvmd"]["environment"]["INTEGRATION_CONFIG_USER_INIT_PASSWORD"] == (
+        "${LAB_GREENBONE_PASSWORD:?set by scripts/security.py prepare}"
+    )
+    assert services["greenbone-control"]["environment"]["PFIS_GVM_PASSWORD"] == (
+        "${LAB_GREENBONE_PASSWORD:?set by scripts/security.py prepare}"
+    )
     assert set(services["ospd-openvas"]["networks"]) == {"default", "scanner"}
     assert services["ospd-openvas"].get("privileged", False) is False
     assert services["ospd-openvas"]["cap_add"] == ["NET_ADMIN", "NET_RAW"]
@@ -751,33 +758,18 @@ def test_greenbone_adapter_sanitizes_manager_errors(
     assert "secret-value" not in traceback
 
 
-def test_greenbone_bootstrap_includes_the_required_registered_user_name(
+def test_greenbone_authenticates_only_with_the_generated_integration_user_password(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import xml.etree.ElementTree as ET
 
     generated_password = "synthetic-generated-greenbone-password-123456"
-    user_id = "9db05c58-d768-4b46-a6a5-485f3c9b4c91"
     configured_passwords: list[str] = []
     requests: list[str] = []
-    responses = iter(
-        [
-            greenbone_adapter.AdapterError("Greenbone credentials were rejected"),
-            ET.fromstring(
-                f'<get_users_response><user id="{user_id}"><name>admin</name></user>'
-                "</get_users_response>"
-            ),
-            ET.fromstring('<modify_user_response status="200"/>'),
-            ET.fromstring('<get_version_response status="200"/>'),
-        ]
-    )
 
     def fake_send(command: str) -> ET.Element:
         requests.append(command)
-        response = next(responses)
-        if isinstance(response, Exception):
-            raise response
-        return response
+        return ET.fromstring('<get_version_response status="200"/>')
 
     monkeypatch.setenv("PFIS_GVM_PASSWORD", generated_password)
     monkeypatch.setattr(greenbone_adapter, "GVM_CONFIG", None)
@@ -790,11 +782,8 @@ def test_greenbone_bootstrap_includes_the_required_registered_user_name(
 
     greenbone_adapter._authenticate()
 
-    assert requests[2] == (
-        "<modify_user><name>admin</name>"
-        f'<password modify="1">{generated_password}</password></modify_user>'
-    )
-    assert configured_passwords == [generated_password, "admin", generated_password]
+    assert requests == ["<get_version/>"]
+    assert configured_passwords == [generated_password]
 
 
 def test_greenbone_adapter_names_rejected_management_operation_safely(
