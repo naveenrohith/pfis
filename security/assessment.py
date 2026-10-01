@@ -370,10 +370,14 @@ class AssessmentCoordinator:
     def _summary(profile_id: str, coverage: list[ToolCoverage], stop_reason: str) -> dict[str, Any]:
         # The persisted finding store contains the canonical evidence list;
         # this report keeps controls and PFIS targets distinct by target ID.
+        expected_tools = set(PROFILE_TOOL_IDS[profile_id])
+        covered_tools = {item.tool for item in coverage}
         return {
             "profile": profile_id,
             "coverage": [asdict(item) for item in coverage],
-            "coverage_complete": all(
+            "coverage_complete": bool(expected_tools)
+            and expected_tools <= covered_tools
+            and all(
                 item.status in {"completed", "no_findings", "not_applicable"} for item in coverage
             ),
             "critical_high_count": sum(item.critical_high_count for item in coverage),

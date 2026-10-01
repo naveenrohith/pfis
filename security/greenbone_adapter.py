@@ -130,7 +130,11 @@ def _send(command: str) -> ET.Element:
         raise AdapterError("Greenbone returned invalid management XML") from exc
     status = response.get("status", "")
     if status and status[0] not in {"2", "3"}:
-        raise AdapterError("Greenbone rejected a management request")
+        request_name = response.tag.removesuffix("_response")
+        if not re.fullmatch(r"[a-z_]{1,48}", request_name):
+            request_name = "management"
+        response_code = status if re.fullmatch(r"\d{3}", status) else "unknown"
+        raise AdapterError(f"Greenbone rejected {request_name} request (status {response_code})")
     return response
 
 
