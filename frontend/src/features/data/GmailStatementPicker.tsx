@@ -100,6 +100,16 @@ export function GmailStatementPicker({ userId, accounts, onImported }: Props) {
       setPassword('');
       setSelected(null);
       setDetection(null);
+      setAccountId('');
+      setCandidates([]);
+      setCursor(null);
+      setCoverageComplete(true);
+      setMessageFailures(0);
+      setTruncated(false);
+      setError('');
+      setIsSearching(false);
+      setIsDetecting(false);
+      setIsImporting(false);
     }
   }, [connected]);
 

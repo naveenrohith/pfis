@@ -2,7 +2,7 @@
 
 Status: implemented on `codex/gmail-statement-import` in [draft PR #10](https://github.com/naveenrohith/pfis/pull/10). Local verification and integrated review passed. All four CI jobs must pass on the final head before merge; merge requires approval.
 
-CI repair: the first draft PR run failed the existing Python dependency audit on PyJWT 2.13.0. Update the existing pin to 2.14.0, which contains [upstream security fixes](https://github.com/jpadilla/pyjwt/blob/2.14.0/CHANGELOG.rst), and verify authentication regressions plus all four jobs. This adds no new library or migration.
+CI repair: the first draft PR run failed the existing Python dependency audit on PyJWT 2.13.0. The initial pin update to 2.14.0 passed on September 30. The October 2 review run found the newly published PYSEC-2026-4141 advisory, so the final pin is 2.15.1, which includes the [upstream payload-parser security fix and padding compatibility repair](https://pyjwt.readthedocs.io/en/latest/changelog.html). Authentication regressions and all four CI jobs must pass before merge. This adds no new library or migration.
 
 Implementation decisions: candidates use encrypted, user/mailbox/generation-bound `source_ref` values rather than browser-visible message IDs. References expire after 30 minutes. Discovery reads 20 messages and returns at most 100 attachments per page, with explicit partial-coverage fields. PDF passwords remain in component memory through detection and import; each server request downloads/decrypts again. Shared standard manual/Gmail import dispatch takes the user lock before fingerprint persistence. No migration or dependency change is required. Exact contracts are maintained in `docs/api-reference.md`, `docs/integrations.md`, and `docs/security.md`.
 

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GmailStatementPicker } from './GmailStatementPicker';
 
@@ -7,10 +7,11 @@ const mocks = vi.hoisted(() => ({
   candidates: vi.fn(),
   detect: vi.fn(),
   import: vi.fn(),
+  connection: vi.fn(),
 }));
 
 vi.mock('@/features/workspace/queries', () => ({
-  useAutoSyncStatus: () => ({ isSuccess: true, data: { connection_status: 'connected' } }),
+  useAutoSyncStatus: mocks.connection,
 }));
 vi.mock('@/lib/api', () => ({
   api: {
@@ -43,16 +44,19 @@ const candidate = {
 
 function renderPicker() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  const element = () => (
     <QueryClientProvider client={client}>
       <GmailStatementPicker userId="user-1" accounts={[account]} onImported={vi.fn()} />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(element());
+  return { refresh: () => view.rerender(element()) };
 }
 
 describe('GmailStatementPicker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.connection.mockReturnValue({ isSuccess: true, data: { connection_status: 'connected' } });
     mocks.candidates.mockResolvedValue({
       candidates: [candidate],
       next_cursor: 'next',
@@ -65,6 +69,37 @@ describe('GmailStatementPicker', () => {
       detection: null,
       document_fingerprint: null,
     });
+  });
+
+  it('resets a pending search on disconnect and ignores its response after reconnect', async () => {
+    let release!: (value: unknown) => void;
+    mocks.candidates.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const view = renderPicker();
+    fireEvent.click(screen.getByRole('button', { name: 'Search Gmail' }));
+    expect(screen.getByRole('button', { name: 'Searching…' })).toBeDisabled();
+    mocks.connection.mockReturnValue({ isSuccess: true, data: null });
+    view.refresh();
+    expect(screen.getByText('Gmail is not connected.')).toBeInTheDocument();
+    mocks.connection.mockReturnValue({ isSuccess: true, data: { connection_status: 'connected' } });
+    view.refresh();
+    expect(screen.getByRole('button', { name: 'Search Gmail' })).toBeEnabled();
+    await act(async () =>
+      release({
+        candidates: [candidate],
+        next_cursor: null,
+        coverage_complete: true,
+        message_failures: 0,
+        truncated: false,
+      }),
+    );
+    expect(screen.queryByRole('button', { name: /statement\.pdf/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Search Gmail' }));
+    expect(await screen.findByRole('button', { name: /statement\.pdf/i })).toBeInTheDocument();
   });
 
   it('keeps password local, retries detection, and prevents duplicate import submits', async () => {
