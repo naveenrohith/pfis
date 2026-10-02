@@ -1217,3 +1217,17 @@ Forecast accountability responses include additive `drift_status` metadata with 
 ### Transaction note and tag search
 
 `GET /api/transactions/` accepts additive filters `note=<text>` and repeated `tag=<tag>` parameters. The existing `q`/`text` search also includes transaction notes and serialized tags. Filters remain user-scoped, bounded by request validation, and applied through SQLAlchemy parameters rather than interpolated SQL.
+
+## Gmail statement attachments
+
+All routes below are user-scoped under `/api/statements/gmail` and require `user_id`. Existing Gmail OAuth consent uses `gmail.readonly`.
+
+| Route | Request | Result |
+| --- | --- | --- |
+| `GET /candidates` | Optional `start_date`, exclusive `end_date`, and opaque `cursor` | Redacted attachment metadata, `source_ref`, `next_cursor`, `coverage_complete`, `message_failures`, `truncated` |
+| `POST /detect` | JSON `source_ref`, optional `password` | `status`: `detected`, `password_required`, or `incorrect_password`; successful results include detection, redacted analysis and SHA-256 `document_fingerprint` |
+| `POST /import` | JSON `source_ref`, optional `password`, owned `financial_account_id`, detected `document_fingerprint` | Existing `StatementImportResultResponse` (201), including retry of an already imported document |
+
+Search defaults to the past 365 days through tomorrow UTC (exclusive). Explicit windows are limited to 3,660 days. Each page reads at most 20 messages and returns at most 100 candidates. The coverage fields distinguish incomplete discovery from an empty complete result. Candidate references and cursors are encrypted, bound to user/mailbox/connection generation and purpose, and expire after 30 minutes. Changing dates requires a new search. Detect and import refetch the attachment; import rechecks its fingerprint and current connection before writing.
+
+Safe errors include `gmail_disconnected`, `gmail_reauthorization_required`, `source_expired`, `source_changed` (409), `attachment_missing` (404), `payload_too_large` (413), `unreadable_pdf` (422), and `gmail_unavailable` (503). Search is limited to 10 requests/minute per user; detection and import to 20 each. Passwords are optional JSON secrets, limited to 256 characters, omitted from responses and validation diagnostics. PDF size remains 10 MB. No PDF, password or extracted source text is retained by these routes.

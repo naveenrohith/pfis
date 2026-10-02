@@ -71,10 +71,15 @@ async def request_validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     """Return validation failures in the same error envelope."""
+    errors = exc.errors()
+    if request.url.path.startswith("/api/statements/gmail/"):
+        # These bodies may contain an ephemeral PDF password. Never echo request
+        # inputs or validator context, including malformed JSON, to clients.
+        errors = [{key: error[key] for key in ("type", "loc", "msg")} for error in errors]
     return error_response(
         request,
         422,
         code="validation_error",
         message="Request validation failed",
-        details=jsonable_encoder(exc.errors()),
+        details=jsonable_encoder(errors),
     )

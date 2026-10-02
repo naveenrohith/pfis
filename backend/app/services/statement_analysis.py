@@ -552,7 +552,7 @@ def _clean_description(value: str) -> str:
 
 def _redact_description(value: str) -> str:
     redacted = re.sub(r"(?i)(?:x|\*){2,}\d{4,}", "[REDACTED]", value)
-    redacted = re.sub(r"\b\d{8,}\b", "[REDACTED]", redacted)
+    redacted = re.sub(r"(?<!\d)\d(?:[ -]?\d){4,}(?!\d)", "[REDACTED]", redacted)
     return _clean_description(redacted)
 
 

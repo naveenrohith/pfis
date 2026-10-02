@@ -21,7 +21,9 @@ import { useAuth } from '@/features/auth/AuthContext';
 import { queryKeys, useAccountLinkRules, useAccounts } from '@/features/workspace/queries';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/format';
+import type { StatementImportResult } from '@/lib/types';
 import { DepositStatementReviewPanel } from './DepositStatementReviewPanel';
+import { GmailStatementPicker } from './GmailStatementPicker';
 import { StatementAnalysisReviewPanel } from './StatementAnalysisReviewPanel';
 
 const MAX_STATEMENT_BYTES = 10 * 1024 * 1024;
@@ -41,6 +43,8 @@ export function StatementImportSection() {
   );
   const [accountId, setAccountId] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [source, setSource] = useState<'gmail' | 'upload'>('upload');
+  const [gmailResult, setGmailResult] = useState<StatementImportResult | null>(null);
   const [fileError, setFileError] = useState('');
   const detectStatement = useMutation({
     mutationFn: (candidate: File) => {
@@ -73,6 +77,22 @@ export function StatementImportSection() {
       ? accountId
       : compatibleAccounts[0]?.id || ''
     : '';
+  async function invalidateImportQueries(imported: StatementImportResult, targetAccountId: string) {
+    if (!user) return;
+    const invalidations = [
+      queryClient.invalidateQueries({ queryKey: queryKeys.accounts(user.id) }),
+      queryClient.invalidateQueries({ queryKey: ['transactions', user.id] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.statementReview(user.id) }),
+      queryClient.invalidateQueries({ queryKey: ['balanceForecast', user.id, targetAccountId] }),
+    ];
+    if (imported.product_type === 'credit_card') {
+      invalidations.push(
+        queryClient.invalidateQueries({ queryKey: ['cardOverview', user.id, targetAccountId] }),
+        queryClient.invalidateQueries({ queryKey: ['cardDueRunway', user.id, targetAccountId] }),
+      );
+    }
+    await Promise.all(invalidations);
+  }
   const importStatement = useMutation({
     mutationFn: ({
       targetAccountId,
@@ -90,31 +110,10 @@ export function StatementImportSection() {
       return api.importStatement(user.id, targetAccountId, statementFile);
     },
     onSuccess: async (imported, variables) => {
-      if (user) {
-        const targetAccountId = variables.targetAccountId;
-        const invalidations = [
-          queryClient.invalidateQueries({ queryKey: queryKeys.accounts(user.id) }),
-          queryClient.invalidateQueries({ queryKey: ['transactions', user.id] }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.statementReview(user.id) }),
-          queryClient.invalidateQueries({
-            queryKey: ['balanceForecast', user.id, targetAccountId],
-          }),
-        ];
-        if (imported.product_type === 'credit_card') {
-          invalidations.push(
-            queryClient.invalidateQueries({
-              queryKey: ['cardOverview', user.id, targetAccountId],
-            }),
-            queryClient.invalidateQueries({
-              queryKey: ['cardDueRunway', user.id, targetAccountId],
-            }),
-          );
-        }
-        await Promise.all(invalidations);
-      }
+      await invalidateImportQueries(imported, variables.targetAccountId);
     },
   });
-  const result = importStatement.data;
+  const result = gmailResult ?? importStatement.data;
   const cardStatement = result?.credit_card_statement ?? null;
   const depositStatement = result?.deposit_account_statement ?? null;
   const resultLines = cardStatement?.lines ?? depositStatement?.lines ?? [];
@@ -186,8 +185,48 @@ export function StatementImportSection() {
         </div>
       </FinancialHero>
 
+      <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Statement source">
+        <Button
+          type="button"
+          variant={source === 'gmail' ? 'primary' : 'outline'}
+          aria-pressed={source === 'gmail'}
+          onClick={() => {
+            setSource('gmail');
+            setGmailResult(null);
+          }}
+        >
+          From Gmail
+        </Button>
+        <Button
+          type="button"
+          variant={source === 'upload' ? 'primary' : 'outline'}
+          aria-pressed={source === 'upload'}
+          onClick={() => {
+            setSource('upload');
+            setGmailResult(null);
+          }}
+        >
+          Upload PDF
+        </Button>
+      </div>
+      {source === 'gmail' ? (
+        <div className="mb-6">
+          <GmailStatementPicker
+            key={user?.id}
+            userId={user?.id ?? ''}
+            accounts={accounts.data ?? []}
+            onImported={async (imported, targetAccountId) => {
+              setGmailResult(imported);
+              await invalidateImportQueries(imported, targetAccountId);
+            }}
+          />
+        </div>
+      ) : null}
       <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-        <section className="rounded-xl bg-card p-5 sm:p-6" aria-labelledby="statement-upload-title">
+        <section
+          className={`rounded-xl bg-card p-5 sm:p-6 ${source === 'gmail' ? 'hidden' : ''}`}
+          aria-labelledby="statement-upload-title"
+        >
           <h2 id="statement-upload-title" className="text-lg font-extrabold tracking-[-0.025em]">
             Import a statement
           </h2>

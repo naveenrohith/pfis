@@ -205,3 +205,9 @@ cmdk, React Hook Form, Zod/resolvers, TanStack Table, and dnd-kit. Motion is
 limited to 120–240 ms fades, small translations, progress, and direct feedback;
 `prefers-reduced-motion` disables non-essential movement. Particles, 3D,
 parallax, heavy glassmorphism, and decorative animation remain excluded.
+
+## Gmail statement intake extension
+
+Statements offers **From Gmail** and **Upload PDF** as source buttons. Gmail uses explicit date search, received date/sender/redacted subject/filename/size candidates, bounded pagination and incomplete-coverage recovery. Selection leads to password recovery where needed, detected product and redacted row preview, compatible account selection, then explicit import. Unsupported layouts remain read-only.
+
+Use the existing PFIS cards, spacing, typography, buttons and focus styles. Form labels, live detection status, selected-candidate pressed state, reduced-motion spinner and responsive wrapped preview rows preserve keyboard and small-screen use. Passwords remain local to the picker and never enter TanStack mutation caches. Manual upload and both sources' post-import query invalidation share existing account/ledger views.

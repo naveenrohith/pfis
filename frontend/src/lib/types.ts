@@ -2427,6 +2427,29 @@ export interface StatementImportResult {
   deposit_account_statement?: ImportedDepositAccountStatement | null;
 }
 
+export interface GmailStatementCandidate {
+  source_ref: string;
+  sender: string;
+  subject: string;
+  filename: string;
+  size_bytes: number;
+  received_at: string | null;
+}
+
+export interface GmailStatementCandidatesResponse {
+  candidates: GmailStatementCandidate[];
+  next_cursor: string | null;
+  coverage_complete: boolean;
+  message_failures: number;
+  truncated: boolean;
+}
+
+export interface GmailStatementDetectionResponse {
+  status: 'detected' | 'password_required' | 'incorrect_password';
+  detection?: (StatementDetection & { analysis?: StatementAnalysis | null }) | null;
+  document_fingerprint?: string | null;
+}
+
 export interface StatementReviewItem extends CardStatementLine {
   financial_account_id: string;
   account_label: string;
@@ -2943,4 +2966,3 @@ export interface CashPocketBalanceResponse {
   balance: number;
   as_of?: string | null;
 }
-

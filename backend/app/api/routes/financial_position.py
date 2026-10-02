@@ -55,7 +55,6 @@ from app.schemas.financial_position import (
     ReservePlanCreate,
     ReservePlanResponse,
     ReservePlanUpdate,
-    StatementAnalysisResponse,
     StatementAnalysisReviewCreate,
     StatementAnalysisReviewResponse,
     StatementCardPaymentCandidateResponse,
@@ -88,9 +87,11 @@ from app.services.card_utilization_history_service import CardUtilizationHistory
 from app.services.financial_position_service import FinancialPositionService
 from app.services.hdfc_statement_extractor import detect_hdfc_statement_document
 from app.services.roadmap_service import RoadmapService
-from app.services.statement_analysis import analyze_statement
 from app.services.statement_analysis_review_service import StatementAnalysisReviewService
-from app.services.statement_detection import detect_statement
+from app.services.statement_import_service import import_detected_statement, lock_statement_user
+from app.services.statement_import_service import (
+    statement_detection_response as _detection_response,
+)
 from app.services.statement_pdf_extractor import StatementPdfText, extract_statement_pdf_text
 
 router = APIRouter(tags=["Financial position"])
@@ -118,20 +119,7 @@ async def detect_statement_document(
     """Recognize a statement before account selection or persistence."""
 
     resolve_user_scope(user_id, current_user)
-    detection = detect_statement(data.statement_text)
-    return StatementDetectionResponse(
-        institution=detection.institution,
-        product_type=detection.product_type,
-        format_id=detection.format_id,
-        support_status=detection.support_status,
-        confidence=detection.confidence,
-        reason_codes=list(detection.reason_codes),
-        activity_types=list(detection.activity_types),
-        detector_version=detection.detector_version,
-        analysis=StatementAnalysisResponse.model_validate(
-            analyze_statement(data.statement_text, detection)
-        ),
-    )
+    return _detection_response(data.statement_text)
 
 
 @router.post("/statements/detect/upload", response_model=StatementDetectionResponse)
@@ -156,18 +144,7 @@ async def detect_statement_pdf_document(
         ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    detection = detect_statement(text)
-    return StatementDetectionResponse(
-        institution=detection.institution,
-        product_type=detection.product_type,
-        format_id=detection.format_id,
-        support_status=detection.support_status,
-        confidence=detection.confidence,
-        reason_codes=list(detection.reason_codes),
-        activity_types=list(detection.activity_types),
-        detector_version=detection.detector_version,
-        analysis=StatementAnalysisResponse.model_validate(analyze_statement(text, detection)),
-    )
+    return _detection_response(text)
 
 
 @router.post(
@@ -303,55 +280,18 @@ async def review_statement_pdf(
     )
 
 
-def _detection_response(statement_text: str) -> StatementDetectionResponse:
-    detection = detect_statement(statement_text)
-    return StatementDetectionResponse(
-        institution=detection.institution,
-        product_type=detection.product_type,
-        format_id=detection.format_id,
-        support_status=detection.support_status,
-        confidence=detection.confidence,
-        reason_codes=list(detection.reason_codes),
-        activity_types=list(detection.activity_types),
-        detector_version=detection.detector_version,
-        analysis=StatementAnalysisResponse.model_validate(
-            analyze_statement(statement_text, detection)
-        ),
-    )
-
-
 async def _import_detected_statement(
     db: AsyncSession,
     user_id: str,
     data: StatementTextImport,
 ) -> StatementImportResultResponse:
-    detection = _detection_response(data.statement_text)
-    if detection.support_status != "supported":
-        raise ValueError("Statement is recognized but not supported for import")
-    service = FinancialPositionService(db)
-    if detection.product_type == "credit_card":
-        card = (
-            await service.import_hdfc_statement_text(user_id, data)
-            if detection.institution == "hdfc"
-            else await service.import_generic_credit_card_statement_text(user_id, data)
-        )
-        return StatementImportResultResponse(
-            product_type="credit_card",
-            detection=detection,
-            credit_card_statement=card,
-        )
-    if detection.product_type == "deposit_account":
-        deposit = (
-            await service.import_hdfc_deposit_statement_text(user_id, data)
-            if detection.institution == "hdfc"
-            else await service.import_generic_deposit_statement_text(user_id, data)
-        )
-        return StatementImportResultResponse(
-            product_type="deposit_account",
-            detection=detection,
-            deposit_account_statement=deposit,
-        )
-    raise ValueError("Statement product could not be determined safely")
+    return await import_detected_statement(
+        db,
+        user_id,
+        data,
+        detection=_detection_response(data.statement_text),
+        service=FinancialPositionService(db),
+    )
 
 
 @router.post(
@@ -1110,6 +1050,7 @@ async def import_hdfc_statement_text(
 ):
     scoped_user_id = resolve_user_scope(user_id, current_user)
     try:
+        await lock_statement_user(db, scoped_user_id)
         return await FinancialPositionService(db).import_hdfc_statement_text(scoped_user_id, data)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1236,6 +1177,7 @@ async def import_hdfc_statement_pdf(
         await _record_statement_rejection(db, user_id, str(exc))
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
+        await lock_statement_user(db, user_id)
         return await FinancialPositionService(db).import_hdfc_statement_text(
             user_id,
             StatementTextImport(
