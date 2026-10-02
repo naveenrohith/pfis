@@ -55,7 +55,6 @@ from app.schemas.financial_position import (
     ReservePlanCreate,
     ReservePlanResponse,
     ReservePlanUpdate,
-    StatementAnalysisResponse,
     StatementAnalysisReviewCreate,
     StatementAnalysisReviewResponse,
     StatementCardPaymentCandidateResponse,
@@ -88,10 +87,11 @@ from app.services.card_utilization_history_service import CardUtilizationHistory
 from app.services.financial_position_service import FinancialPositionService
 from app.services.hdfc_statement_extractor import detect_hdfc_statement_document
 from app.services.roadmap_service import RoadmapService
-from app.services.statement_analysis import analyze_statement
 from app.services.statement_analysis_review_service import StatementAnalysisReviewService
-from app.services.statement_detection import detect_statement
 from app.services.statement_import_service import import_detected_statement, lock_statement_user
+from app.services.statement_import_service import (
+    statement_detection_response as _detection_response,
+)
 from app.services.statement_pdf_extractor import StatementPdfText, extract_statement_pdf_text
 
 router = APIRouter(tags=["Financial position"])
@@ -119,20 +119,7 @@ async def detect_statement_document(
     """Recognize a statement before account selection or persistence."""
 
     resolve_user_scope(user_id, current_user)
-    detection = detect_statement(data.statement_text)
-    return StatementDetectionResponse(
-        institution=detection.institution,
-        product_type=detection.product_type,
-        format_id=detection.format_id,
-        support_status=detection.support_status,
-        confidence=detection.confidence,
-        reason_codes=list(detection.reason_codes),
-        activity_types=list(detection.activity_types),
-        detector_version=detection.detector_version,
-        analysis=StatementAnalysisResponse.model_validate(
-            analyze_statement(data.statement_text, detection)
-        ),
-    )
+    return _detection_response(data.statement_text)
 
 
 @router.post("/statements/detect/upload", response_model=StatementDetectionResponse)
@@ -157,18 +144,7 @@ async def detect_statement_pdf_document(
         ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    detection = detect_statement(text)
-    return StatementDetectionResponse(
-        institution=detection.institution,
-        product_type=detection.product_type,
-        format_id=detection.format_id,
-        support_status=detection.support_status,
-        confidence=detection.confidence,
-        reason_codes=list(detection.reason_codes),
-        activity_types=list(detection.activity_types),
-        detector_version=detection.detector_version,
-        analysis=StatementAnalysisResponse.model_validate(analyze_statement(text, detection)),
-    )
+    return _detection_response(text)
 
 
 @router.post(
@@ -301,23 +277,6 @@ async def review_statement_pdf(
         scoped_user_id,
         statement_text,
         hashlib.sha256(payload).hexdigest(),
-    )
-
-
-def _detection_response(statement_text: str) -> StatementDetectionResponse:
-    detection = detect_statement(statement_text)
-    return StatementDetectionResponse(
-        institution=detection.institution,
-        product_type=detection.product_type,
-        format_id=detection.format_id,
-        support_status=detection.support_status,
-        confidence=detection.confidence,
-        reason_codes=list(detection.reason_codes),
-        activity_types=list(detection.activity_types),
-        detector_version=detection.detector_version,
-        analysis=StatementAnalysisResponse.model_validate(
-            analyze_statement(statement_text, detection)
-        ),
     )
 
 

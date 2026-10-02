@@ -10,6 +10,7 @@ from app.schemas.financial_position import (
     DepositAccountStatementResponse,
     StatementDetectionResponse,
 )
+from app.services import statement_import_service
 from app.services.statement_pdf_extractor import StatementPdfText
 from fastapi import HTTPException
 
@@ -135,8 +136,10 @@ def _detected_response(*, product_type: str, institution: str, support_status: s
 async def test_statement_detection_review_and_import_routes_cover_success_and_failures(monkeypatch):
     db = _Db()
     monkeypatch.setattr(routes, "resolve_user_scope", lambda user_id, _current: user_id)
-    monkeypatch.setattr(routes, "detect_statement", lambda _text: _detection())
-    monkeypatch.setattr(routes, "analyze_statement", lambda _text, _detection: _analysis())
+    monkeypatch.setattr(statement_import_service, "detect_statement", lambda _text: _detection())
+    monkeypatch.setattr(
+        statement_import_service, "analyze_statement", lambda _text, _detection: _analysis()
+    )
     monkeypatch.setattr(
         routes,
         "detect_hdfc_statement_document",
@@ -273,6 +276,9 @@ async def test_statement_detection_review_and_import_routes_cover_success_and_fa
     with pytest.raises(ValueError, match="could not be determined"):
         await routes._import_detected_statement(db, "user-1", import_data)
 
+    monkeypatch.setattr(
+        routes, "_detection_response", statement_import_service.statement_detection_response
+    )
     assert (
         await routes.detect_statement_pdf_document(_Request(b"%PDF bytes"), "user-1", None)
     ).product_type == "credit_card"
