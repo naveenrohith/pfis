@@ -1,0 +1,17 @@
+id: pfis-security-missing-hsts
+
+info:
+  name: HTTPS response missing Strict-Transport-Security
+  author: PFIS security lab
+  severity: low
+  description: The synthetic HTTPS endpoint did not return an HSTS policy.
+  tags: pfis,misconfiguration,headers
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/health"
+    matchers:
+      - type: dsl
+        dsl:
+          - "!contains(tolower(all_headers), 'strict-transport-security:')"

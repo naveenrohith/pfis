@@ -271,8 +271,8 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; "
         "object-src 'none'; form-action 'self'; img-src 'self' data:; "
-        "font-src 'self'; style-src 'self' 'unsafe-inline'; "
-        "script-src 'self'; connect-src 'self' ws: wss:"
+        "font-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; "
+        "script-src 'self'; connect-src 'self'"
     )
     if settings.is_production:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"

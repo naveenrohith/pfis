@@ -1,0 +1,306 @@
+name: Security Lab
+
+on:
+  push:
+    branches: [codex/pfis-security-lab]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      extended:
+        description: Run the bounded active ZAP, Nuclei, Nmap, and TLS assessment
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-lint:
+    name: Validate workflow syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned actionlint
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=actionlint_1.7.12_linux_amd64.tar.gz
+          curl --fail --silent --show-error --location \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/${archive}" \
+            --output "/tmp/${archive}"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/${archive}" | sha256sum --check --status
+          tar -xzf "/tmp/${archive}" -C /tmp actionlint
+          /tmp/actionlint -color .github/workflows/*.yml
+
+  controller:
+    name: Security controller checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install backend and security test dependencies
+        run: python -m pip install --requirement backend/requirements-dev.txt
+
+      - name: Audit runtime Python dependencies
+        run: pip-audit --requirement backend/requirements.txt
+
+      - name: Ruff
+        run: ruff check security scripts/security.py scripts/security_ci.py tests/pytest/test_security_lab.py tests/pytest/test_security_dependencies.py
+
+      - name: Black
+        run: black --check security scripts/security.py scripts/security_ci.py tests/pytest/test_security_lab.py tests/pytest/test_security_dependencies.py
+
+      - name: Mypy
+        run: mypy security scripts/security.py scripts/security_ci.py
+
+      - name: Security controller, adapters, parsers, and scope tests
+        run: pytest tests/pytest/test_security_lab.py -q
+
+  console:
+    name: Security console checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit Node dependencies
+        run: npm audit --audit-level=high
+
+      - name: Lint security console
+        run: npm run security:lint
+
+      - name: Test security console components
+        run: npm run security:test
+
+      - name: Build separate security console
+        run: npm run security:build
+
+      - name: Enforce security console bundle budget
+        run: npm run security:quality:bundle
+
+      - name: Install Firefox and accessibility dependencies
+        run: npx playwright install --with-deps firefox
+
+      - name: Run Firefox and axe checks
+        env:
+          CI: 'true'
+        run: npm run security:e2e
+
+      - name: Upload Firefox test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-console-firefox
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  lightweight-lab:
+    name: Ephemeral lab and passive ZAP
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install PFIS lab controller dependencies
+        run: python -m pip install --requirement backend/requirements.txt
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build PFIS frontend for the disposable application image
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Prepare pinned lightweight lab images
+        run: python scripts/security.py prepare --lightweight
+
+      - name: Start fresh HTTPS lab and apply migrations
+        run: python scripts/security.py lab start --lightweight
+
+      - name: Verify authenticated synthetic-user boundaries
+        run: python scripts/security_ci.py verify-boundaries
+
+      - name: Run bounded passive ZAP profile
+        run: python scripts/security_ci.py run-profile --profile passive
+
+      - name: Run bounded frontend ZAP coverage profile
+        run: python scripts/security_ci.py run-profile --profile frontend
+
+      - name: Always clean this generation's lab resources
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f .security-local/lab.env ]]; then
+            python scripts/security.py lab reset
+          else
+            echo 'No generated lab identity exists; nothing to clean.'
+          fi
+
+      - name: Upload sanitized lab reports and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-lightweight-reports
+          path: .security-local/ci-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
+  extended-lab:
+    name: Manual active application assessment
+    if: github.event_name == 'workflow_dispatch' && inputs.extended
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install PFIS lab controller dependencies
+        run: python -m pip install --requirement backend/requirements.txt
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build PFIS frontend for the disposable application image
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Prepare pinned active-scan images and reviewed templates
+        run: python scripts/security.py prepare --extended
+
+      - name: Start fresh isolated HTTPS lab
+        run: python scripts/security.py lab start --lightweight
+
+      - name: Run Nmap, TLS, passive ZAP, and reviewed Nuclei baseline
+        id: baseline
+        continue-on-error: true
+        run: python scripts/security_ci.py run-profile --profile baseline
+
+      - name: Run authenticated ZAP, synthetic-user boundary checks, and Nuclei
+        id: application
+        if: always()
+        continue-on-error: true
+        run: python scripts/security_ci.py run-profile --profile application
+
+      - name: Run the separate passive frontend coverage profile
+        id: frontend
+        if: always()
+        continue-on-error: true
+        run: python scripts/security_ci.py run-profile --profile frontend
+
+      - name: Require all profiles to complete without critical or high findings
+        if: always()
+        env:
+          BASELINE_OUTCOME: ${{ steps.baseline.outcome }}
+          APPLICATION_OUTCOME: ${{ steps.application.outcome }}
+          FRONTEND_OUTCOME: ${{ steps.frontend.outcome }}
+        run: |
+          test "$BASELINE_OUTCOME" = success
+          test "$APPLICATION_OUTCOME" = success
+          test "$FRONTEND_OUTCOME" = success
+
+      - name: Always clean this generation's lab resources
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f .security-local/lab.env ]]; then
+            python scripts/security.py lab reset
+          else
+            echo 'No generated lab identity exists; nothing to clean.'
+          fi
+
+      - name: Upload sanitized active-scan reports and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-extended-reports
+          path: .security-local/ci-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
+  security-result:
+    name: Required security result
+    if: always()
+    needs: [workflow-lint, controller, console, lightweight-lab, extended-lab]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail when a required security job failed, was skipped, or was cancelled
+        env:
+          LINT_RESULT: ${{ needs.workflow-lint.result }}
+          CONTROLLER_RESULT: ${{ needs.controller.result }}
+          CONSOLE_RESULT: ${{ needs.console.result }}
+          LIGHTWEIGHT_RESULT: ${{ needs.lightweight-lab.result }}
+          EXTENDED_RESULT: ${{ needs.extended-lab.result }}
+          EXTENDED_REQUESTED: ${{ inputs.extended }}
+        run: |
+          test "$LINT_RESULT" = success
+          test "$CONTROLLER_RESULT" = success
+          test "$CONSOLE_RESULT" = success
+          test "$LIGHTWEIGHT_RESULT" = success
+          if [[ "$EXTENDED_REQUESTED" == "true" ]]; then
+            test "$EXTENDED_RESULT" = success
+          elif [[ "$EXTENDED_RESULT" != "skipped" ]]; then
+            test "$EXTENDED_RESULT" = success
+          fi

@@ -1,0 +1,794 @@
+name: pfis-security-${LAB_GENERATION}
+x-scanner-hardening:
+  read_only: true
+  cap_drop: &id002
+  - ALL
+  security_opt: &id003
+  - no-new-privileges:true
+  pids_limit: 128
+  mem_limit: 1536m
+  cpus: 1.5
+  tmpfs: &id004
+  - /tmp:rw,noexec,nosuid,size=256m
+services:
+  database:
+    image: postgres:17.6@sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929
+    environment:
+      POSTGRES_DB: pfis
+      POSTGRES_USER: pfis
+      POSTGRES_PASSWORD: ${LAB_DATABASE_PASSWORD:?set by scripts/security.py prepare}
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U pfis -d pfis
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    volumes:
+    - postgres-data:/var/lib/postgresql/data
+    networks:
+    - app-data
+    labels: &id001
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  app:
+    build:
+      context: ..
+      dockerfile: security/docker/app.Dockerfile
+    image: pfis-security-app:${LAB_GENERATION}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pfis:${LAB_DATABASE_PASSWORD}@database:5432/pfis
+      ENVIRONMENT: lab
+      DEBUG: 'false'
+      AUTH_REQUIRED: 'true'
+      ALLOW_DEMO_LOGIN: 'false'
+      SESSION_COOKIE_SECURE: 'true'
+      SESSION_COOKIE_NAME: __Host-pfis-session
+      CSRF_COOKIE_NAME: __Host-pfis-csrf
+      OAUTH_COOKIE_NAME: __Host-pfis-oauth
+      SECRET_KEY: ${LAB_SECRET_KEY:?set by scripts/security.py prepare}
+      TOKEN_ENCRYPTION_KEY: ${LAB_TOKEN_ENCRYPTION_KEY:?set by scripts/security.py prepare}
+      CORS_ORIGINS: https://localhost:${LAB_HTTPS_PORT}
+      GOOGLE_REDIRECT_URI: https://localhost:${LAB_HTTPS_PORT}/api/auth/google/callback
+      GMAIL_OAUTH_REDIRECT_URI: https://localhost:${LAB_HTTPS_PORT}/api/auth/gmail/callback
+      GOOGLE_ALLOWED_EMAILS: ''
+      STATEMENT_OCR_ENABLED: 'false'
+      LAB_OWNER_EMAIL: ${LAB_OWNER_EMAIL:?set by scripts/security.py prepare}
+      LAB_OWNER_PASSWORD: ${LAB_OWNER_PASSWORD:?set by scripts/security.py prepare}
+      LAB_MEMBER_EMAIL: ${LAB_MEMBER_EMAIL:?set by scripts/security.py prepare}
+      LAB_MEMBER_PASSWORD: ${LAB_MEMBER_PASSWORD:?set by scripts/security.py prepare}
+      LAB_VIEWER_EMAIL: ${LAB_VIEWER_EMAIL:?set by scripts/security.py prepare}
+      LAB_VIEWER_PASSWORD: ${LAB_VIEWER_PASSWORD:?set by scripts/security.py prepare}
+      DEMO_USER_PASSWORD: ${LAB_DEMO_PASSWORD:?set by scripts/security.py prepare}
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+    - app-data
+    labels: *id001
+  proxy:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    ports:
+    - mode: host
+      target: 443
+      published: ${LAB_HTTPS_PORT}
+      host_ip: 127.0.0.1
+      protocol: tcp
+    volumes:
+    - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    - proxy-data:/data
+    - proxy-config:/config
+    depends_on:
+    - app
+    networks:
+      app-data: {}
+      scanner:
+        aliases:
+        - pfis.test
+      operator: {}
+    labels: *id001
+  sqli-fixture:
+    build:
+      context: ..
+      dockerfile: security/docker/sqli-fixture.Dockerfile
+    image: pfis-security-sqli-fixture:${LAB_GENERATION}
+    networks:
+    - scanner
+    labels: *id001
+  metasploit-fixture:
+    image: tleemcjr/metasploitable2:latest@sha256:e559450b37dccc1909eafa2df5b20bb052e1bd801246f4539a3ef183d5f7288a
+    command:
+    - sh
+    - -c
+    - service xinetd start && tail -f /dev/null
+    networks:
+    - scanner
+    labels: *id001
+  zap:
+    read_only: true
+    cap_drop: *id002
+    security_opt: *id003
+    pids_limit: 128
+    mem_limit: 1536m
+    cpus: 1.5
+    working_dir: /tmp
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=256m
+    - /zap/wrk:rw,noexec,nosuid,size=128m
+    image: pfis-security-zap:2.17.0
+    entrypoint:
+    - python3
+    - /opt/pfis/zap_passive.py
+    command:
+    - --version
+    profiles:
+    - scanners
+    environment:
+      HOME: /tmp
+    networks:
+    - scanner
+    labels: *id001
+  nuclei:
+    read_only: true
+    cap_drop: *id002
+    security_opt: *id003
+    pids_limit: 128
+    mem_limit: 1536m
+    cpus: 1.5
+    tmpfs: *id004
+    build:
+      context: ..
+      dockerfile: security/docker/nuclei.Dockerfile
+    image: pfis-security-nuclei:3.11.1
+    entrypoint:
+    - nuclei
+    command:
+    - -version
+    environment:
+      HOME: /tmp
+      XDG_CONFIG_HOME: /tmp/.config
+    profiles:
+    - scanners
+    networks:
+    - scanner
+    labels: *id001
+  nmap:
+    read_only: true
+    cap_drop: *id002
+    security_opt: *id003
+    pids_limit: 128
+    mem_limit: 1536m
+    cpus: 1.5
+    tmpfs: *id004
+    image: instrumentisto/nmap:7.97@sha256:14f6a358dde31433690efe3b636472983fa99df1ced025ed04c6e39f0ad37355
+    entrypoint:
+    - nmap
+    command:
+    - --version
+    profiles:
+    - scanners
+    networks:
+    - scanner
+    labels: *id001
+  testssl:
+    read_only: true
+    cap_drop: *id002
+    security_opt: *id003
+    pids_limit: 128
+    mem_limit: 1536m
+    cpus: 1.5
+    tmpfs: *id004
+    build:
+      context: ..
+      dockerfile: security/docker/testssl-adapter.Dockerfile
+    image: pfis-security-testssl:3.2.4
+    entrypoint:
+    - /bin/sh
+    - /opt/pfis/testssl_adapter.sh
+    command:
+    - --version
+    profiles:
+    - scanners
+    networks:
+    - scanner
+    labels: *id001
+  sqlmap:
+    read_only: true
+    cap_drop: *id002
+    security_opt: *id003
+    pids_limit: 128
+    mem_limit: 1536m
+    cpus: 1.5
+    tmpfs: *id004
+    build:
+      context: ..
+      dockerfile: security/docker/sqlmap.Dockerfile
+    image: pfis-security-sqlmap:1.10
+    entrypoint:
+    - python
+    - /opt/sqlmap/sqlmap.py
+    command:
+    - --version
+    profiles:
+    - scanners
+    environment:
+      HOME: /tmp
+    networks:
+    - scanner
+    labels: *id001
+  metasploit:
+    build:
+      context: ..
+      dockerfile: security/docker/metasploit.Dockerfile
+    image: pfis-security-metasploit:6.5.5
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 3g
+    cpus: 2
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=512m
+    user: 1000:1000
+    environment:
+      HOME: /tmp
+    entrypoint: []
+    command:
+    - ./msfconsole
+    - --version
+    profiles:
+    - scanners
+    networks:
+    - scanner
+    labels: *id001
+  greenbone-tools:
+    read_only: true
+    cap_drop: *id002
+    security_opt: *id003
+    pids_limit: 128
+    mem_limit: 1536m
+    cpus: 1.5
+    tmpfs: *id004
+    image: registry.community.greenbone.net/community/gvm-tools:latest@sha256:a3ec2b8d2281e1a0bea147f1a6fbe00d22eab26db1c114bebf7bb2beed0a5619
+    entrypoint:
+    - gvm-cli
+    command:
+    - --version
+    profiles:
+    - scanners
+    networks:
+    - scanner
+    labels: *id001
+  vulnerability-tests:
+    image: registry.community.greenbone.net/community/vulnerability-tests:latest@sha256:86a44fb7a9f9b982d521f98914aba98846f573b4f9ec9e8c1007c4866ec943af
+    environment:
+      FEED_RELEASE: '24.10'
+      KEEP_ALIVE: 1
+    volumes:
+    - vt_data_vol:/mnt
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+    - feed-egress
+  notus-data:
+    image: registry.community.greenbone.net/community/notus-data:latest@sha256:f53836e6ac0eb3abb7f5ab74ccf93b8317fedd2ba5cd293473cd307c148fc4c3
+    environment:
+      KEEP_ALIVE: 1
+    volumes:
+    - notus_data_vol:/mnt
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+    - feed-egress
+  scap-data:
+    image: registry.community.greenbone.net/community/scap-data:latest@sha256:54c9c81d70e0072e6e31ef62de94326546081b6d888d443fcbb2c5dfde5c59a8
+    environment:
+      KEEP_ALIVE: 1
+    volumes:
+    - scap_data_vol:/mnt
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+    - feed-egress
+  cert-bund-data:
+    image: registry.community.greenbone.net/community/cert-bund-data:latest@sha256:735b786ccb113e8ef437c6328cda15acdf74478bfcd4c0ec39031b79960635e8
+    environment:
+      KEEP_ALIVE: 1
+    volumes:
+    - cert_data_vol:/mnt
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+    - feed-egress
+  dfn-cert-data:
+    image: registry.community.greenbone.net/community/dfn-cert-data:latest@sha256:4926366038df2e655f7de04ca10733984cf46fce7f44d205a7b2393a10f0f148
+    environment:
+      KEEP_ALIVE: 1
+    volumes:
+    - cert_data_vol:/mnt
+    depends_on:
+      cert-bund-data:
+        condition: service_healthy
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+    - feed-egress
+  data-objects:
+    image: registry.community.greenbone.net/community/data-objects:latest@sha256:3ef69ac56aca55981f164e228eceab4116aa8e1a855e1a83d108f3621a83445f
+    environment:
+      FEED_RELEASE: '24.10'
+      KEEP_ALIVE: 1
+    volumes:
+    - data_objects_vol:/mnt
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+    - feed-egress
+  report-formats:
+    image: registry.community.greenbone.net/community/report-formats:latest@sha256:3b1352bec64190d2f8716fe1044d03d61da5b4863a99f78e856762bbf77e9d45
+    environment:
+      FEED_RELEASE: '24.10'
+      KEEP_ALIVE: 1
+    volumes:
+    - data_objects_vol:/mnt
+    depends_on:
+      data-objects:
+        condition: service_healthy
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+    - feed-egress
+  gpg-data:
+    image: registry.community.greenbone.net/community/gpg-data@sha256:aa6954b978ce1f7320ec508b91ca39e3632632533fca9e425bd74296a369389c
+    volumes:
+    - gpg_data_vol:/mnt
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+  redis-server:
+    image: registry.community.greenbone.net/community/redis-server@sha256:6da6a7c7221aa3ab231961fd6ca001d552b6a2c7727ac6201c6d8a360baa963a
+    deploy:
+      restart_policy:
+        condition: any
+    volumes:
+    - redis_socket_vol:/run/redis/
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+  pg-gvm:
+    image: registry.community.greenbone.net/community/pg-gvm@sha256:b81bc5d7a750203ea25c6e4dd086751ecee8e388d1cb2501c60b3805e0056204
+    deploy:
+      restart_policy:
+        condition: any
+    volumes:
+    - psql_data_vol:/var/lib/postgresql
+    - psql_socket_vol:/var/run/postgresql
+    depends_on:
+      pg-gvm-migrator:
+        condition: service_completed_successfully
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+  pg-gvm-migrator:
+    image: registry.community.greenbone.net/community/pg-gvm-migrator@sha256:201da953f12dd26c84db8aa0117465de0aac9916f4e1d2d60b4fcb6f86176d4e
+    deploy:
+      restart_policy:
+        condition: none
+    volumes:
+    - psql_data_vol:/var/lib/postgresql
+    - psql_socket_vol:/var/run/postgresql
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+  gvmd:
+    image: registry.community.greenbone.net/community/gvmd@sha256:fec601848e0847b27d7bb262b684a05747d369b85ddde75f7074fd2880f06221
+    environment:
+      INTEGRATION_CONFIG_USER: pfis_security
+      INTEGRATION_CONFIG_USER_INIT_PASSWORD: ${LAB_GREENBONE_PASSWORD:?set by scripts/security.py prepare}
+    deploy:
+      restart_policy:
+        condition: any
+    volumes:
+    - gvmd_data_vol:/var/lib/gvm
+    - scap_data_vol:/var/lib/gvm/scap-data/
+    - cert_data_vol:/var/lib/gvm/cert-data
+    - data_objects_vol:/var/lib/gvm/data-objects/gvmd
+    - vt_data_vol:/var/lib/openvas/plugins
+    - psql_data_vol:/var/lib/postgresql
+    - gvmd_socket_vol:/run/gvmd
+    - ospd_openvas_socket_vol:/run/ospd
+    - psql_socket_vol:/var/run/postgresql
+    depends_on:
+      pg-gvm:
+        condition: service_started
+      scap-data:
+        condition: service_healthy
+      cert-bund-data:
+        condition: service_healthy
+      dfn-cert-data:
+        condition: service_healthy
+      data-objects:
+        condition: service_healthy
+      report-formats:
+        condition: service_healthy
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+  configure-openvas:
+    image: registry.community.greenbone.net/community/openvas-scanner@sha256:df2275deea6ccec43f6c2849e9f15289c20f542ef6b65878a117ef482a5cd937
+    volumes:
+    - openvas_data_vol:/mnt
+    - openvas_log_data_vol:/var/log/openvas
+    command:
+    - /bin/sh
+    - -c
+    - 'printf "table_driven_lsc = yes\nopenvasd_server = http://openvasd:80\n" > /mnt/openvas.conf
+
+      sed "s/127/128/" /etc/openvas/openvas_log.conf | sed ''s/gvm/openvas/'' > /mnt/openvas_log.conf
+
+      chmod 644 /mnt/openvas.conf
+
+      chmod 644 /mnt/openvas_log.conf
+
+      touch /var/log/openvas/openvas.log
+
+      chmod 666 /var/log/openvas/openvas.log
+
+      '
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+  openvas:
+    image: registry.community.greenbone.net/community/openvas-scanner@sha256:df2275deea6ccec43f6c2849e9f15289c20f542ef6b65878a117ef482a5cd937
+    volumes:
+    - openvas_data_vol:/etc/openvas
+    - openvas_log_data_vol:/var/log/openvas
+    command:
+    - /bin/sh
+    - -c
+    - 'cat /etc/openvas/openvas.conf
+
+      tail -f /var/log/openvas/openvas.log
+
+      '
+    depends_on:
+      configure-openvas:
+        condition: service_completed_successfully
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+  openvasd:
+    image: registry.community.greenbone.net/community/openvas-scanner@sha256:df2275deea6ccec43f6c2849e9f15289c20f542ef6b65878a117ef482a5cd937
+    deploy:
+      restart_policy:
+        condition: any
+    environment:
+      OPENVASD_MODE: service_notus
+      GNUPGHOME: /etc/openvas/gnupg
+      LISTENING: 0.0.0.0:80
+    volumes:
+    - openvas_data_vol:/etc/openvas
+    - openvas_log_data_vol:/var/log/openvas
+    - gpg_data_vol:/etc/openvas/gnupg
+    - notus_data_vol:/var/lib/notus
+    depends_on:
+      vulnerability-tests:
+        condition: service_healthy
+      notus-data:
+        condition: service_healthy
+      configure-openvas:
+        condition: service_completed_successfully
+      gpg-data:
+        condition: service_completed_successfully
+    networks:
+    - default
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  ospd-openvas:
+    image: registry.community.greenbone.net/community/ospd-openvas@sha256:db44c0dbdc63b4f57b3a0a92d8af6882dfe4559bd4409a7dd0ce49d732230c82
+    deploy:
+      restart_policy:
+        condition: any
+    hostname: ospd-openvas.local
+    command:
+    - ospd-openvas
+    - -f
+    - --config
+    - /etc/gvm/ospd-openvas.conf
+    - --notus-feed-dir
+    - /var/lib/notus/advisories
+    - -m
+    - '666'
+    volumes:
+    - gpg_data_vol:/etc/openvas/gnupg
+    - vt_data_vol:/var/lib/openvas/plugins
+    - notus_data_vol:/var/lib/notus
+    - ospd_openvas_socket_vol:/run/ospd
+    - redis_socket_vol:/run/redis/
+    - openvas_data_vol:/etc/openvas/
+    - openvas_log_data_vol:/var/log/openvas
+    depends_on:
+      redis-server:
+        condition: service_started
+      gpg-data:
+        condition: service_completed_successfully
+      configure-openvas:
+        condition: service_completed_successfully
+      vulnerability-tests:
+        condition: service_healthy
+      notus-data:
+        condition: service_healthy
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+    - scanner
+    cap_add:
+    - NET_ADMIN
+    - NET_RAW
+    security_opt:
+    - seccomp=unconfined
+    - apparmor=unconfined
+  greenbone-control:
+    image: pfis-security-greenbone-control:community
+    user: "1000:1000"
+    volumes:
+    - gvmd_socket_vol:/run/gvmd:ro
+    depends_on:
+    - gvmd
+    - ospd-openvas
+    profiles:
+    - greenbone
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+    networks:
+    - default
+    - scanner
+    build:
+      context: ..
+      dockerfile: security/docker/greenbone.Dockerfile
+    entrypoint:
+    - python3
+    - /opt/pfis/greenbone_adapter.py
+    command:
+    - --help
+    environment:
+      PFIS_GVM_PASSWORD: ${LAB_GREENBONE_PASSWORD:?set by scripts/security.py prepare}
+      LAB_GENERATION: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      LAB_SECURITY_TARGET_ID: pfis-web
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=32m
+  zap-api:
+    healthcheck:
+      disable: true
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    pids_limit: 192
+    mem_limit: 3g
+    cpus: 2
+    working_dir: /tmp
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=768m
+    - /zap/wrk:rw,noexec,nosuid,size=128m
+    build:
+      context: ..
+      dockerfile: security/docker/zap-authenticated.Dockerfile
+    image: pfis-security-zap:2.17.0
+    entrypoint:
+    - python3
+    - /opt/pfis/zap_authenticated.py
+    command:
+    - --help
+    environment:
+      HOME: /tmp
+      LAB_OWNER_EMAIL: ${LAB_OWNER_EMAIL:?set by scripts/security.py prepare}
+      LAB_OWNER_PASSWORD: ${LAB_OWNER_PASSWORD:?set by scripts/security.py prepare}
+      LAB_CADDY_ROOT_CA_B64: ${LAB_CADDY_ROOT_CA_B64:-}
+    profiles:
+    - scanners
+    networks:
+    - scanner
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  isolation-probe:
+    read_only: true
+    cap_drop: *id002
+    security_opt: *id003
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 0.25
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=8m
+    build:
+      context: ..
+      dockerfile: security/docker/isolation-probe.Dockerfile
+    image: pfis-security-isolation-probe:local
+    entrypoint:
+    - python3
+    - /opt/pfis/isolation_probe.py
+    command:
+    - --help
+    extra_hosts:
+    - host.docker.internal:host-gateway
+    profiles:
+    - scanners
+    networks:
+    - scanner
+    labels: *id001
+volumes:
+  postgres-data:
+    labels: *id001
+  proxy-data:
+    labels: *id001
+  proxy-config:
+    labels: *id001
+  gpg_data_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  scap_data_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  cert_data_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  data_objects_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  gvmd_data_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  psql_data_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  vt_data_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  notus_data_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  psql_socket_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  gvmd_socket_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  ospd_openvas_socket_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  redis_socket_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  openvas_data_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  openvas_log_data_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  gsa_data_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  nginx_config_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  nginx_certificates_vol:
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+networks:
+  app-data:
+    internal: true
+    labels: *id001
+  scanner:
+    name: pfis-security-${LAB_GENERATION}-scanner
+    internal: true
+    labels: *id001
+  operator:
+    name: pfis-security-${LAB_GENERATION}-operator
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: 'false'
+      com.docker.network.bridge.host_binding_ipv4: 127.0.0.1
+    labels: *id001
+  default:
+    internal: true
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'
+  feed-egress:
+    name: pfis-security-${LAB_GENERATION}-feed-egress
+    labels:
+      com.pfis.security.lab-generation: ${LAB_GENERATION:?set by scripts/security.py prepare}
+      com.pfis.security.managed: 'true'

@@ -20,6 +20,12 @@
     "test:e2e": "playwright test",
     "test:e2e:ci": "playwright test --grep-invert @visual",
     "test:e2e:update": "playwright test --update-snapshots",
+    "security:build": "vite build --config vite.security.config.ts",
+    "security:lint": "eslint src/security-console",
+    "security:test": "vitest run src/security-console",
+    "security:e2e": "playwright test --config playwright.security.config.ts",
+    "security:preview": "vite preview --config vite.security.config.ts --host 127.0.0.1 --port 4174",
+    "security:quality:bundle": "node scripts/check-security-bundle-budget.mjs",
     "quality:bundle": "node scripts/check-bundle-budget.mjs",
     "quality:lighthouse": "npx --yes @lhci/cli@0.15.1 autorun"
   },

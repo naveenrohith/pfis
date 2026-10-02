@@ -1,0 +1,31 @@
+{
+  "schema_version": "pfis-security-baseline-1",
+  "base_ref": "main",
+  "base_commit": "f755c3b9ccf47961822ba95ecbb70ee7aa47b533",
+  "captured_before_security_implementation": true,
+  "local_pipeline": {
+    "status": "passed",
+    "pytest": {
+      "passed": 1098,
+      "skipped": 2,
+      "coverage_percent": 85.34,
+      "status": "passed",
+      "command": null,
+      "note": "The pre-implementation test result was retained, but its original terminal command was not persisted."
+    }
+  },
+  "github_actions": {
+    "workflow": "CI",
+    "run_id": 36117696867,
+    "created_at": "2026-09-25T09:18:29Z",
+    "head_commit": "f755c3b9ccf47961822ba95ecbb70ee7aa47b533",
+    "status": "completed",
+    "conclusion": "success",
+    "jobs": {
+      "Lint, type-check & test": "success",
+      "Frontend lint, test & build": "success",
+      "PostgreSQL migration & runtime": "success",
+      "Browser regression": "success"
+    }
+  }
+}

@@ -1,5 +1,6 @@
 """Deterministic tests for provider-neutral production release gates."""
 
+import asyncio
 import json
 from argparse import Namespace
 from datetime import UTC, datetime, timedelta
@@ -7,7 +8,10 @@ from pathlib import Path
 
 import httpx
 import pytest
+from app.main import security_headers_middleware
 from sqlalchemy.exc import OperationalError
+from starlette.requests import Request
+from starlette.responses import Response
 
 from scripts import check_worktree_inventory, postgres_restore_drill
 from scripts.check_migration_parity import database_url_for
@@ -230,6 +234,34 @@ def test_release_gate_validates_health_payload_and_hsts():
     validate_security_headers(headers)
     with pytest.raises(RuntimeError, match="strict-transport-security"):
         validate_security_headers(httpx.Headers({"cache-control": "no-store"}))
+
+
+def test_security_headers_scope_inline_style_attributes_and_websocket_origins():
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "https",
+        "path": "/",
+        "raw_path": b"/",
+        "query_string": b"",
+        "headers": [],
+        "client": ("127.0.0.1", 50000),
+        "server": ("localhost", 443),
+    }
+
+    async def call_next(_request: Request) -> Response:
+        return Response(status_code=200)
+
+    response = asyncio.run(security_headers_middleware(Request(scope), call_next))
+    policy = response.headers["content-security-policy"]
+
+    assert "style-src 'self'" in policy
+    assert "style-src-attr 'unsafe-inline'" in policy
+    assert "style-src 'self' 'unsafe-inline'" not in policy
+    assert "connect-src 'self'" in policy
+    assert "ws:" not in policy
+    assert "wss:" not in policy
 
 
 def test_load_summary_enforces_exact_request_accounting():

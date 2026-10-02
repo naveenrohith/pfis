@@ -1,0 +1,13 @@
+.git
+.venv
+**/__pycache__
+**/.pytest_cache
+.security-local
+.env
+backend/.env
+frontend/node_modules
+frontend/test-results
+frontend/playwright-report
+frontend/.vite
+frontend/coverage
+*.log
